@@ -21,8 +21,9 @@ Usage: $0 --cards DIR [--xml FILE] --print-size a3|a4 [--pdf-size MB] [--fronts-
   --xml FILE         order XML. Defaults to the single .xml in DIR or DIR/images/.
   --print-size a3|a4 sheet paper size. a3 fits 4x4 cards, a4 fits 3x3.
   --pdf-size MB      max size per output part in MB (default 300).
-  --bin PATH         autofill binary (default ./autofill-linux.bin;
-                     on macOS pass the matching .command file).
+  --bin PATH         autofill binary (default: ./autofill-linux.bin on Linux,
+                     ./autofill-macos-<arch>.command on macOS; downloaded
+                     automatically from upstream releases if missing).
   --fronts-only      build sheets for card fronts only.
   --backs-only       build sheets for card backs only.
   -h, --help         show this help.
@@ -33,14 +34,14 @@ export/ is already complete.
 EOF
 }
 
-CARDS=""; XML=""; PRINTSIZE=""; PDF_SIZE=300; FRONTS_ONLY=0; BACKS_ONLY=0; BIN="./autofill-linux.bin"
+CARDS=""; XML=""; PRINTSIZE=""; PDF_SIZE=300; FRONTS_ONLY=0; BACKS_ONLY=0; BIN=""; BIN_GIVEN=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --cards) CARDS="${2:?}"; shift 2;;
         --xml) XML="${2:?}"; shift 2;;
         --print-size) PRINTSIZE="${2:?}"; shift 2;;
         --pdf-size) PDF_SIZE="${2:?}"; shift 2;;
-        --bin) BIN="${2:?}"; shift 2;;
+        --bin) BIN="${2:?}"; BIN_GIVEN=1; shift 2;;
         --fronts-only) FRONTS_ONLY=1; shift;;
         --backs-only) BACKS_ONLY=1; shift;;
         -h|--help) usage; exit 0;;
@@ -59,10 +60,51 @@ fi
 if [[ $FRONTS_ONLY == 1 && $BACKS_ONLY == 1 ]]; then
     echo "--fronts-only and --backs-only are mutually exclusive" >&2; exit 1
 fi
-if [[ ! -x "$BIN" ]]; then
-    echo "Autofill binary not found or not executable: $BIN" >&2
-    echo "Run this from the folder containing it, or pass --bin PATH." >&2; exit 1
+if [[ -z "$BIN" ]]; then
+    if [[ "$(uname -s)" == Darwin ]]; then
+        if [[ "$(uname -m)" == arm64 ]]; then
+            BIN="./autofill-macos-arm.command"
+        else
+            BIN="./autofill-macos-intel.command"
+        fi
+    else
+        BIN="./autofill-linux.bin"
+    fi
 fi
+
+ensure_autofill() {
+    # Uses the existing binary, or downloads it from the upstream releases.
+    if [[ -x "$BIN" ]]; then
+        return 0
+    fi
+    if [[ $BIN_GIVEN == 1 ]]; then
+        echo "Autofill binary not found or not executable: $BIN" >&2; exit 1
+    fi
+    for cmd in curl unzip; do
+        command -v "$cmd" >/dev/null 2>&1 || { echo "Need $cmd to download the autofill binary." >&2; exit 1; }
+    done
+    local os arch asset inner
+    os="$(uname -s)"; arch="$(uname -m)"
+    if [[ "$os" == Linux ]]; then
+        asset="autofill-linux.zip"; inner="autofill-linux.bin"
+    elif [[ "$os" == Darwin && "$arch" == arm64 ]]; then
+        asset="autofill-macos-arm.zip"; inner="autofill-macos-arm.command"
+    elif [[ "$os" == Darwin ]]; then
+        asset="autofill-macos-intel.zip"; inner="autofill-macos-intel.command"
+    else
+        echo "Unsupported platform ($os/$arch) — download the desktop tool manually" >&2
+        echo "from https://github.com/chilli-axe/mpc-autofill/releases and pass --bin PATH." >&2
+        exit 1
+    fi
+    echo "Downloading $asset from the MPC Autofill releases..."
+    curl -fL --retry 3 -o "$WORKDIR/autofill.zip" "https://github.com/chilli-axe/mpc-autofill/releases/latest/download/$asset"
+    unzip -o -j "$WORKDIR/autofill.zip" "$inner" -d . >/dev/null
+    if [[ "$inner" != "$(basename "$BIN")" ]]; then
+        mv "$inner" "$BIN"
+    fi
+    chmod +x "$BIN"
+    echo "Saved to $BIN"
+}
 
 # Portable helpers (macOS lacks realpath(1) and GNU stat).
 abspath() { # $1 = existing path -> absolute path
@@ -268,6 +310,7 @@ else
         echo "Multiple XML files in this folder — move all but one away first." >&2
         exit 1
     fi
+    ensure_autofill
     rm -rf "export/$EXPORT_NAME"
     echo "Running autofill export — answer 'Yes' when asked for separate face PDFs."
     "$BIN" --allowsleep --exportpdf

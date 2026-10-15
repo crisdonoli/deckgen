@@ -19,9 +19,12 @@ size for upload to sites like Canva.
 
 ## Requirements
 
-- The MPC Autofill desktop binary in the working folder:
-  `autofill-linux.bin` on Linux, or the matching macOS `.command`
-  file passed via `--bin`.
+- The MPC Autofill desktop binary: `autofill-linux.bin` on Linux, or the
+  matching macOS `.command` file. You do not need to fetch it yourself —
+  on the first run the script downloads it automatically from the
+  [upstream releases](https://github.com/chilli-axe/mpc-autofill/releases)
+  for your platform (needs `curl` + `unzip`). To pin a specific build,
+  place the binary next to the script or pass `--bin PATH`.
 - `bash`, `awk`, poppler tools (`pdfunite`, `pdfinfo`, `pdfseparate`),
   and `pdflatex` with the `geometry` and `pgf`/`tikz` packages.
 
