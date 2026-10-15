@@ -96,3 +96,15 @@ Notes:
   the black lines to standard 2.5" x 3.5".
 - On A4 the outer cut lines sit ~1mm from the paper edge — use
   borderless printing or they may be clipped.
+
+## Credits
+
+Card exporting is done by the MPC Autofill desktop tool
+(`autofill-linux.bin`), built from the open-source project by chilli-axe:
+
+- Repository: <https://github.com/chilli-axe/mpc-autofill>
+- Docs (Desktop Tool): <https://github.com/chilli-axe/mpc-autofill/wiki/Desktop-Tool>
+- License: GPL-3.0
+
+`deckgen` only automates around it (export download + print sheet
+layout) and ships no code from that project.
