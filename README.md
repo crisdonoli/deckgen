@@ -102,6 +102,19 @@ Notes:
   guillotine pass separates both neighbours. No bleed tolerance remains:
   keep cuts on the lines or white edges will show.
 
+## Troubleshooting
+
+> [!IMPORTANT]
+> Missing `tikz` (`pgf`) in TinyTeX: the run stops silently right after
+> `fronts: N pages combined`, with no sheets in `sheets/`. The script needs
+> `tikz` to lay out the sheets and draw cut lines. Check with
+> `kpsewhich tikz.sty` (empty = missing). Install with
+> `tlmgr install pgf`. If `tlmgr` fails with checksum errors and your install
+> is TeX Live 2025 while the repo serves 2026, point it at the frozen archive
+> first: `tlmgr option repository https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final`,
+> then `tlmgr install pgf`. Since this fix, `pdflatex` failures print the log
+> tail instead of dying silently.
+
 ## Credits
 
 Card exporting is done by the MPC Autofill desktop tool

@@ -241,7 +241,9 @@ build_face() {
     # NOTE: -jobname keeps the output name different from the input PDF.
     # pdflatex destroys the input file when both names match.
     # NOTE: two runs — tikz 'remember picture' positions settle on the second pass.
-    (cd "$WORKDIR" && pdflatex -interaction=nonstopmode -jobname "$(basename "$out_prefix")" "$face.tex" >/dev/null && pdflatex -interaction=nonstopmode -jobname "$(basename "$out_prefix")" "$face.tex" >/dev/null)
+    # NOTE: log to file, show tail on failure instead of silent /dev/null.
+    local log="$WORKDIR/$(basename "$out_prefix").log"
+    (cd "$WORKDIR" && pdflatex -interaction=nonstopmode -jobname "$(basename "$out_prefix")" "$face.tex" >"$log" 2>&1 && pdflatex -interaction=nonstopmode -jobname "$(basename "$out_prefix")" "$face.tex" >"$log" 2>&1) || { echo "pdflatex failed, tail of $log:" >&2; tail -n 50 "$log" >&2; return 1; }
     mv "$WORKDIR/$(basename "$out_prefix").pdf" "${out_prefix}.pdf"
     echo "$face -> ${out_prefix}.pdf"
     split_pdf "${out_prefix}.pdf" "$out_prefix"
