@@ -25,6 +25,8 @@ size for upload to sites like Canva.
   [upstream releases](https://github.com/chilli-axe/mpc-autofill/releases)
   for your platform (needs `curl` + `unzip`). To pin a specific build,
   place the binary next to the script or pass `--bin PATH`.
+  No web browser is needed: only the offline PDF-export path is used,
+  never the browser automation.
 - `bash`, `awk`, poppler tools (`pdfunite`, `pdfinfo`, `pdfseparate`),
   and `pdflatex` with the `geometry` and `pgf`/`tikz` packages.
 
@@ -95,10 +97,10 @@ my-deck/
 
 Notes:
 
-- Cards print at exact size (poker + bleed, 2.73" x 3.71"); trim along
-  the black lines to standard 2.5" x 3.5".
-- On A4 the outer cut lines sit ~1mm from the paper edge — use
-  borderless printing or they may be clipped.
+- The ~3mm bleed is trimmed at print time: cards land on the sheet at
+  exactly 63.5 x 88.9mm with one cut line per boundary — a single
+  guillotine pass separates both neighbours. No bleed tolerance remains:
+  keep cuts on the lines or white edges will show.
 
 ## Credits
 
