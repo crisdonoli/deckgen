@@ -6,8 +6,8 @@
 #   <deck>/sheets/        full-bleed cut-line sheets + size-capped parts
 # Flow:
 #   1. Organize loose top-level images into <deck>/images/.
-#   2. Unless <deck>/export/ is complete: link ./cards -> images and
-#      ./deck.xml as needed, then run autofill-linux.bin --exportpdf.
+#   2. Unless <deck>/export/ is complete: link ./cards and ./deck.xml
+#      as needed, then run autofill-linux.bin --exportpdf.
 #   3. Build sheets (--print-size a3|a4), split into parts <= --pdf-size MB.
 #   4. Remove temp links; on success also remove autofill logs.
 # Usage: ./make-deck.sh --cards DIR [--xml FILE] --print-size a3|a4 [--pdf-size MB] [--fronts-only|--backs-only]
@@ -118,8 +118,6 @@ if [[ "$PRINTSIZE" == a3 ]]; then
     PAPER=a3paper; PW=297; PH=420; COLS=4; ROWS=4
 else
     PAPER=a4paper; PW=210; PH=297; COLS=3; ROWS=3
-    echo "WARNING: on A4 the outer cut lines sit ~1mm from the paper edge;" >&2
-    echo "use borderless printing or they may be clipped." >&2
 fi
 
 CARDS_ABS=""; XML_ABS=""
@@ -147,9 +145,14 @@ trap 'rm -rf "$WORKDIR"; restore; exit 130' INT TERM
 
 LIMIT=$((PDF_SIZE * 1024 * 1024))
 
-# Card size as emitted by the exporter: 2.73 x 3.71 in (poker + bleed).
-CARD_W=69.34 # mm
-CARD_H=94.23 # mm
+# Placed size: standard poker. The exporter emits 2.73 x 3.71 in pages
+# (poker + ~3mm bleed); the bleed is shaved at print time via trim+clip.
+CARD_W=63.5 # mm
+CARD_H=88.9 # mm
+# Bleed trimmed on each side, in big points (page is 196.56 x 267.12 pt,
+# target box 180 x 252 pt, centered).
+TRIM_X_PT=8.28
+TRIM_Y_PT=7.56
 
 # Grid line positions (mm from the sheet edges). The grid is centered;
 # inner lines are drawn full-bleed, edge to edge of the paper.
@@ -206,7 +209,7 @@ build_sheets_tex() {
             local r c
             for ((r = 0; r < ROWS && p <= total; r++)); do
                 for ((c = 0; c < COLS && p <= total; c++)); do
-                    printf '%s\n' "\node[anchor=south west,inner sep=0pt] at ([xshift=${XS[$c]}mm,yshift=${YS[$r]}mm]current page.south west) {\\includegraphics[page=$p,width=${CARD_W}mm,height=${CARD_H}mm]{$src}};"
+                    printf '%s\n' "\node[anchor=south west,inner sep=0pt] at ([xshift=${XS[$c]}mm,yshift=${YS[$r]}mm]current page.south west) {\\includegraphics[page=$p,trim=${TRIM_X_PT} ${TRIM_Y_PT} ${TRIM_X_PT} ${TRIM_Y_PT},clip,width=${CARD_W}mm,height=${CARD_H}mm]{$src}};"
                     p=$((p + 1))
                 done
             done
@@ -318,6 +321,7 @@ else
         echo "Autofill did not produce export/$EXPORT_NAME/{fronts,backs} — aborting." >&2
         exit 1
     fi
+    rm -rf "$EXPORT/fronts" "$EXPORT/backs"
     mv "export/$EXPORT_NAME/fronts" "export/$EXPORT_NAME/backs" "$EXPORT/"
     rmdir "export/$EXPORT_NAME" 2>/dev/null || true
     rmdir export 2>/dev/null || true
