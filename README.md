@@ -60,7 +60,7 @@ nix-shell -p poppler_utils texlive.combined.scheme-medium
 | `--cards DIR` | Deck folder with card images (and usually the `.xml`). |
 | `--xml FILE` | Order XML. Defaults to the single `.xml` in `DIR` or `DIR/images/`. |
 | `--print-size a3\|a4` | Sheet paper size. Required. |
-| `--pdf-size MB` | Max size per output part in MB (default 300). |
+| `--pdf-size MB` | Optional; max size per output part in MB. If omitted the PDF is not split. |
 | `--fronts-only` / `--backs-only` | Build sheets for one face only (mutually exclusive). |
 | `--bin PATH` | Autofill binary (default `./autofill-linux.bin`). |
 | `-h`, `--help` | Show help. |
