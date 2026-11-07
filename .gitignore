@@ -1,1 +1,3 @@
 decks/
+.tmp/
+__pycache__/
