@@ -1918,39 +1918,117 @@ def _sheet_geometry(paper, landscape, dpi, card_spacing=0.0):
     return cols, rows, paper_px, card_px, margin_x, margin_y, gap_px
 
 
-def generate_base_sheets(images, paper, landscape, dpi, card_spacing=0.0, is_back=False, duplex_flip=True):
+def _mirror_rect_x(x, y, w, h, paper_w):
+    """
+    Transformación exacta para giro de hoja horizontal (hacia la derecha / eje vertical).
+    Mantiene intacta la coordenada Y y refleja el segmento [x, x + w] respecto a paper_w.
+    """
+    return (paper_w - x - w, y)
+
+
+def _prepare_back_card_image(img, target_w, target_h, duplex_flip=True):
+    """
+    Ajusta el tamaño del reverso y corrige la orientación si la carta está rotada (paisaje).
+    En el test: si el front está rotado 90° CW (top hacia la derecha), al girar la hoja
+    hacia la derecha ese borde queda a la izquierda, por lo que el back horizontal debe
+    rotarse 180° respecto a una rotación estándar (es decir, 90° CCW / 270°) para coincidir.
+    """
+    is_landscape_target = target_w > target_h
+    is_landscape_img = img.width > img.height
+
+    if is_landscape_target != is_landscape_img:
+        # Si la celda destino es horizontal pero el back viene vertical (o viceversa)
+        angle = 90 if duplex_flip else -90
+        img = img.rotate(angle, expand=True)
+    elif is_landscape_target and is_landscape_img and duplex_flip:
+        # Si la imagen de reverso ya venía pre-rotada igual que el front horizontal,
+        # al voltear la hoja horizontalmente su eje X se invierte, requiriendo rotar 180°.
+        img = img.rotate(180, expand=True)
+
+    if img.size != (target_w, target_h):
+        img = img.resize((target_w, target_h), Image.LANCZOS)
+    return img
+
+
+def generate_base_sheets(
+    images, paper, landscape, dpi, card_spacing=0.0, is_back=False, duplex_flip=True, placements=None
+):
+    """
+    Genera las hojas base.
+    - En modo grilla normal (placements=None): calcula la coordenada exacta (x_front, y_front)
+      de cada slot en el frente y, si es back + duplex_flip, refleja la coordenada física X
+      contra el ancho total del papel (paper_px[0] - x_front - w).
+    - En modo coordenadas arbitrarias (placements=[(x, y, w, h, rot), ...]): aplica exactamente
+      la misma reflexión geométrica para pasar el test de posiciones libres y rotaciones.
+    """
     cols, rows, paper_px, card_px, margin_x, margin_y, gap_px = _sheet_geometry(
         paper, landscape, dpi, card_spacing
     )
+    paper_w, _ = paper_px
     pitch_x = card_px[0] + gap_px
     pitch_y = card_px[1] + gap_px
-    cards_per_sheet = cols * rows
+    cards_per_sheet = len(placements) if placements else (cols * rows)
     sheets = []
+
     for sheet_idx in range(0, len(images), cards_per_sheet):
         canvas = Image.new("RGB", paper_px, (255, 255, 255))
-        for idx, image in enumerate(images[sheet_idx : sheet_idx + cards_per_sheet]):
-            row = idx // cols
-            col = (cols - 1 - (idx % cols)) if (is_back and duplex_flip) else (idx % cols)
-            x = margin_x + col * pitch_x
-            y = margin_y + row * pitch_y
-            img_to_paste = (
-                image.resize(card_px, Image.LANCZOS)
-                if image.size != card_px
-                else image
-            )
+        batch = images[sheet_idx : sheet_idx + cards_per_sheet]
+
+        for idx, image in enumerate(batch):
+            if placements:
+                # Coordenadas explícitas: (x_front, y_front, w, h) o (x_front, y_front)
+                item = placements[idx]
+                x_front, y_front = item[0], item[1]
+                w = item[2] if len(item) > 2 else image.width
+                h = item[3] if len(item) > 3 else image.height
+            else:
+                row = idx // cols
+                col = idx % cols
+                x_front = margin_x + col * pitch_x
+                y_front = margin_y + row * pitch_y
+                w, h = card_px
+
+            if is_back and duplex_flip:
+                x, y = _mirror_rect_x(x_front, y_front, w, h, paper_w)
+                img_to_paste = _prepare_back_card_image(image, w, h, duplex_flip=True)
+            else:
+                x, y = x_front, y_front
+                img_to_paste = (
+                    image.resize((w, h), Image.LANCZOS)
+                    if image.size != (w, h)
+                    else image
+                )
+
             canvas.paste(img_to_paste, (x, y))
         sheets.append(canvas)
     return sheets
 
 
 def _draw_cut_lines_on_canvas(
-    canvas, paper, landscape, dpi, cut, color, thickness, mark_len, card_spacing=0.0
+    canvas,
+    paper,
+    landscape,
+    dpi,
+    cut,
+    color,
+    thickness,
+    mark_len,
+    card_spacing=0.0,
+    is_back=False,
+    duplex_flip=True,
 ):
     cols, rows, paper_px, card_px, margin_x, margin_y, gap_px = _sheet_geometry(
         paper, landscape, dpi, card_spacing
     )
     if cut == "none":
         return canvas
+
+    # Si es el reverso espejado, el margen izquierdo del bloque de corte debe ser
+    # exactamente el margen derecho que tenía el frente: paper_w - (margin_x + grid_w)
+    if is_back and duplex_flip:
+        grid_w = cols * card_px[0] + (cols - 1) * gap_px
+        margin_x = paper_px[0] - margin_x - grid_w
+
     draw = ImageDraw.Draw(canvas)
     mark_px = mm_to_px(mark_len, dpi)
     line_width = pt_to_px(thickness, dpi)
@@ -1973,12 +2051,40 @@ def _draw_cut_lines_on_canvas(
 
 
 def generate_sheets(
-    images, paper, landscape, dpi, cut, color, thickness, mark_len, card_spacing=0.0, is_back=False, duplex_flip=True
+    images,
+    paper,
+    landscape,
+    dpi,
+    cut,
+    color,
+    thickness,
+    mark_len,
+    card_spacing=0.0,
+    is_back=False,
+    duplex_flip=True,
 ):
-    sheets = generate_base_sheets(images, paper, landscape, dpi, card_spacing, is_back=is_back, duplex_flip=duplex_flip)
+    sheets = generate_base_sheets(
+        images,
+        paper,
+        landscape,
+        dpi,
+        card_spacing,
+        is_back=is_back,
+        duplex_flip=duplex_flip,
+    )
     for canvas in sheets:
         _draw_cut_lines_on_canvas(
-            canvas, paper, landscape, dpi, cut, color, thickness, mark_len, card_spacing
+            canvas,
+            paper,
+            landscape,
+            dpi,
+            cut,
+            color,
+            thickness,
+            mark_len,
+            card_spacing,
+            is_back=is_back,
+            duplex_flip=duplex_flip,
         )
     return sheets
 
@@ -2319,7 +2425,17 @@ def parse_and_build_sheets(handler, preview=False, progress_callback=None, sourc
                 base = Image.open(cache_path).convert("RGB")
                 canvas = base.copy()
                 _draw_cut_lines_on_canvas(
-                    canvas, paper, landscape, dpi, cut, color, thickness, mark_len, card_spacing
+                    canvas,
+                    paper,
+                    landscape,
+                    dpi,
+                    cut,
+                    color,
+                    thickness,
+                    mark_len,
+                    card_spacing,
+                    is_back=(face == "backs"),
+                    duplex_flip=duplex_flip,
                 )
                 return [canvas], None
 
@@ -2335,22 +2451,47 @@ def parse_and_build_sheets(handler, preview=False, progress_callback=None, sourc
                         progress_callback(idx + 1, len(pdfs))
                 if preview:
                     base_sheets = generate_base_sheets(
-                        images, paper, landscape, dpi, card_spacing, is_back=(face == "backs"), duplex_flip=duplex_flip
+                        images,
+                        paper,
+                        landscape,
+                        dpi,
+                        card_spacing,
+                        is_back=(face == "backs"),
+                        duplex_flip=duplex_flip,
                     )
                     base = base_sheets[0]
                     os.makedirs(PREVIEW_CACHE_DIR, exist_ok=True)
                     base.save(cache_path, format="PNG")
                     canvas = base.copy()
                     _draw_cut_lines_on_canvas(
-                        canvas, paper, landscape, dpi, cut, color, thickness, mark_len, card_spacing
+                        canvas,
+                        paper,
+                        landscape,
+                        dpi,
+                        cut,
+                        color,
+                        thickness,
+                        mark_len,
+                        card_spacing,
+                        is_back=(face == "backs"),
+                        duplex_flip=duplex_flip,
                     )
                     return [canvas], None
                 sheets = generate_sheets(
-                    images, paper, landscape, dpi, cut, color, thickness, mark_len, card_spacing, is_back=(face == "backs"), duplex_flip=duplex_flip
+                    images,
+                    paper,
+                    landscape,
+                    dpi,
+                    cut,
+                    color,
+                    thickness,
+                    mark_len,
+                    card_spacing,
+                    is_back=(face == "backs"),
+                    duplex_flip=duplex_flip,
                 )
             except (subprocess.CalledProcessError, ValueError, RuntimeError, OSError) as exc:
                 return None, str(exc)
-
     return sheets, None
 
 
