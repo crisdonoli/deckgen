@@ -89,6 +89,7 @@ document.addEventListener('keydown', function(e) {
 (function() {
   const saveProjectBtn = document.getElementById('nav-save-project-btn');
   const loadProjectBtn = document.getElementById('nav-load-project-btn');
+  const cleanAllBtn = document.getElementById('nav-clean-all-btn');
   const loadProjectInput = document.getElementById('nav-load-project-input');
 
   function readStorageJson(key) {
@@ -171,6 +172,20 @@ document.addEventListener('keydown', function(e) {
       } catch (err) {
         alert('Error loading project file: ' + err.message);
       }
+    });
+  }
+
+  if (cleanAllBtn) {
+    cleanAllBtn.addEventListener('click', async function() {
+      window.__deckgenSkipSaveOnUnload = true;
+      try {
+        localStorage.removeItem('deckgen-dg-state');
+        localStorage.removeItem('deckgen-cb-state');
+      } catch (e) {}
+      try {
+        await fetch('/clear-cache', { method: 'POST' });
+      } catch (e) {}
+      window.location.href = window.location.pathname;
     });
   }
 })();

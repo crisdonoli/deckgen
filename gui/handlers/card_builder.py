@@ -536,76 +536,112 @@ def render_pdf_layer_rgba(file_path, target_w, target_h):
     return rgba
 
 
+def _apply_layer_opacity(rgba_img, opacity):
+    if opacity >= 0.999:
+        return rgba_img
+    r, g, b, a = rgba_img.split()
+    a = a.point(lambda p: int(p * opacity))
+    return Image.merge("RGBA", (r, g, b, a))
+
+
 def compose_card_pdf(card, card_name, target_dir, art_overlay_b64, text_overlay_b64, fallback_full_b64):
     fronts_dir = os.path.join(target_dir, "fronts")
     os.makedirs(fronts_dir, exist_ok=True)
     dest_path = os.path.join(fronts_dir, f"{safe_card_filename(card_name)}.pdf")
 
     fc = card.get("frame_components") or {}
-    layer_order = ["background", "pinlines", "name_box", "crown", "border", "pt_box"]
-    active_rel_paths = [fc.get(k) for k in layer_order if fc.get(k)]
+    default_order = ["background", "pinlines", "name_box", "crown", "border", "pt_box"]
+    raw_order = card.get("layer_order") if isinstance(card.get("layer_order"), list) else []
+    layer_order = []
+    for k in raw_order:
+        if k in default_order and k not in layer_order:
+            layer_order.append(k)
+    for k in default_order:
+        if k not in layer_order:
+            layer_order.append(k)
 
+    active_rel_paths = [fc.get(k) for k in layer_order if fc.get(k)]
+    default_opacity = max(0.0, min(1.0, float(card.get("frame_opacity", 1.0))))
+    layer_opacities = card.get("layer_opacities") or {}
+
+    def _layer_op(key):
+        try:
+            return max(0.0, min(1.0, float(layer_opacities.get(key, default_opacity))))
+        except (TypeError, ValueError):
+            return default_opacity
+
+    bg_opacity = _layer_op("background")
     used_pdf_components = []
     canvas_img = Image.new("RGBA", (STANDARD_CARD_W_PX, STANDARD_CARD_H_PX), (17, 17, 17, 255))
 
-    # 1. Renderizar Background desde su versión .pdf preservando transparencia
-    bg_rel = fc.get("background")
-    if bg_rel:
-        bg_pdf_path = jpg_rel_path_to_pdf_abs_path(bg_rel)
-        if bg_pdf_path:
-            used_pdf_components.append(os.path.relpath(bg_pdf_path, ASSETS_DIR))
-            bg_img = render_pdf_layer_rgba(bg_pdf_path, STANDARD_CARD_W_PX, STANDARD_CARD_H_PX)
-            canvas_img.alpha_composite(bg_img)
+    def _composite_art():
+        if art_overlay_b64:
+            _, b64_art = art_overlay_b64.split(",", 1) if "," in art_overlay_b64 else ("", art_overlay_b64)
+            art_layer = Image.open(io.BytesIO(base64.b64decode(b64_art))).convert("RGBA")
+            if art_layer.size != (STANDARD_CARD_W_PX, STANDARD_CARD_H_PX):
+                art_layer = art_layer.resize((STANDARD_CARD_W_PX, STANDARD_CARD_H_PX), Image.LANCZOS)
+            canvas_img.alpha_composite(art_layer)
+        else:
+            art_layout = (card.get("layout") or {}).get("art") or DEFAULT_LAYOUT["art"]
+            art_img = None
+            if card.get("custom_art_data"):
+                _, b64_raw = card["custom_art_data"].split(",", 1)
+                art_img = Image.open(io.BytesIO(base64.b64decode(b64_raw))).convert("RGBA")
+            elif card.get("art_crop_url"):
+                resp = tornado.httpclient.HTTPClient().fetch(
+                    card["art_crop_url"],
+                    headers={"User-Agent": "DeckGenCardBuilder/1.0", "Accept": "image/*"},
+                    raise_error=False,
+                    request_timeout=30,
+                    connect_timeout=10,
+                )
+                if resp.code == 200:
+                    art_img = Image.open(io.BytesIO(resp.body)).convert("RGBA")
 
-    # 2. Superponer la capa de Arte ya recortada y encuadrada desde el cliente
-    if art_overlay_b64:
-        _, b64_art = art_overlay_b64.split(",", 1) if "," in art_overlay_b64 else ("", art_overlay_b64)
-        art_layer = Image.open(io.BytesIO(base64.b64decode(b64_art))).convert("RGBA")
-        if art_layer.size != (STANDARD_CARD_W_PX, STANDARD_CARD_H_PX):
-            art_layer = art_layer.resize((STANDARD_CARD_W_PX, STANDARD_CARD_H_PX), Image.LANCZOS)
-        canvas_img.alpha_composite(art_layer)
-    else:
-        # Respaldo descargando desde Scryfall con User-Agent
-        art_layout = (card.get("layout") or {}).get("art") or DEFAULT_LAYOUT["art"]
-        art_img = None
-        if card.get("custom_art_data"):
-            _, b64_raw = card["custom_art_data"].split(",", 1)
-            art_img = Image.open(io.BytesIO(base64.b64decode(b64_raw))).convert("RGBA")
-        elif card.get("art_crop_url"):
-            resp = tornado.httpclient.HTTPClient().fetch(
-                card["art_crop_url"],
-                headers={"User-Agent": "DeckGenCardBuilder/1.0", "Accept": "image/*"},
-                raise_error=False,
-                request_timeout=30,
-                connect_timeout=10,
-            )
-            if resp.code == 200:
-                art_img = Image.open(io.BytesIO(resp.body)).convert("RGBA")
+            if art_img:
+                aw, ah = int(art_layout["w"]), int(art_layout["h"])
+                ax, ay = int(art_layout["x"]), int(art_layout["y"])
+                scale = float(art_layout.get("scale", 1.0))
+                ox = int(art_layout.get("offset_x", 0))
+                oy = int(art_layout.get("offset_y", 0))
+                base_scale = max(aw / art_img.width, ah / art_img.height) * scale
+                dw, dh = max(1, int(art_img.width * base_scale)), max(1, int(art_img.height * base_scale))
+                resized_art = art_img.resize((dw, dh), Image.LANCZOS)
+                art_box_canvas = Image.new("RGBA", (aw, ah), (0, 0, 0, 0))
+                art_box_canvas.paste(resized_art, ((aw - dw) // 2 + ox, (ah - dh) // 2 + oy))
+                canvas_img.paste(art_box_canvas, (ax, ay), art_box_canvas)
 
-        if art_img:
-            aw, ah = int(art_layout["w"]), int(art_layout["h"])
-            ax, ay = int(art_layout["x"]), int(art_layout["y"])
-            scale = float(art_layout.get("scale", 1.0))
-            ox = int(art_layout.get("offset_x", 0))
-            oy = int(art_layout.get("offset_y", 0))
-            base_scale = max(aw / art_img.width, ah / art_img.height) * scale
-            dw, dh = max(1, int(art_img.width * base_scale)), max(1, int(art_img.height * base_scale))
-            resized_art = art_img.resize((dw, dh), Image.LANCZOS)
-            art_box_canvas = Image.new("RGBA", (aw, ah), (0, 0, 0, 0))
-            art_box_canvas.paste(resized_art, ((aw - dw) // 2 + ox, (ah - dh) // 2 + oy))
-            canvas_img.paste(art_box_canvas, (ax, ay), art_box_canvas)
-
-    # 3. Renderizar el resto de componentes del frame usando su archivo .pdf hermano
-    for comp_key in ("pinlines", "name_box", "crown", "border", "pt_box"):
+    def _composite_comp(comp_key):
+        comp_op = _layer_op(comp_key)
+        if comp_op <= 0.001:
+            return
         rel_p = fc.get(comp_key)
         if not rel_p:
-            continue
+            return
         pdf_p = jpg_rel_path_to_pdf_abs_path(rel_p)
         if not pdf_p:
-            continue
+            return
         used_pdf_components.append(os.path.relpath(pdf_p, ASSETS_DIR))
         comp_rgba = render_pdf_layer_rgba(pdf_p, STANDARD_CARD_W_PX, STANDARD_CARD_H_PX)
-        canvas_img.alpha_composite(comp_rgba)
+        canvas_img.alpha_composite(_apply_layer_opacity(comp_rgba, comp_op))
+
+    art_drawn = False
+    for comp_key in layer_order:
+        if comp_key == "background":
+            if bg_opacity < 0.999:
+                if not art_drawn:
+                    _composite_art()
+                    art_drawn = True
+                _composite_comp("background")
+            else:
+                _composite_comp("background")
+                if not art_drawn:
+                    _composite_art()
+                    art_drawn = True
+        else:
+            _composite_comp(comp_key)
+    if not art_drawn:
+        _composite_art()
 
     # 4. Superponer la capa transparente de textos e iconos
     if text_overlay_b64 and active_rel_paths:

@@ -39,6 +39,8 @@
   const artOyInput = document.getElementById("cb-art-oy");
 
   const fieldName = document.getElementById("cb-field-name");
+  const fieldOfficialName = document.getElementById("cb-field-official-name");
+  const frameOpacityInput = document.getElementById("cb-frame-opacity");
   const fieldMana = document.getElementById("cb-field-mana");
   const fieldType = document.getElementById("cb-field-type");
   const fieldSet = document.getElementById("cb-field-set");
@@ -102,6 +104,32 @@
     { key: "border", label: "Border" },
     { key: "pt_box", label: "PT Box" },
   ];
+  const DEFAULT_LAYER_ORDER = LAYER_DEFINITIONS.map((d) => d.key);
+
+  function getCardLayerOrder(card) {
+    const raw = Array.isArray(card?.layer_order) ? card.layer_order : [];
+    const seen = new Set();
+    const out = [];
+    raw.forEach((k) => {
+      if (DEFAULT_LAYER_ORDER.includes(k) && !seen.has(k)) {
+        seen.add(k);
+        out.push(k);
+      }
+    });
+    DEFAULT_LAYER_ORDER.forEach((k) => {
+      if (!seen.has(k)) out.push(k);
+    });
+    return out;
+  }
+
+  function syncLayerOrderDOM(card) {
+    if (!layerPickersContainer) return;
+    const order = getCardLayerOrder(card);
+    order.forEach((key) => {
+      const el = layerPickersContainer.querySelector(`.cb-visual-picker[data-layer-key="${key}"]`);
+      if (el) layerPickersContainer.appendChild(el);
+    });
+  }
 
   let cards = [];
   let activeIndex = -1;
@@ -168,6 +196,7 @@
     LAYER_DEFINITIONS.forEach((def) => {
       const wrapper = document.createElement("div");
       wrapper.className = "cb-visual-picker";
+      wrapper.dataset.layerKey = def.key;
       wrapper.innerHTML = `
         <div class="cb-visual-picker-row">
           <span class="cb-visual-picker-label">${def.label}</span>
@@ -175,6 +204,15 @@
             <span class="cb-vp-text">None</span>
             <span class="cb-vp-caret">▾</span>
           </button>
+          <div style="display: flex; gap: 2px; flex-shrink: 0;">
+            <button type="button" class="ps-mini-btn cb-layer-move" data-dir="-1" title="Move back (draw earlier)">↑</button>
+            <button type="button" class="ps-mini-btn cb-layer-move" data-dir="1" title="Move forward (draw later)">↓</button>
+          </div>
+        </div>
+        <div class="ps-slider-row cb-layer-opacity-row" style="margin-top: 3px; margin-bottom: 4px;">
+          <span style="font-size: 10px; opacity: 0.8;">Opacity</span>
+          <input type="range" class="cb-layer-opacity" data-layer="${def.key}" min="0" max="1" step="0.05" value="1">
+          <span class="ps-val cb-layer-opacity-val" style="min-width: 34px;">100%</span>
         </div>
         <div class="cb-visual-picker-menu" hidden>
           <input type="text" class="ps-input cb-vp-search" placeholder="Filter layer...">
@@ -188,6 +226,42 @@
       const menu = wrapper.querySelector(".cb-visual-picker-menu");
       const searchInput = wrapper.querySelector(".cb-vp-search");
       const listEl = wrapper.querySelector(".cb-vp-list");
+      const opacitySlider = wrapper.querySelector(".cb-layer-opacity");
+      const opacityVal = wrapper.querySelector(".cb-layer-opacity-val");
+      const moveBtns = wrapper.querySelectorAll(".cb-layer-move");
+
+      moveBtns.forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (activeIndex < 0 || !cards[activeIndex]) return;
+          const card = cards[activeIndex];
+          const dir = parseInt(btn.dataset.dir, 10);
+          const order = getCardLayerOrder(card);
+          const idx = order.indexOf(def.key);
+          const swapIdx = idx + dir;
+          if (idx < 0 || swapIdx < 0 || swapIdx >= order.length) return;
+          pushUndoState();
+          const tmp = order[idx];
+          order[idx] = order[swapIdx];
+          order[swapIdx] = tmp;
+          card.layer_order = order;
+          syncLayerOrderDOM(card);
+          renderCardCanvas();
+        });
+      });
+
+      if (opacitySlider) {
+        opacitySlider.addEventListener("focus", () => pushUndoState());
+        opacitySlider.addEventListener("input", () => {
+          if (activeIndex < 0 || !cards[activeIndex]) return;
+          const card = cards[activeIndex];
+          if (!card.layer_opacities) card.layer_opacities = {};
+          const v = Math.max(0, Math.min(1, parseFloat(opacitySlider.value)));
+          card.layer_opacities[def.key] = Number.isFinite(v) ? v : 1.0;
+          if (opacityVal) opacityVal.textContent = Math.round(card.layer_opacities[def.key] * 100) + "%";
+          renderCardCanvas();
+        });
+      }
 
       let currentItems = [];
       let currentValue = "";
@@ -683,11 +757,40 @@
     if (colorOracleInput) colorOracleInput.value = L.oracle_box.color || "#111111";
   }
 
+  function getLayerOpacity(card, key) {
+    if (card?.layer_opacities && card.layer_opacities[key] !== undefined) {
+      const v = Number(card.layer_opacities[key]);
+      return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 1.0;
+    }
+    const fb = card?.frame_opacity !== undefined ? Number(card.frame_opacity) : 1.0;
+    return Number.isFinite(fb) ? Math.max(0, Math.min(1, fb)) : 1.0;
+  }
+
+  function syncLayerOpacitySliders(card) {
+    LAYER_DEFINITIONS.forEach((def) => {
+      const slider = layerPickersContainer.querySelector(`.cb-layer-opacity[data-layer="${def.key}"]`);
+      if (!slider) return;
+      const op = getLayerOpacity(card, def.key);
+      slider.value = op;
+      const valEl = slider.parentElement?.querySelector(".cb-layer-opacity-val");
+      if (valEl) valEl.textContent = Math.round(op * 100) + "%";
+    });
+  }
+
   function refreshInputsFromActiveCard() {
     if (activeIndex < 0 || !cards[activeIndex]) return;
     const card = cards[activeIndex];
     document.getElementById("cb-editor-title").textContent = card.name;
     fieldName.value = card.name || "";
+    if (fieldOfficialName) fieldOfficialName.value = card.official_name || "";
+    const fOp = card.frame_opacity !== undefined ? Number(card.frame_opacity) : 1.0;
+    if (frameOpacityInput) {
+      frameOpacityInput.value = Number.isFinite(fOp) ? fOp : 1.0;
+      const valEl = document.getElementById("val-frame-opacity");
+      if (valEl) valEl.textContent = Math.round((Number.isFinite(fOp) ? fOp : 1.0) * 100) + "%";
+    }
+    syncLayerOpacitySliders(card);
+    syncLayerOrderDOM(card);
     fieldMana.value = card.mana_cost || "";
     fieldType.value = card.type_line || "";
     fieldSet.value = card.set || "";
@@ -1329,6 +1432,12 @@
     targetCtx.textAlign = "left";
     targetCtx.textBaseline = "alphabetic";
     targetCtx.fillText(card.name || "", L.title.x, L.title.y, L.title.max_w || 470);
+    const officialTitle = (card.official_name || "").trim();
+    if (officialTitle) {
+      const subSize = Math.max(12, Math.round(L.title.font_size * 0.56));
+      targetCtx.font = `italic ${subSize}px "BelerenLocal", "MPlantinLocal", Georgia, serif`;
+      targetCtx.fillText(`(${officialTitle})`, L.title.x, L.title.y + Math.round(L.title.font_size * 0.78), L.title.max_w || 470);
+    }
     targetCtx.restore();
 
     drawManaCost(targetCtx, card.mana_cost || "", L.mana_cost.x, L.mana_cost.y, L.mana_cost.size);
@@ -1444,26 +1553,68 @@
       fc.background || fc.pinlines || fc.name_box || fc.crown || fc.border || fc.pt_box
     );
 
+    const frameOpacity = card.frame_opacity !== undefined ? Math.max(0.05, Math.min(1.0, Number(card.frame_opacity))) : 1.0;
+
     if (hasAnyJpgComponent) {
       ctx.fillStyle = "#111111";
       ctx.fillRect(0, 0, 750, 1050);
 
-      if (fc.background) {
-        const bgImg = await loadImage(relPathToAssetUrl(fc.background));
-        if (bgImg) ctx.drawImage(bgImg, 0, 0, 750, 1050);
-      }
+      const bgOp = getLayerOpacity(card, "background");
+      const order = getCardLayerOrder(card);
+      let artDrawn = false;
 
-      drawArtLayer();
+      const drawBg = async () => {
+        if (fc.background && bgOp > 0.001) {
+          const bgImg = await loadImage(relPathToAssetUrl(fc.background));
+          if (bgImg) {
+            ctx.save();
+            ctx.globalAlpha = bgOp;
+            ctx.drawImage(bgImg, 0, 0, 750, 1050);
+            ctx.restore();
+          }
+        }
+      };
 
-      for (const compKey of ["pinlines", "name_box", "crown", "border", "pt_box"]) {
-        if (fc[compKey]) {
+      for (const compKey of order) {
+        if (compKey === "background") {
+          if (bgOp < 0.999) {
+            if (!artDrawn) {
+              drawArtLayer();
+              artDrawn = true;
+            }
+            await drawBg();
+          } else {
+            await drawBg();
+            if (!artDrawn) {
+              drawArtLayer();
+              artDrawn = true;
+            }
+          }
+          continue;
+        }
+        const compOp = getLayerOpacity(card, compKey);
+        if (fc[compKey] && compOp > 0.001) {
           const layerCanvas = await loadTransparentLayerJpg(fc[compKey]);
-          if (layerCanvas) ctx.drawImage(layerCanvas, 0, 0, 750, 1050);
+          if (layerCanvas) {
+            ctx.save();
+            ctx.globalAlpha = compOp;
+            ctx.drawImage(layerCanvas, 0, 0, 750, 1050);
+            ctx.restore();
+          }
         }
       }
+      if (!artDrawn) drawArtLayer();
     } else {
-      drawProceduralFrame(card);
-      drawArtLayer();
+      if (frameOpacity < 1.0) {
+        drawArtLayer();
+        ctx.save();
+        ctx.globalAlpha = frameOpacity;
+        drawProceduralFrame(card);
+        ctx.restore();
+      } else {
+        drawProceduralFrame(card);
+        drawArtLayer();
+      }
       if (card.power !== null && card.power !== undefined && String(card.power).trim() !== "") {
         const ptf = L.pt_box || STATIC_FRAME_GEOMETRY.ptFrame;
         ctx.save();
@@ -1777,6 +1928,22 @@
     if (activeIndex < 0 || !cards[activeIndex]) return;
     const card = cards[activeIndex];
     card.name = fieldName.value;
+    if (fieldOfficialName) card.official_name = fieldOfficialName.value;
+    if (frameOpacityInput) {
+      const fOp = parseFloat(frameOpacityInput.value);
+      const nextOp = Number.isFinite(fOp) ? fOp : 1.0;
+      if (card.frame_opacity !== nextOp) {
+        card.frame_opacity = nextOp;
+        if (!card.layer_opacities) card.layer_opacities = {};
+        LAYER_DEFINITIONS.forEach((def) => {
+          card.layer_opacities[def.key] = nextOp;
+        });
+        syncLayerOpacitySliders(card);
+    syncLayerOrderDOM(card);
+      }
+      const valEl = document.getElementById("val-frame-opacity");
+      if (valEl) valEl.textContent = Math.round(nextOp * 100) + "%";
+    }
     card.mana_cost = fieldMana.value;
     card.type_line = fieldType.value;
     card.set = fieldSet.value.trim().toLowerCase();
@@ -1824,7 +1991,7 @@
   }
 
   [
-    fieldName, fieldMana, fieldType, fieldSet, fieldRarity,
+    fieldName, fieldOfficialName, frameOpacityInput, fieldMana, fieldType, fieldSet, fieldRarity,
     fieldOracle, fieldFlavor, fieldPower, fieldToughness, fieldArtist,
     artUrlInput, artScaleInput, artOxInput, artOyInput,
     ...Object.values(posInputs),
@@ -2589,7 +2756,9 @@
       setTimeout(saveCardBuilderState, 0);
     });
   }
-  window.addEventListener("beforeunload", saveCardBuilderState);
+  window.addEventListener("beforeunload", () => {
+    if (!window.__deckgenSkipSaveOnUnload) saveCardBuilderState();
+  });
 
   async function initCardBuilder() {
     initLayerPickers();

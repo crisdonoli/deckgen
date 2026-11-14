@@ -660,8 +660,12 @@ button:hover { background: var(--hover-bg); }
   align-items: center;
   gap: 0.5em;
 }
-.navbar-btn {
-  padding: 0.35em 0.75em;
+.navbar .navbar-btn {
+  margin: 0;
+  padding: 0.35em 0.7em;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.2;
   border-radius: 4px;
   border: 1px solid var(--border);
   background: var(--bg);
@@ -671,7 +675,7 @@ button:hover { background: var(--hover-bg); }
   cursor: pointer;
   white-space: nowrap;
 }
-.navbar-btn:hover {
+.navbar .navbar-btn:hover {
   border-color: var(--accent);
   background: var(--hover-bg);
 }

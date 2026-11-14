@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Card Builder - DeckGen</title>
-  <link rel="stylesheet" href="/static/css/main.css">
+  <link rel="stylesheet" href="/static/css/main.css?v=2">
   <link rel="stylesheet" href="/assets/mana-master/css/mana.min.css">
   <link rel="stylesheet" href="/assets/keyrune-master/css/keyrune.min.css">
   <style>
@@ -20,8 +20,8 @@
       font-weight: normal;
     }
   </style>
-  <script src="/static/js/common.js" defer></script>
-  <script src="/static/js/card_builder.js" defer></script>
+  <script src="/static/js/common.js?v=2" defer></script>
+  <script src="/static/js/card_builder.js?v=5" defer></script>
 </head>
 <body>
   $navbar
@@ -197,6 +197,11 @@
         <div class="ps-section">
           <div class="ps-group-title">Frame Layers (Hover to Preview)</div>
           <div id="cb-layer-pickers-container"></div>
+          <div class="ps-slider-row" style="margin-top: 8px;">
+            <span>Frame Opacity</span>
+            <input type="range" id="cb-frame-opacity" min="0.1" max="1.0" step="0.05" value="1.0">
+            <span class="ps-val" id="val-frame-opacity">100%</span>
+          </div>
         </div>
 
         <div class="ps-section">
@@ -256,6 +261,9 @@
         <div class="ps-section">
           <label class="ps-label">Card Name
             <input type="text" id="cb-field-name" class="ps-input">
+          </label>
+          <label class="ps-label">Official Title (optional)
+            <input type="text" id="cb-field-official-name" class="ps-input" placeholder="Original card name in parentheses">
           </label>
           <label class="ps-label">Mana Cost
             <input type="text" id="cb-field-mana" class="ps-input" placeholder="{1}{R}{W}{B}">
