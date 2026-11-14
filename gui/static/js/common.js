@@ -122,6 +122,71 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
+// --- IndexedDB helper for large state (e.g. custom_art_data base64) ---
+window.__deckgenIDB = (function() {
+  const DB_NAME = 'deckgen-state-db';
+  const STORE_NAME = 'kv';
+  let dbPromise = null;
+
+  function openDb() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise(function(resolve, reject) {
+      if (!window.indexedDB) {
+        reject(new Error('IndexedDB unavailable'));
+        return;
+      }
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = function() {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME);
+        }
+      };
+      req.onsuccess = function() { resolve(req.result); };
+      req.onerror = function() { reject(req.error); };
+    });
+    return dbPromise;
+  }
+
+  return {
+    get: async function(key) {
+      try {
+        const db = await openDb();
+        return await new Promise(function(resolve, reject) {
+          const tx = db.transaction(STORE_NAME, 'readonly');
+          const req = tx.objectStore(STORE_NAME).get(key);
+          req.onsuccess = function() { resolve(req.result ?? null); };
+          req.onerror = function() { reject(req.error); };
+        });
+      } catch (e) {
+        return null;
+      }
+    },
+    set: async function(key, val) {
+      try {
+        const db = await openDb();
+        await new Promise(function(resolve, reject) {
+          const tx = db.transaction(STORE_NAME, 'readwrite');
+          const req = tx.objectStore(STORE_NAME).put(val, key);
+          req.onsuccess = function() { resolve(); };
+          req.onerror = function() { reject(req.error); };
+        });
+      } catch (e) {}
+    },
+    del: async function(key) {
+      try {
+        const db = await openDb();
+        await new Promise(function(resolve, reject) {
+          const tx = db.transaction(STORE_NAME, 'readwrite');
+          const req = tx.objectStore(STORE_NAME).delete(key);
+          req.onsuccess = function() { resolve(); };
+          req.onerror = function() { reject(req.error); };
+        });
+      } catch (e) {}
+    }
+  };
+})();
+
 // --- Project Save / Load (state_<date>.json) ---
 (function() {
   const saveProjectBtn = document.getElementById('nav-save-project-btn');
@@ -147,13 +212,19 @@ document.addEventListener('keydown', function(e) {
   }
 
   if (saveProjectBtn) {
-    saveProjectBtn.addEventListener('click', function() {
+    saveProjectBtn.addEventListener('click', async function() {
       const dgState = typeof window.__deckgenGetDeckGeneratorState === 'function'
         ? window.__deckgenGetDeckGeneratorState()
         : readStorageJson('deckgen-dg-state');
-      const cbState = typeof window.__deckgenGetCardBuilderState === 'function'
+      let cbState = typeof window.__deckgenGetCardBuilderState === 'function'
         ? window.__deckgenGetCardBuilderState()
-        : readStorageJson('deckgen-cb-state');
+        : null;
+      if (!cbState && window.__deckgenIDB) {
+        cbState = await window.__deckgenIDB.get('deckgen-cb-state');
+      }
+      if (!cbState) {
+        cbState = readStorageJson('deckgen-cb-state');
+      }
       const payload = {
         version: 1,
         saved_at: new Date().toISOString(),
@@ -195,7 +266,24 @@ document.addEventListener('keydown', function(e) {
           }
         }
         if (data.card_builder) {
-          try { localStorage.setItem('deckgen-cb-state', JSON.stringify(data.card_builder)); } catch (e) {}
+          if (window.__deckgenIDB) {
+            await window.__deckgenIDB.set('deckgen-cb-state', data.card_builder);
+          }
+          try {
+            localStorage.setItem('deckgen-cb-state', JSON.stringify(data.card_builder));
+          } catch (e) {
+            // If custom_art_data exceeds localStorage 5MB quota, keep lightweight metadata in localStorage;
+            // full data is preserved in IndexedDB.
+            try {
+              const lightCards = (data.card_builder.cards || []).map(function(c) {
+                if (!c || !c.custom_art_data) return c;
+                const copy = Object.assign({}, c);
+                delete copy.custom_art_data;
+                return copy;
+              });
+              localStorage.setItem('deckgen-cb-state', JSON.stringify(Object.assign({}, data.card_builder, { cards: lightCards })));
+            } catch (e2) {}
+          }
           if (typeof window.__deckgenApplyCardBuilderState === 'function') {
             window.__deckgenApplyCardBuilderState(data.card_builder);
           }
@@ -217,6 +305,9 @@ document.addEventListener('keydown', function(e) {
         localStorage.removeItem('deckgen-dg-state');
         localStorage.removeItem('deckgen-cb-state');
       } catch (e) {}
+      if (window.__deckgenIDB) {
+        await window.__deckgenIDB.del('deckgen-cb-state');
+      }
       try {
         await fetch('/clear-cache', { method: 'POST' });
       } catch (e) {}

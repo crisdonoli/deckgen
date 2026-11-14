@@ -30,18 +30,27 @@ EXPORT_CARD_H_PX = int(round(STANDARD_CARD_H_PX * EXPORT_SCALE))
 # Aumentar el límite de píxeles de Pillow de forma segura para soportar hasta 2400 DPI (6000x8400 = 50.4 MP)
 Image.MAX_IMAGE_PIXELS = max(getattr(Image, "MAX_IMAGE_PIXELS", 89478485) or 89478485, 120_000_000)
 
+CARD_WIDTH_INCHES = 2.5
+BASE_DPI = STANDARD_CARD_W_PX / float(CARD_WIDTH_INCHES)
+
+
+def pt(points):
+    """Convierte puntos tipográficos reales (1 pt = 1/72 in) a px del canvas base."""
+    return int(round((points * BASE_DPI) / 72.0))
+
+
 DEFAULT_LAYOUT = {
-    "canvas": {"w": 750, "h": 1050},
+    "canvas": {"w": STANDARD_CARD_W_PX, "h": STANDARD_CARD_H_PX},
     "art": {"x": 64, "y": 136, "w": 622, "h": 446, "scale": 1.0, "offset_x": 0, "offset_y": 0},
-    "title": {"x": 84, "y": 116, "max_w": 450, "font_size": 28, "color": "#111111"},
-    "official_title": {"x": 84, "y": 138, "max_w": 450, "font_size": 16, "color": "#111111"},
-    "mana_cost": {"x": 664, "y": 116, "size": 25, "align": "right"},
-    "type_line": {"x": 84, "y": 622, "max_w": 500, "font_size": 23, "color": "#111111"},
-    "set_symbol": {"x": 664, "y": 614, "size": 32, "align": "right"},
-    "oracle_box": {"x": 88, "y": 658, "w": 574, "h": 272, "font_size": 21, "color": "#111111"},
+    "title": {"x": 84, "y": 118, "max_w": 450, "font_size": pt(9.0), "color": "#111111"},
+    "official_title": {"x": 84, "y": 140, "max_w": 450, "font_size": pt(5.5), "color": "#111111"},
+    "mana_cost": {"x": 664, "y": 116, "size": pt(6.5), "align": "right"},
+    "type_line": {"x": 84, "y": 622, "max_w": 500, "font_size": pt(7.5), "color": "#111111"},
+    "set_symbol": {"x": 664, "y": 614, "size": pt(8.0), "align": "right"},
+    "oracle_box": {"x": 84, "y": 654, "w": 582, "h": 284, "font_size": pt(7.2), "color": "#111111"},
     "pt_box": {"x": 562, "y": 908, "w": 123, "h": 66},
-    "pt_text": {"x": 624, "y": 941, "font_size": 29, "color": "#111111"},
-    "artist": {"x": 76, "y": 990, "font_size": 14, "color": "#ffffff"},
+    "pt_text": {"x": 624, "y": 941, "font_size": pt(9.2), "color": "#111111"},
+    "artist": {"x": 76, "y": 990, "font_size": pt(4.3), "color": "#ffffff"},
 }
 
 GUILD_PAIRS = ["WU", "UB", "BR", "RG", "GW", "WB", "BG", "GU", "UR", "RW"]

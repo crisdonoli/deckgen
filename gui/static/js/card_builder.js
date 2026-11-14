@@ -93,18 +93,26 @@
   };
 
   // Calibrated coordinates matching the inner frame margins (with bleed) of Automated Templates
+  const CARD_WIDTH_INCHES = 2.5; // 63.5 mm
+  const CANVAS_W = 750;
+  const CANVAS_H = 1050;
+  const BASE_DPI = CANVAS_W / CARD_WIDTH_INCHES; // 300 DPI base
+
+  // Convierte puntos tipográficos reales (1 pt = 1/72 in) a px del canvas base
+  const pt = (points) => Math.round((points * BASE_DPI) / 72);
+
   const DEFAULT_LAYOUT = {
-    canvas: { w: 750, h: 1050 },
+    canvas: { w: CANVAS_W, h: CANVAS_H },
     art: { x: 64, y: 136, w: 622, h: 446, scale: 1.0, offset_x: 0, offset_y: 0 },
-    title: { x: 84, y: 116, max_w: 450, font_size: 28, color: "#111111" },
-    official_title: { x: 84, y: 138, max_w: 450, font_size: 16, color: "#111111" },
-    mana_cost: { x: 664, y: 116, size: 25, align: "right" },
-    type_line: { x: 84, y: 622, max_w: 500, font_size: 23, color: "#111111" },
-    set_symbol: { x: 664, y: 614, size: 32, align: "right" },
-    oracle_box: { x: 88, y: 658, w: 574, h: 272, font_size: 21, color: "#111111" },
+    title: { x: 84, y: 118, max_w: 450, font_size: pt(9.0), color: "#111111" },
+    official_title: { x: 84, y: 140, max_w: 450, font_size: pt(5.5), color: "#111111" },
+    mana_cost: { x: 664, y: 116, size: pt(6.5), align: "right" },
+    type_line: { x: 84, y: 622, max_w: 500, font_size: pt(7.5), color: "#111111" },
+    set_symbol: { x: 664, y: 614, size: pt(8.0), align: "right" },
+    oracle_box: { x: 84, y: 654, w: 582, h: 284, font_size: pt(7.2), color: "#111111" },
     pt_box: { x: 562, y: 908, w: 123, h: 66 },
-    pt_text: { x: 624, y: 941, font_size: 29, color: "#111111" },
-    artist: { x: 76, y: 990, font_size: 14, color: "#ffffff" },
+    pt_text: { x: 624, y: 941, font_size: pt(9.2), color: "#111111" },
+    artist: { x: 76, y: 990, font_size: pt(4.3), color: "#ffffff" },
   };
 
   const STATIC_FRAME_GEOMETRY = {
@@ -1541,12 +1549,13 @@
   }
 
   function drawRichOracleText(targetCtx, oracleText, flavorText, box) {
-    let fontSize = box.font_size || 24;
+    let fontSize = box.font_size || DEFAULT_LAYOUT.oracle_box.font_size;
     const textColor = box.color || "#111111";
     const maxW = box.w;
     const maxH = box.h;
 
-    while (fontSize > 14 && measureOracleBlockHeight(targetCtx, oracleText, flavorText, maxW, fontSize) > maxH - 6) {
+    const minOraclePx = pt(4.5);
+    while (fontSize > minOraclePx && measureOracleBlockHeight(targetCtx, oracleText, flavorText, maxW, fontSize) > maxH - 6) {
       fontSize -= 1;
     }
 
@@ -1743,8 +1752,8 @@
     while (scale >= 1.5) {
       const off = document.createElement("canvas");
       try {
-        off.width = Math.round(750 * scale);
-        off.height = Math.round(1050 * scale);
+        off.width = Math.round(CANVAS_W * scale);
+        off.height = Math.round(CANVAS_H * scale);
         const octx = off.getContext("2d");
         if (!octx) throw new Error("Canvas context unavailable");
         octx.scale(scale, scale);
@@ -1773,8 +1782,8 @@
     // Python backend resizes to exact target DPI with Lanczos.
     const exportScale = Math.max(1.5, Math.min(4.0, Number(requestedScale) || 4));
     const off = document.createElement("canvas");
-    off.width = Math.round(750 * exportScale);
-    off.height = Math.round(1050 * exportScale);
+    off.width = Math.round(CANVAS_W * exportScale);
+    off.height = Math.round(CANVAS_H * exportScale);
     const octx = off.getContext("2d");
     octx.scale(exportScale, exportScale);
 
@@ -2478,9 +2487,9 @@
     const card = cards[activeIndex];
     const exportDpi = clampExportDpi(exportDpiInput ? exportDpiInput.value : DEFAULT_EXPORT_DPI);
     if (exportDpiInput) exportDpiInput.value = exportDpi;
-    const exportScale = exportDpi / 300.0;
-    const exportW = Math.round(750 * exportScale);
-    const exportH = Math.round(1050 * exportScale);
+    const exportScale = exportDpi / BASE_DPI;
+    const exportW = Math.round(CANVAS_W * exportScale);
+    const exportH = Math.round(CANVAS_H * exportScale);
 
     setLoading(true, `Compositing ${exportDpi} DPI PDF (${exportW}×${exportH} px) from .pdf layer assets...`);
     await renderCardCanvas(true);
@@ -3041,6 +3050,9 @@
 
   function saveCardBuilderState() {
     const state = getCardBuilderStateObject();
+    if (window.__deckgenIDB) {
+      window.__deckgenIDB.set(CB_STATE_KEY, state);
+    }
     try {
       localStorage.setItem(CB_STATE_KEY, JSON.stringify(state));
     } catch (e) {
@@ -3068,20 +3080,30 @@
 
   function applyCardBuilderStateObject(state) {
     if (!state || typeof state !== "object") return;
+    undoStack = [];
+    redoStack = [];
+    updateUndoRedoButtons();
+    if (filterCardsInput) filterCardsInput.value = "";
     if (targetDirInput && typeof state.target_dir === "string") {
       targetDirInput.value = state.target_dir;
     }
     if (exportDpiInput && state.export_dpi !== undefined) {
       exportDpiInput.value = clampExportDpi(state.export_dpi);
     }
-    if (Array.isArray(state.cards) && state.cards.length > 0) {
+    if (Array.isArray(state.cards)) {
       cards = state.cards;
-      const idx = typeof state.active_index === "number" ? state.active_index : 0;
-      activeIndex = Math.max(0, Math.min(cards.length - 1, idx));
-      normalizeCardLayout(cards[activeIndex]);
-      renderCardList();
-      refreshInputsFromActiveCard();
-      renderCardCanvas();
+      if (cards.length > 0) {
+        const idx = typeof state.active_index === "number" ? state.active_index : 0;
+        activeIndex = Math.max(0, Math.min(cards.length - 1, idx));
+        normalizeCardLayout(cards[activeIndex]);
+        renderCardList();
+        refreshInputsFromActiveCard();
+        renderCardCanvas();
+      } else {
+        activeIndex = -1;
+        renderCardList();
+        renderCardCanvas();
+      }
     } else if (typeof renderCardList === "function") {
       renderCardList();
       renderCardCanvas();
@@ -3111,8 +3133,15 @@
     initLayerPickers();
     await fetchTemplateCatalog();
     try {
-      const raw = localStorage.getItem(CB_STATE_KEY);
-      if (raw) applyCardBuilderStateObject(JSON.parse(raw));
+      let savedState = null;
+      if (window.__deckgenIDB) {
+        savedState = await window.__deckgenIDB.get(CB_STATE_KEY);
+      }
+      if (!savedState) {
+        const raw = localStorage.getItem(CB_STATE_KEY);
+        if (raw) savedState = JSON.parse(raw);
+      }
+      if (savedState) applyCardBuilderStateObject(savedState);
     } catch (e) {}
     if (document.fonts) {
       try {
