@@ -93,3 +93,11 @@ Arrange your card PDFs into print-ready sheets with cut marks and card backs:
 
 ### 3. Image Converter (`/image-converter`)
 Quickly convert `.png` or `.jpg` card images into standard-sized PDF files ready for Deck Generator.
+
+---
+
+## Support
+
+If you find DeckGen useful, you can support the project here:
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-cridonoso-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/cridonoso)
