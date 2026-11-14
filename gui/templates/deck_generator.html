@@ -1,0 +1,348 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>DeckGen Sheet Generator</title>
+  <link rel="stylesheet" href="/static/css/main.css">
+  <script src="/static/js/common.js" defer></script>
+  <script src="/static/js/deck_generator.js" defer></script>
+</head>
+<body>
+  $navbar
+  <div id="loading-overlay" class="overlay">
+    <div class="progress-box">
+      <div class="progress-bar-bg"><div id="progress-bar" class="progress-bar-fill"></div></div>
+      <div id="progress-status">Processing...</div>
+    </div>
+  </div>
+  <div class="app ps-ui">
+    <div class="panel ps-panel" id="options-panel">
+      <div class="panel-head">
+        <h1>DeckGen Sheet Generator</h1>
+        <div class="head-actions">
+          <button type="button" id="panel-toggle" class="icon-btn" title="Hide options panel" aria-label="Hide options panel" aria-expanded="true" aria-controls="options-panel">«</button>
+        </div>
+      </div>
+      <form id="deckform" method="post" action="/generate" enctype="multipart/form-data">
+        <div class="deck-tabs" role="tablist">
+          <button type="button" class="deck-tab active" data-tab="fronts" role="tab" aria-selected="true">Fronts</button>
+          <button type="button" class="deck-tab" data-tab="backs" role="tab" aria-selected="false">Backs</button>
+          <button type="button" class="deck-tab" data-tab="export" role="tab" aria-selected="false">Export</button>
+        </div>
+
+        <div class="deck-tab-panel active" data-panel="fronts" role="tabpanel">
+          <div class="ps-section">
+            <div class="ps-group-title">Source</div>
+            <div class="ps-row-between">
+              <button type="button" id="source-upload-btn" class="ps-btn" style="flex: 1;">📁 Load PDF Folder</button>
+              <button type="button" id="check-deck-btn" class="ps-btn" title="Verify deck" aria-label="Verify deck">📋 Verify</button>
+            </div>
+            <input type="file" id="source-files" webkitdirectory directory multiple name="source_files" hidden>
+          </div>
+
+          <div class="ps-section">
+            <div class="ps-group-title">Sheet Layout</div>
+            <label class="ps-label" for="paper-select">Paper</label>
+            <select name="paper" id="paper-select" class="ps-select">
+              <option value="a3" $paper_a3_selected>a3</option>
+              <option value="a4" $paper_a4_selected>a4</option>
+              <option value="a4-3" $paper_a4_3_selected>a4-3</option>
+            </select>
+
+            <label class="ps-label" style="display: flex; align-items: center; gap: 6px; margin-top: 8px; cursor: pointer;">
+              <input type="checkbox" name="landscape" id="landscape-check" value="true" $landscape_checked>
+              <span>Landscape</span>
+            </label>
+          </div>
+
+          <div class="ps-section">
+            <div class="ps-group-title">Cut Marks</div>
+            <label class="ps-label" for="cut-select">Cut lines</label>
+            <select name="cut" id="cut-select" class="ps-select">
+              <option value="none" $cut_none_selected>none</option>
+              <option value="full" $cut_full_selected>full</option>
+              <option value="corners" $cut_corners_selected>corners</option>
+            </select>
+
+            <div id="card-spacing-group">
+              <label class="ps-label" for="card-spacing">Card spacing (mm)</label>
+              <div class="ps-slider-row">
+                <input type="range" name="card_spacing" id="card-spacing" value="$card_spacing" min="0" max="5" step="0.5">
+                <span class="ps-val" id="card-spacing-value">$card_spacing</span>
+              </div>
+            </div>
+
+            <label class="ps-label" for="color-text">Cut color (hex)</label>
+            <div class="ps-row-between">
+              <input type="text" name="color" id="color-text" class="ps-input" value="$color" required style="flex: 1;">
+              <input type="color" id="color-picker" value="$color" style="width: 34px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: transparent; cursor: pointer;">
+            </div>
+
+            <div class="ps-row-between" style="margin-top: 6px;">
+              <div style="flex: 1;">
+                <label class="ps-label" for="thickness-input" style="margin-top: 0;">Thickness (pt)</label>
+                <input type="number" name="thickness" id="thickness-input" class="ps-input" value="$thickness" step="0.1" min="0.1" required>
+              </div>
+              <div style="flex: 1;">
+                <label class="ps-label" for="mark-len-input" style="margin-top: 0;">Mark len (mm)</label>
+                <input type="number" name="mark_len" id="mark-len-input" class="ps-input" value="$mark_len" step="0.1" min="1" required>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="deck-tab-panel" data-panel="backs" role="tabpanel">
+          <input type="hidden" name="duplex_flip" id="duplex-flip" value="true">
+          <div class="ps-section">
+            <div class="ps-group-title">Generic Card Back</div>
+            <label class="ps-label" for="back-file">Card back (PDF / image)</label>
+            <input type="file" name="back_file" id="back-file" class="ps-file-input" accept=".pdf,.png,.jpg,.jpeg">
+          </div>
+
+          <div class="ps-section">
+            <div class="ps-group-title">Double-Faced Cards</div>
+            <button type="button" id="open-custom-backs-btn" class="ps-btn" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;">
+              <span>🔄</span> Custom backs / MDFC (PDF)
+              <span id="custom-backs-badge" style="display: none; background: var(--accent); color: #fff; border-radius: 10px; padding: 1px 7px; font-size: 10px; font-weight: bold;">0 MDFC</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="deck-tab-panel" data-panel="export" role="tabpanel">
+          <div class="ps-section">
+            <div class="ps-group-title">Destination</div>
+            <label class="ps-label" for="export-dir">Export directory</label>
+            <div class="ps-row-between">
+              <input type="text" name="export_dir" id="export-dir" class="ps-input" value="$export_dir" placeholder="Select or enter folder..." style="flex: 1;">
+              <button type="button" id="export-dir-browse-btn" class="ps-btn" title="Browse or create folder">📁 Browse</button>
+            </div>
+          </div>
+
+          <div class="ps-section">
+            <div class="ps-group-title">Output</div>
+            <label class="ps-label" for="face-select">Face</label>
+            <select name="face" id="face-select" class="ps-select">
+              <option value="fronts" $face_fronts_selected>fronts</option>
+              <option value="backs" $face_backs_selected>backs</option>
+            </select>
+
+            <div class="ps-row-between" style="margin-top: 10px;">
+              <button type="submit" class="ps-btn primary" style="flex: 1;">Generate PDF</button>
+              <button type="button" id="preview-btn" class="ps-btn">Preview</button>
+            </div>
+            <button type="button" id="clear-cache-btn" class="ps-btn" style="width: 100%; margin-top: 6px;" title="Delete cached previews">Clear cache</button>
+          </div>
+        </div>
+      </form>
+      <div id="error-message" class="error">$error</div>
+      <div id="save-result"></div>
+    </div>
+    <div class="panel-rail">
+      <button type="button" id="panel-rail-toggle" class="icon-btn" title="Show options panel" aria-label="Show options panel" aria-expanded="false" aria-controls="options-panel">»</button>
+    </div>
+    <div class="preview">
+      <div id="preview-pager" class="preview-pager">
+        <button type="button" id="preview-prev-btn" class="icon-btn" title="Previous page" aria-label="Previous page" disabled>◀</button>
+        <span id="preview-page-label">Page 1 / 1</span>
+        <button type="button" id="preview-next-btn" class="icon-btn" title="Next page" aria-label="Next page" disabled>▶</button>
+      </div>
+      <div class="preview-stage">
+        <img id="preview" alt="Preview">
+      </div>
+    </div>
+  </div>
+
+  <button type="button" id="floating-preview-btn" class="floating-preview-btn" title="Preview fronts and backs" aria-label="Preview fronts and backs">🖼</button>
+
+  <div id="dir-browser-modal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 560px; width: 92vw;">
+      <div class="modal-header">
+        <h2><span>📁</span> Select Export Folder</h2>
+        <button type="button" class="modal-close" id="dir-browser-close-btn">&times;</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <button type="button" id="dir-browser-up-btn" class="ps-btn" title="Parent folder">⬆ Up</button>
+          <input type="text" id="dir-browser-current" class="ps-input" readonly style="flex: 1; font-family: monospace;">
+        </div>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <input type="text" id="dir-browser-new-name" class="ps-input" placeholder="New folder name..." style="flex: 1;">
+          <button type="button" id="dir-browser-mkdir-btn" class="ps-btn">+ Create Folder</button>
+        </div>
+        <div id="dir-browser-list" style="max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);"></div>
+        <div id="dir-browser-error" style="color: var(--danger); font-size: 12px; display: none;"></div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button type="button" id="dir-browser-cancel-btn" class="ps-btn">Cancel</button>
+          <button type="button" id="dir-browser-select-btn" class="ps-btn primary">Select This Folder</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="preview-modal" class="modal-overlay preview-modal">
+    <div class="modal-content preview-modal-content">
+      <div class="modal-header">
+        <h2><span>🖼</span> Sheet Preview</h2>
+        <button type="button" class="modal-close" id="preview-modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body preview-modal-body">
+        <figure class="preview-pane">
+          <figcaption>Fronts</figcaption>
+          <img id="preview-front" alt="Fronts preview">
+        </figure>
+        <figure class="preview-pane">
+          <figcaption>Backs</figcaption>
+          <img id="preview-back" alt="Backs preview">
+        </figure>
+      </div>
+    </div>
+  </div>
+
+  <div id="deck-modal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2><span>📋</span> Deck Verification and Inspection (XML / MTGO .txt)</h2>
+        <button type="button" class="modal-close" id="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="display: flex; gap: 0.8em; align-items: center; margin-bottom: 1em; flex-wrap: wrap;">
+          <label style="font-weight: 600; font-size: 0.9em; margin: 0;">Deck list (.txt / .xml):</label>
+          <select id="xml-select" style="flex: 1; min-width: 200px; padding: 0.4em; border-radius: 4px; border: 1px solid var(--border);"></select>
+          <label class="btn-secondary" style="margin: 0; padding: 0.4em 0.8em; cursor: pointer; border-radius: 4px; font-size: 0.85em; display: inline-flex; align-items: center; gap: 0.3em;">
+            <span>📁</span> Upload TXT / XML
+            <input type="file" id="xml-file-input" accept=".xml,.txt,text/plain" style="display: none;">
+          </label>
+          <button type="button" id="xml-refresh-btn" class="btn-secondary" style="margin: 0; padding: 0.4em 0.8em; font-size: 0.85em;">↻ Reload</button>
+        </div>
+
+        <div id="deck-stats" class="stats-grid">
+          <div class="stat-card"><div class="val" id="stat-target">100</div><div class="lbl">Target</div></div>
+          <div class="stat-card"><div class="val" id="stat-disk" style="color: var(--info);">-</div><div class="lbl">On disk</div></div>
+          <div class="stat-card"><div class="val" id="stat-xml" style="color: var(--muted);">-</div><div class="lbl">Cards in list</div></div>
+          <div class="stat-card"><div class="val" id="stat-needs" style="color: var(--warn);">-</div><div class="lbl">Need duplicates</div></div>
+          <div class="stat-card"><div class="val" id="stat-missing" style="color: var(--danger);">-</div><div class="lbl">Missing</div></div>
+        </div>
+
+        <div id="deck-feedback" style="display: none; padding: 0.6em 0.8em; border-radius: 4px; margin-bottom: 0.8em; font-size: 0.85em;"></div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8em; gap: 1em; flex-wrap: wrap;">
+          <button type="button" id="auto-duplicate-btn" style="margin: 0; background: var(--ok); color: #fff; font-weight: bold; padding: 0.5em 1em; border: none; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 0.4em;">
+            <span>⚡</span> Duplicate repeated cards per list
+          </button>
+          <input type="text" id="deck-search-input" placeholder="Filter by name..." style="width: 220px; padding: 0.4em 0.6em; border-radius: 4px; border: 1px solid var(--border); margin: 0; font-size: 0.85em;">
+        </div>
+
+        <div class="modal-tabs">
+          <button type="button" class="tab-btn active" data-tab="all">All (<span id="count-all">0</span>)</button>
+          <button type="button" class="tab-btn" data-tab="needs_copies" style="color: var(--warn);">⚠️ Need duplicates (<span id="count-needs">0</span>)</button>
+          <button type="button" class="tab-btn" data-tab="missing" style="color: var(--danger);">❌ Missing (<span id="count-missing">0</span>)</button>
+          <button type="button" class="tab-btn" data-tab="ok" style="color: var(--ok);">✅ Complete (<span id="count-ok">0</span>)</button>
+          <button type="button" class="tab-btn" data-tab="extra">Tokens / Extras (<span id="count-extra">0</span>)</button>
+        </div>
+
+        <div class="modal-table-container">
+          <table class="deck-table" id="deck-table">
+            <thead>
+              <tr>
+                <th style="width: 14%;">Slots</th>
+                <th style="width: 36%;">Card / Query</th>
+                <th style="width: 8%;">Req.</th>
+                <th style="width: 8%;">Disk</th>
+                <th style="width: 14%;">Status</th>
+                <th style="width: 20%;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="deck-table-body">
+              <tr><td colspan="6" style="text-align: center; color: var(--muted); padding: 2em;">Loading deck data...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div style="display: flex; justify-content: flex-end; padding: 0.8em 1.2em; border-top: 1px solid var(--table-border); background: var(--modal-footer-bg);">
+        <button type="button" class="btn-secondary" id="modal-close-footer-btn" style="margin: 0; padding: 0.4em 1em;">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Custom Card Backs (MDFC) -->
+  <div id="custom-backs-modal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2><span>🔄</span> Custom Card Backs / Double-Faced Cards (MDFC)</h2>
+        <button type="button" class="modal-close" id="cb-modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="margin-top: 0; color: var(--muted); font-size: 0.88em;">
+          Assign an individual back PDF file to cards that flip (MDFC / Transform). Cards without a custom back will use the generic back.
+        </p>
+
+        <div id="cb-stats" class="stats-grid">
+          <div class="stat-card">
+            <div class="val" id="cb-stat-total">0</div>
+            <div class="lbl">Total Cards</div>
+          </div>
+          <div class="stat-card">
+            <div class="val" id="cb-stat-generic" style="color: var(--muted);">0</div>
+            <div class="lbl">Generic Back</div>
+          </div>
+          <div class="stat-card">
+            <div class="val" id="cb-stat-custom" style="color: var(--accent);">0</div>
+            <div class="lbl">Custom Back (PDF)</div>
+          </div>
+          <div class="stat-card">
+            <div class="val" id="cb-stat-available" style="color: var(--ok);">0</div>
+            <div class="lbl">PDFs en backs/</div>
+          </div>
+        </div>
+
+        <div id="cb-feedback" style="display: none; padding: 0.6em 0.8em; border-radius: 4px; margin-bottom: 0.8em; font-size: 0.85em;"></div>
+
+        <div style="display: flex; gap: 0.6em; align-items: center; margin-bottom: 0.8em; flex-wrap: wrap;">
+          <input type="text" id="cb-search-input" placeholder="Search card by name or file..." style="flex: 1; min-width: 180px; padding: 0.45em 0.8em; font-size: 0.85em; border: 1px solid var(--border); border-radius: 4px;">
+          <select id="cb-filter-select" style="padding: 0.45em 0.8em; font-size: 0.85em; border: 1px solid var(--border); border-radius: 4px;">
+            <option value="all">All cards</option>
+            <option value="custom">Only with custom back</option>
+            <option value="generic">Only generic back</option>
+          </select>
+          <button type="button" id="cb-autodetect-btn" style="background: var(--info); color: #fff; padding: 0.45em 0.8em; font-size: 0.85em; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 0.3em;">
+            <span>⚡</span> Auto-detect
+          </button>
+          <button type="button" id="cb-bulk-assign-btn" style="background: var(--accent); color: #fff; padding: 0.45em 0.8em; font-size: 0.85em; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 0.3em;">
+            <span>📤</span> Assign PDF to selected (<span id="cb-selected-count">0</span>)
+          </button>
+          <button type="button" id="cb-bulk-remove-btn" style="background: var(--danger); color: #fff; padding: 0.45em 0.8em; font-size: 0.85em; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 0.3em;">
+            <span>✕</span> Remove custom
+          </button>
+        </div>
+
+        <input type="file" id="cb-single-upload" accept=".pdf" style="display: none;">
+        <input type="file" id="cb-bulk-upload" accept=".pdf" style="display: none;">
+
+        <div class="modal-table-container">
+          <table class="deck-table" id="cb-table">
+            <thead>
+              <tr>
+                <th style="width: 34px; text-align: center;"><input type="checkbox" id="cb-select-all"></th>
+                <th style="width: 38px;">#</th>
+                <th>Front Card</th>
+                <th>Front File</th>
+                <th>Assigned Back</th>
+                <th style="width: 240px; text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="cb-table-body">
+              <tr><td colspan="6" style="text-align: center; color: var(--muted); padding: 2em;">Loading cards...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.8em 1.2em; border-top: 1px solid var(--table-border); background: var(--modal-footer-bg);">
+        <div style="font-size: 0.82em; color: var(--muted);">
+          Directory: <strong id="cb-footer-dir" style="color: var(--fg);">-</strong>
+        </div>
+        <button type="button" id="cb-modal-footer-close-btn" class="btn-secondary" style="margin: 0; padding: 0.45em 1.2em; font-weight: 600; cursor: pointer;">Close</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

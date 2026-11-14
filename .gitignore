@@ -1,3 +1,7 @@
 decks/
 .tmp/
 __pycache__/
+.codegraph
+assets
+assets.zip
+psd
