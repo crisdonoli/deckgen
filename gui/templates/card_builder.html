@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Card Builder - DeckGen</title>
-  <link rel="stylesheet" href="/static/css/main.css?v=2">
+  <link rel="stylesheet" href="/static/css/main.css?v=4">
   <link rel="stylesheet" href="/assets/mana-master/css/mana.min.css">
   <link rel="stylesheet" href="/assets/keyrune-master/css/keyrune.min.css">
   <style>
@@ -20,11 +20,12 @@
       font-weight: normal;
     }
   </style>
-  <script src="/static/js/common.js?v=2" defer></script>
-  <script src="/static/js/card_builder.js?v=5" defer></script>
+  <script src="/static/js/common.js?v=4" defer></script>
+  <script src="/static/js/card_builder.js?v=10" defer></script>
 </head>
 <body>
   $navbar
+
   <!-- Preload local MTG icon & card fonts -->
   <div aria-hidden="true" style="position:absolute; width:0; height:0; overflow:hidden; opacity:0; pointer-events:none;">
     <i class="ms ms-w ms-cost"></i>
@@ -67,7 +68,7 @@
         <div id="cb-dir-browser-error" style="color: var(--danger); font-size: 12px; display: none;"></div>
         <div style="display: flex; justify-content: flex-end; gap: 8px;">
           <button type="button" id="cb-dir-browser-cancel-btn" class="ps-btn">Cancel</button>
-          <button type="button" id="cb-dir-browser-select-btn" class="ps-btn primary">Select This Folder</button>
+          <button type="button" id="cb-dir-browser-select-btn" class="ps-btn ps-btn-primary">Select This Folder</button>
         </div>
       </div>
     </div>
@@ -77,13 +78,13 @@
   <div id="cb-crop-modal" class="modal-overlay">
     <div class="modal-content" style="max-width: 780px; width: 92vw;">
       <div class="modal-header">
-        <span>✂️ Crop Artwork to Art Box</span>
+        <span>✂ Crop Artwork to Art Box</span>
         <button type="button" id="cb-crop-close-btn" class="modal-close" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body" style="display: flex; flex-direction: column; gap: 12px;">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-          <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer;">
-            <input type="checkbox" id="cb-crop-lock-ratio">
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; margin: 0;">
+            <input type="checkbox" id="cb-crop-lock-ratio" style="width: auto;">
             <span>Aspect Lock (Art Box)</span>
           </label>
           <span id="cb-crop-info" style="font-size: 12px; opacity: 0.8;">Drag box to move, drag corners to resize</span>
@@ -94,23 +95,24 @@
         <div style="display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;">
           <button type="button" id="cb-crop-reset-btn" class="ps-btn">Reset</button>
           <button type="button" id="cb-crop-cancel-btn" class="ps-btn">Cancel</button>
-          <button type="button" id="cb-crop-apply-btn" class="ps-btn primary">Apply Crop</button>
+          <button type="button" id="cb-crop-apply-btn" class="ps-btn ps-btn-primary">Apply Crop</button>
         </div>
       </div>
     </div>
   </div>
 
   <div class="app card-builder-app ps-ui">
-    <!-- Left Panel: Deck Source, Scryfall & Card List -->
+    <!-- Left Panel: Deck Source, Scryfall & Card List (Photoshop Normalized Style) -->
     <div class="panel ps-panel" id="options-panel">
       <div class="panel-head">
         <h1>Card Builder</h1>
         <div class="head-actions">
-          <button type="button" id="panel-toggle" class="icon-btn" title="Hide panel" aria-label="Hide panel" aria-expanded="true" aria-controls="options-panel">⟨</button>
+          <button type="button" id="panel-toggle" class="icon-btn" title="Hide panel" aria-label="Hide panel" aria-expanded="true" aria-controls="options-panel">◀</button>
         </div>
       </div>
 
       <div class="ps-section">
+        <div class="ps-group-title">Workspace Source</div>
         <label class="ps-label" for="cb-target-dir">Deck Folder (.txt / .json)</label>
         <div class="ps-row-between">
           <input type="text" id="cb-target-dir" class="ps-input" placeholder="/home/choroy/projects/deckgen/decks_json/..." style="flex: 1;">
@@ -119,15 +121,14 @@
       </div>
 
       <div class="ps-section">
+        <div class="ps-group-title">Import &amp; Search</div>
         <label class="ps-label" for="cb-scryfall-input">Scryfall Search</label>
         <div class="cb-search-row">
           <input type="text" id="cb-scryfall-input" class="ps-input" placeholder="e.g. Mr. House, President and CEO">
           <button type="button" id="cb-search-btn" class="ps-btn ps-btn-primary">Search</button>
         </div>
-      </div>
 
-      <div class="ps-section">
-        <label class="ps-label" for="cb-txt-input">Import MTGO List (.txt)</label>
+        <label class="ps-label" for="cb-txt-input" style="margin-top: 8px;">Import MTGO List (.txt)</label>
         <input type="file" id="cb-txt-input" class="ps-file-input" accept=".txt,text/plain">
         <button type="button" id="cb-upload-txt-btn" class="ps-btn" style="width: 100%; margin-top: 6px;">
           Parse .txt &amp; Save JSONs
@@ -138,8 +139,8 @@
 
       <div class="ps-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
         <div class="ps-row-between">
-          <label class="ps-label" style="margin:0;">Loaded Cards (<span id="cb-cards-count">0</span>)</label>
-          <button type="button" id="cb-remove-card-btn" class="ps-mini-btn" title="Remove the active card from the list">Remove card</button>
+          <span class="ps-group-title" style="margin:0;">Loaded Cards (<span id="cb-cards-count">0</span>)</span>
+          <button type="button" id="cb-remove-card-btn" class="ps-mini-btn" title="Remove the active card from the list">✕ Remove</button>
         </div>
         <input type="text" id="cb-filter-cards" class="ps-input" placeholder="Filter cards..." style="margin: 5px 0;">
         <ul id="cb-card-list" class="cb-card-list">
@@ -149,7 +150,7 @@
     </div>
 
     <div class="panel-rail">
-      <button type="button" id="panel-rail-toggle" class="icon-btn" title="Show panel" aria-label="Show panel" aria-expanded="false" aria-controls="options-panel">⟩</button>
+      <button type="button" id="panel-rail-toggle" class="icon-btn" title="Show panel" aria-label="Show panel" aria-expanded="false" aria-controls="options-panel">▶</button>
     </div>
 
     <!-- Center Workspace: 750x1050 Card Canvas -->
@@ -168,14 +169,37 @@
         </div>
         <button type="button" id="cb-save-json-btn" class="ps-btn ps-btn-primary">Save JSON</button>
         <button type="button" id="cb-download-png-btn" class="ps-btn">Export PNG</button>
-        <button type="button" id="cb-export-pdf-btn" class="ps-btn ps-btn-ok">Export PDF</button>
+
+        <div class="cb-dpi-export-group" title="Export PDF resolution (500 to 2400 DPI max safe limit, default 1200 DPI)">
+          <label for="cb-export-dpi" class="cb-dpi-label">DPI</label>
+          <input type="number" id="cb-export-dpi" class="ps-input cb-dpi-input" min="500" max="2400" step="50" value="1200" list="cb-dpi-presets">
+          <datalist id="cb-dpi-presets">
+            <option value="500"></option>
+            <option value="600"></option>
+            <option value="900"></option>
+            <option value="1200"></option>
+            <option value="1500"></option>
+            <option value="1800"></option>
+            <option value="2100"></option>
+            <option value="2400"></option>
+          </datalist>
+          <button type="button" id="cb-export-pdf-btn" class="ps-btn ps-btn-ok">Export PDF</button>
+        </div>
       </div>
+    </div>
+
+    <!-- Right Rail for Collapsed Inspector -->
+    <div class="panel-rail panel-rail-right">
+      <button type="button" id="inspector-rail-toggle" class="icon-btn" title="Show inspector panel" aria-label="Show inspector panel" aria-expanded="true" aria-controls="cb-editor-panel">◀</button>
     </div>
 
     <!-- Right Panel: Photoshop-Style Inspector -->
     <aside class="panel ps-panel cb-editor-panel" id="cb-editor-panel">
       <div class="panel-head">
         <h1 id="cb-editor-title" class="ps-card-title">Card Inspector</h1>
+        <div class="head-actions">
+          <button type="button" id="inspector-toggle" class="icon-btn" title="Hide inspector panel" aria-label="Hide inspector panel" aria-expanded="true" aria-controls="cb-editor-panel">▶</button>
+        </div>
       </div>
 
       <div class="ps-tabs" role="tablist">
@@ -189,16 +213,22 @@
         <div class="ps-section">
           <div class="ps-row-between">
             <label class="ps-label" for="cb-style-select" style="margin:0;">Template Style</label>
-            <button type="button" id="cb-autolayer-btn" class="ps-mini-btn" title="Auto-select layers by color &amp; type">⚡ Auto</button>
+            <button type="button" id="cb-autolayer-btn" class="ps-mini-btn" title="Auto-select layers by color &amp; type">✨ Auto</button>
           </div>
           <select id="cb-style-select" class="ps-select" style="margin-top: 4px;"></select>
         </div>
 
         <div class="ps-section">
-          <div class="ps-group-title">Frame Layers (Hover to Preview)</div>
+          <div class="ps-row-between" style="margin-bottom: 5px;">
+            <span class="ps-group-title" style="margin:0;">Frame Layers (Drag ⠿ / 👁 Hide)</span>
+          </div>
+          <label class="ps-checkbox-inline" style="margin-bottom: 6px; font-size: 11px;" title="Draws Artwork over Legendary Crown, Title Box &amp; top border while keeping Type Line and lower frame on top">
+            <input type="checkbox" id="cb-art-over-top">
+            <span>Art over Crown &amp; Title (keep Type)</span>
+          </label>
           <div id="cb-layer-pickers-container"></div>
           <div class="ps-slider-row" style="margin-top: 8px;">
-            <span>Frame Opacity</span>
+            <span>Global Op.</span>
             <input type="range" id="cb-frame-opacity" min="0.1" max="1.0" step="0.05" value="1.0">
             <span class="ps-val" id="val-frame-opacity">100%</span>
           </div>
@@ -208,11 +238,9 @@
           <div class="ps-group-title">Artwork</div>
           <label class="ps-label" for="cb-art-url">Art URL</label>
           <input type="text" id="cb-art-url" class="ps-input" placeholder="https://cards.scryfall.io/art_crop/...">
-
           <label class="ps-label" for="cb-art-file" style="margin-top: 6px;">Upload Local Art</label>
           <input type="file" id="cb-art-file" class="ps-file-input" accept="image/png,image/jpeg,image/webp">
-          <button type="button" id="cb-crop-art-btn" class="ps-btn" style="width: 100%; margin-top: 6px;">✂️ Crop Art to Box</button>
-
+          <button type="button" id="cb-crop-art-btn" class="ps-btn" style="width: 100%; margin-top: 6px;">✂ Crop Art to Box</button>
           <div class="ps-slider-row">
             <span>Zoom</span>
             <input type="range" id="cb-art-scale" min="0.3" max="3.0" step="0.02" value="1.0">
@@ -231,26 +259,42 @@
         </div>
       </div>
 
-      <!-- Tab 2: Card Data & Font Colors -->
+      <!-- Tab 2: Card Data & Independent Font Colors -->
       <div class="ps-tab-panel" data-panel="text-data">
         <div class="ps-section">
           <div class="ps-row-between">
-            <span class="ps-group-title" style="margin:0;">Font Colors</span>
-            <button type="button" id="cb-auto-contrast-btn" class="ps-mini-btn" title="Auto-detect dark/light frame background">🌗 Auto</button>
+            <span class="ps-group-title" style="margin:0;">Independent Font Colors</span>
+            <button type="button" id="cb-auto-contrast-btn" class="ps-mini-btn" title="Auto-detect dark/light frame background for each text zone independently">✨ Auto</button>
           </div>
           <div class="cb-color-grid">
             <div class="cb-color-item">
-              <span class="ps-label">Title / Type / PT</span>
+              <span class="ps-label">Card Title</span>
               <div class="cb-color-row">
-                <input type="color" id="cb-color-header" value="#111111">
-                <button type="button" class="ps-mini-btn cb-preset-color" data-target="header" data-color="#ffffff" title="White">W</button>
-                <button type="button" class="ps-mini-btn cb-preset-color" data-target="header" data-color="#111111" title="Black">B</button>
+                <input type="color" id="cb-color-title" value="#111111" title="Card Title text color">
+                <button type="button" class="ps-mini-btn cb-preset-color" data-target="title" data-color="#ffffff" title="White">W</button>
+                <button type="button" class="ps-mini-btn cb-preset-color" data-target="title" data-color="#111111" title="Black">B</button>
               </div>
             </div>
             <div class="cb-color-item">
-              <span class="ps-label">Rules Text</span>
+              <span class="ps-label">Official Title</span>
               <div class="cb-color-row">
-                <input type="color" id="cb-color-oracle" value="#111111">
+                <input type="color" id="cb-color-official" value="#111111" title="Official Name (optional) text color">
+                <button type="button" class="ps-mini-btn cb-preset-color" data-target="official_title" data-color="#ffffff" title="White">W</button>
+                <button type="button" class="ps-mini-btn cb-preset-color" data-target="official_title" data-color="#111111" title="Black">B</button>
+              </div>
+            </div>
+            <div class="cb-color-item">
+              <span class="ps-label">Type Line</span>
+              <div class="cb-color-row">
+                <input type="color" id="cb-color-type" value="#111111" title="Type Line text color">
+                <button type="button" class="ps-mini-btn cb-preset-color" data-target="type_line" data-color="#ffffff" title="White">W</button>
+                <button type="button" class="ps-mini-btn cb-preset-color" data-target="type_line" data-color="#111111" title="Black">B</button>
+              </div>
+            </div>
+            <div class="cb-color-item">
+              <span class="ps-label">Rules &amp; PT</span>
+              <div class="cb-color-row">
+                <input type="color" id="cb-color-oracle" value="#111111" title="Oracle &amp; P/T text color">
                 <button type="button" class="ps-mini-btn cb-preset-color" data-target="oracle" data-color="#ffffff" title="White">W</button>
                 <button type="button" class="ps-mini-btn cb-preset-color" data-target="oracle" data-color="#111111" title="Black">B</button>
               </div>
@@ -304,56 +348,84 @@
         </div>
       </div>
 
-      <!-- Tab 3: Coordinates & Transform -->
+      <!-- Tab 3: Collapsible Coordinates & Transform -->
       <div class="ps-tab-panel" data-panel="positions">
         <div class="ps-section">
-          <div class="ps-group-title">Art Box (X, Y, W, H)</div>
-          <div class="cb-four-cols">
-            <input type="number" id="pos-art-x" class="ps-input" title="X">
-            <input type="number" id="pos-art-y" class="ps-input" title="Y">
-            <input type="number" id="pos-art-w" class="ps-input" title="W">
-            <input type="number" id="pos-art-h" class="ps-input" title="H">
+          <div class="ps-row-between" style="margin-bottom: 6px;">
+            <span class="ps-group-title" style="margin: 0;">Element Coordinates</span>
+            <button type="button" id="cb-toggle-all-pos-btn" class="ps-mini-btn" title="Expand or collapse all coordinate sections">Expand All</button>
           </div>
 
-          <div class="ps-group-title" style="margin-top: 8px;">Title (X, Y, Size)</div>
-          <div class="cb-three-cols">
-            <input type="number" id="pos-title-x" class="ps-input" title="X">
-            <input type="number" id="pos-title-y" class="ps-input" title="Y">
-            <input type="number" id="pos-title-size" class="ps-input" title="Font Size">
-          </div>
+          <details class="ps-collapsible" data-pos-group="art">
+            <summary class="ps-collapsible-summary">Art Box (X, Y, W, H)</summary>
+            <div class="ps-collapsible-body">
+              <div class="cb-four-cols">
+                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-art-x" class="ps-input" title="X"></label>
+                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-art-y" class="ps-input" title="Y"></label>
+                <label class="ps-mini-field"><span>W</span><input type="number" id="pos-art-w" class="ps-input" title="W"></label>
+                <label class="ps-mini-field"><span>H</span><input type="number" id="pos-art-h" class="ps-input" title="H"></label>
+              </div>
+            </div>
+          </details>
 
-          <div class="ps-group-title" style="margin-top: 8px;">Mana Cost (X, Y, Size)</div>
-          <div class="cb-three-cols">
-            <input type="number" id="pos-mana-x" class="ps-input" title="X">
-            <input type="number" id="pos-mana-y" class="ps-input" title="Y">
-            <input type="number" id="pos-mana-size" class="ps-input" title="Icon Size">
-          </div>
+          <details class="ps-collapsible" data-pos-group="title">
+            <summary class="ps-collapsible-summary">Title &amp; Official Name</summary>
+            <div class="ps-collapsible-body">
+              <div class="ps-sub-label">Card Title</div>
+              <div class="cb-three-cols">
+                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-title-x" class="ps-input" title="X"></label>
+                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-title-y" class="ps-input" title="Y"></label>
+                <label class="ps-mini-field"><span>Size</span><input type="number" id="pos-title-size" class="ps-input" title="Font Size"></label>
+              </div>
+              <div class="ps-sub-label" style="margin-top: 6px;">Official Title (optional)</div>
+              <div class="cb-three-cols">
+                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-official-x" class="ps-input" title="X"></label>
+                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-official-y" class="ps-input" title="Y"></label>
+                <label class="ps-mini-field"><span>Size</span><input type="number" id="pos-official-size" class="ps-input" title="Font Size"></label>
+              </div>
+            </div>
+          </details>
 
-          <div class="ps-group-title" style="margin-top: 8px;">Type Line (X, Y, Size)</div>
-          <div class="cb-three-cols">
-            <input type="number" id="pos-type-x" class="ps-input" title="X">
-            <input type="number" id="pos-type-y" class="ps-input" title="Y">
-            <input type="number" id="pos-type-size" class="ps-input" title="Font Size">
-          </div>
+          <details class="ps-collapsible" data-pos-group="mana_type">
+            <summary class="ps-collapsible-summary">Mana Cost &amp; Type Line</summary>
+            <div class="ps-collapsible-body">
+              <div class="ps-sub-label">Mana Cost</div>
+              <div class="cb-three-cols">
+                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-mana-x" class="ps-input" title="X"></label>
+                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-mana-y" class="ps-input" title="Y"></label>
+                <label class="ps-mini-field"><span>Size</span><input type="number" id="pos-mana-size" class="ps-input" title="Icon Size"></label>
+              </div>
+              <div class="ps-sub-label" style="margin-top: 6px;">Type Line</div>
+              <div class="cb-three-cols">
+                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-type-x" class="ps-input" title="X"></label>
+                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-type-y" class="ps-input" title="Y"></label>
+                <label class="ps-mini-field"><span>Size</span><input type="number" id="pos-type-size" class="ps-input" title="Font Size"></label>
+              </div>
+            </div>
+          </details>
 
-          <div class="ps-group-title" style="margin-top: 8px;">Oracle Box (X, Y, W, H, Size)</div>
-          <div class="cb-four-cols">
-            <input type="number" id="pos-oracle-x" class="ps-input" title="X">
-            <input type="number" id="pos-oracle-y" class="ps-input" title="Y">
-            <input type="number" id="pos-oracle-w" class="ps-input" title="W">
-            <input type="number" id="pos-oracle-h" class="ps-input" title="H">
-          </div>
-          <div class="ps-slider-row" style="margin-top: 4px;">
-            <span>Font Size</span>
-            <input type="number" id="pos-oracle-size" class="ps-input" style="width: 64px;" value="23">
-          </div>
-
-          <div class="ps-group-title" style="margin-top: 8px;">Power / Toughness (X, Y, Size)</div>
-          <div class="cb-three-cols">
-            <input type="number" id="pos-pt-x" class="ps-input" title="X">
-            <input type="number" id="pos-pt-y" class="ps-input" title="Y">
-            <input type="number" id="pos-pt-size" class="ps-input" title="Font Size">
-          </div>
+          <details class="ps-collapsible" data-pos-group="oracle_pt">
+            <summary class="ps-collapsible-summary">Oracle Box &amp; P/T</summary>
+            <div class="ps-collapsible-body">
+              <div class="ps-sub-label">Oracle Box</div>
+              <div class="cb-four-cols">
+                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-oracle-x" class="ps-input" title="X"></label>
+                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-oracle-y" class="ps-input" title="Y"></label>
+                <label class="ps-mini-field"><span>W</span><input type="number" id="pos-oracle-w" class="ps-input" title="W"></label>
+                <label class="ps-mini-field"><span>H</span><input type="number" id="pos-oracle-h" class="ps-input" title="H"></label>
+              </div>
+              <div class="ps-slider-row" style="margin-top: 4px;">
+                <span>Font Size</span>
+                <input type="number" id="pos-oracle-size" class="ps-input" style="width: 64px;" value="21">
+              </div>
+              <div class="ps-sub-label" style="margin-top: 6px;">Power / Toughness</div>
+              <div class="cb-three-cols">
+                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-pt-x" class="ps-input" title="X"></label>
+                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-pt-y" class="ps-input" title="Y"></label>
+                <label class="ps-mini-field"><span>Size</span><input type="number" id="pos-pt-size" class="ps-input" title="Font Size"></label>
+              </div>
+            </div>
+          </details>
 
           <button type="button" id="cb-reset-layout-btn" class="ps-btn" style="width: 100%; margin-top: 10px;">
             Reset Default Positions

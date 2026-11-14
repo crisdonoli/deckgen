@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import gc
 import io
 import json
 import logging
@@ -17,10 +18,23 @@ from PIL import Image, ImageOps
 
 from config import ASSETS_DIR, DPI, STANDARD_CARD_H_PX, STANDARD_CARD_W_PX
 
+MIN_EXPORT_DPI = 500
+MAX_EXPORT_DPI = 2400
+DEFAULT_EXPORT_DPI = 1200
+
+EXPORT_DPI = DEFAULT_EXPORT_DPI
+EXPORT_SCALE = EXPORT_DPI / float(DPI)
+EXPORT_CARD_W_PX = int(round(STANDARD_CARD_W_PX * EXPORT_SCALE))
+EXPORT_CARD_H_PX = int(round(STANDARD_CARD_H_PX * EXPORT_SCALE))
+
+# Aumentar el límite de píxeles de Pillow de forma segura para soportar hasta 2400 DPI (6000x8400 = 50.4 MP)
+Image.MAX_IMAGE_PIXELS = max(getattr(Image, "MAX_IMAGE_PIXELS", 89478485) or 89478485, 120_000_000)
+
 DEFAULT_LAYOUT = {
     "canvas": {"w": 750, "h": 1050},
     "art": {"x": 64, "y": 136, "w": 622, "h": 446, "scale": 1.0, "offset_x": 0, "offset_y": 0},
     "title": {"x": 84, "y": 116, "max_w": 450, "font_size": 28, "color": "#111111"},
+    "official_title": {"x": 84, "y": 138, "max_w": 450, "font_size": 16, "color": "#111111"},
     "mana_cost": {"x": 664, "y": 116, "size": 25, "align": "right"},
     "type_line": {"x": 84, "y": 622, "max_w": 500, "font_size": 23, "color": "#111111"},
     "set_symbol": {"x": 664, "y": 614, "size": 32, "align": "right"},
@@ -36,6 +50,14 @@ GUILD_PAIRS = ["WU", "UB", "BR", "RG", "GW", "WB", "BG", "GU", "UR", "RW"]
 def safe_card_filename(name):
     clean = re.sub(r"[^\w\s\-]", "", name).strip()
     return re.sub(r"[\s]+", "_", clean).lower()
+
+
+def clamp_export_dpi(raw_dpi):
+    try:
+        val = int(round(float(raw_dpi)))
+    except (TypeError, ValueError):
+        val = DEFAULT_EXPORT_DPI
+    return max(MIN_EXPORT_DPI, min(MAX_EXPORT_DPI, val))
 
 
 def get_color_code_for_templates(colors, color_identity, type_line):
@@ -83,7 +105,6 @@ def scan_template_catalog():
             }
             for root, _, files in os.walk(style_path):
                 rel_folder = os.path.relpath(root, style_path).replace("\\", "/")
-                # Ignorar carpetas de referencias de texto para no saturar memoria ni selectores
                 if any(skip in rel_folder for skip in ("Text and Icons", "Legal")):
                     continue
                 for f in sorted(files):
@@ -112,7 +133,6 @@ def scan_template_catalog():
                     elif "pt box" in rf_lower or "pt and level" in rf_lower:
                         categories["pt_box"].append(item)
                     elif rf_lower == ".":
-                        # En estilos como basic/ los fondos están en la raíz del estilo
                         if "basic" in style.lower() and any(
                             land in f for land in ("Forest", "Mountain", "Swamp", "Island", "Plains", "Wastes")
                         ):
@@ -160,7 +180,6 @@ def auto_select_frame_components(card_data, style_key="Automated Templates/norma
         type_line,
     )
 
-    # Si es tierra básica y estamos en estilo basic, buscar por nombre de tierra
     card_name = card_data.get("name", "")
     search_tokens = [pair_or_color, broad_color, "Gold", "Artifact", "Land", "W"]
     if "basic" in style_key.lower():
@@ -216,6 +235,7 @@ def extract_scryfall_card_payload(raw_card, count=1, catalog=None):
     base_info = {
         "id": raw_card.get("id"),
         "name": primary.get("name") or raw_card.get("name", ""),
+        "official_name": "",
         "full_name": raw_card.get("name", ""),
         "count": count,
         "mana_cost": primary.get("mana_cost") or raw_card.get("mana_cost", ""),
@@ -234,6 +254,7 @@ def extract_scryfall_card_payload(raw_card, count=1, catalog=None):
         "art_crop_url": image_uris.get("art_crop", ""),
         "normal_image_url": image_uris.get("normal", ""),
         "custom_art_data": None,
+        "hidden_layers": {},
         "layout": json.loads(json.dumps(DEFAULT_LAYOUT)),
     }
     base_info["frame_components"] = auto_select_frame_components(base_info, default_style, catalog=catalog)
@@ -300,18 +321,32 @@ def parse_mtgo_txt(content):
 
 
 def remove_solid_bg_pil(pil_img, tolerance=28):
-    """Elimina el fondo sólido (blanco o negro de las esquinas) de una capa renderizada desde PDF para superponerla."""
+    """Elimina el fondo sólido (blanco o negro de las esquinas) de una capa optimizando el uso de RAM."""
     rgba = pil_img.convert("RGBA")
-    arr = np.array(rgba, dtype=np.int16)
-    corners = [arr[0, 0, :3], arr[0, -1, :3], arr[-1, 0, :3], arr[-1, -1, :3]]
-    bg = np.median(corners, axis=0)
-    # Solo eliminar si el color de las esquinas es casi blanco (>235) o casi negro (<20)
+    w, h = rgba.size
+    if w < 2 or h < 2:
+        return rgba
+
+    # Comprobar primero los 4 píxeles de las esquinas en O(1) sin clonar toda la matriz en memoria
+    c_pixels = [
+        rgba.getpixel((0, 0))[:3],
+        rgba.getpixel((w - 1, 0))[:3],
+        rgba.getpixel((0, h - 1))[:3],
+        rgba.getpixel((w - 1, h - 1))[:3],
+    ]
+    bg = np.median(np.array(c_pixels, dtype=np.int16), axis=0)
     if not (np.all(bg > 235) or np.all(bg < 20)):
         return rgba
-    diff = np.max(np.abs(arr[:, :, :3] - bg), axis=2)
+
+    arr = np.array(rgba, dtype=np.uint8)
+    rgb = arr[:, :, :3].astype(np.int16)
+    diff = np.max(np.abs(rgb - bg), axis=2)
+    del rgb
     alpha = np.where(diff < tolerance, 0, np.clip((diff - tolerance) * 8, 0, 255)).astype(np.uint8)
-    arr[:, :, 3] = np.minimum(arr[:, :, 3].astype(np.uint8), alpha)
-    return Image.fromarray(arr.astype(np.uint8), "RGBA")
+    del diff
+    arr[:, :, 3] = np.minimum(arr[:, :, 3], alpha)
+    del alpha
+    return Image.fromarray(arr, "RGBA")
 
 
 def jpg_rel_path_to_pdf_abs_path(rel_path):
@@ -523,15 +558,17 @@ def render_pdf_layer_rgba(file_path, target_w, target_h):
             mat = pymupdf.Matrix(target_w / rect.width, target_h / rect.height)
             pix = page.get_pixmap(matrix=mat, alpha=True)
             rgba = Image.frombytes("RGBA", (pix.width, pix.height), pix.samples)
+            del pix
             if rgba.size != (target_w, target_h):
                 rgba = rgba.resize((target_w, target_h), Image.LANCZOS)
         finally:
             doc.close()
     else:
-        rgba = Image.open(file_path).convert("RGBA").resize((target_w, target_h), Image.LANCZOS)
+        with Image.open(file_path) as src_img:
+            rgba = src_img.convert("RGBA").resize((target_w, target_h), Image.LANCZOS)
 
-    arr = np.array(rgba)
-    if np.all(arr[:, :, 3] == 255):
+    extrema = rgba.getextrema()
+    if len(extrema) >= 4 and extrema[3] == (255, 255):
         return remove_solid_bg_pil(rgba)
     return rgba
 
@@ -544,13 +581,27 @@ def _apply_layer_opacity(rgba_img, opacity):
     return Image.merge("RGBA", (r, g, b, a))
 
 
-def compose_card_pdf(card, card_name, target_dir, art_overlay_b64, text_overlay_b64, fallback_full_b64):
+def compose_card_pdf(
+    card,
+    card_name,
+    target_dir,
+    art_overlay_b64,
+    text_overlay_b64,
+    fallback_full_b64,
+    export_dpi=DEFAULT_EXPORT_DPI,
+):
+    effective_dpi = clamp_export_dpi(export_dpi)
+    export_scale = effective_dpi / float(DPI)
+    export_w = int(round(STANDARD_CARD_W_PX * export_scale))
+    export_h = int(round(STANDARD_CARD_H_PX * export_scale))
+
     fronts_dir = os.path.join(target_dir, "fronts")
     os.makedirs(fronts_dir, exist_ok=True)
     dest_path = os.path.join(fronts_dir, f"{safe_card_filename(card_name)}.pdf")
 
     fc = card.get("frame_components") or {}
-    default_order = ["background", "pinlines", "name_box", "crown", "border", "pt_box"]
+    frame_keys = ("background", "pinlines", "name_box", "crown", "border", "pt_box")
+    default_order = ["background", "art", "pinlines", "name_box", "crown", "border", "pt_box"]
     raw_order = card.get("layer_order") if isinstance(card.get("layer_order"), list) else []
     layer_order = []
     for k in raw_order:
@@ -560,33 +611,49 @@ def compose_card_pdf(card, card_name, target_dir, art_overlay_b64, text_overlay_
         if k not in layer_order:
             layer_order.append(k)
 
-    active_rel_paths = [fc.get(k) for k in layer_order if fc.get(k)]
+    hidden_layers = card.get("hidden_layers") or {}
+
+    def _is_layer_hidden(key):
+        if isinstance(hidden_layers, list):
+            return key in hidden_layers
+        if isinstance(hidden_layers, dict):
+            return bool(hidden_layers.get(key))
+        return False
+
+    has_any_fc = any(bool(fc.get(k)) for k in frame_keys)
     default_opacity = max(0.0, min(1.0, float(card.get("frame_opacity", 1.0))))
     layer_opacities = card.get("layer_opacities") or {}
 
     def _layer_op(key):
+        if _is_layer_hidden(key):
+            return 0.0
         try:
             return max(0.0, min(1.0, float(layer_opacities.get(key, default_opacity))))
         except (TypeError, ValueError):
             return default_opacity
 
-    bg_opacity = _layer_op("background")
     used_pdf_components = []
-    canvas_img = Image.new("RGBA", (STANDARD_CARD_W_PX, STANDARD_CARD_H_PX), (17, 17, 17, 255))
+    canvas_img = Image.new("RGBA", (export_w, export_h), (17, 17, 17, 255))
 
     def _composite_art():
+        art_op = _layer_op("art")
+        if art_op <= 0.001:
+            return
         if art_overlay_b64:
             _, b64_art = art_overlay_b64.split(",", 1) if "," in art_overlay_b64 else ("", art_overlay_b64)
-            art_layer = Image.open(io.BytesIO(base64.b64decode(b64_art))).convert("RGBA")
-            if art_layer.size != (STANDARD_CARD_W_PX, STANDARD_CARD_H_PX):
-                art_layer = art_layer.resize((STANDARD_CARD_W_PX, STANDARD_CARD_H_PX), Image.LANCZOS)
-            canvas_img.alpha_composite(art_layer)
+            with Image.open(io.BytesIO(base64.b64decode(b64_art))) as raw_art:
+                art_layer = raw_art.convert("RGBA")
+            if art_layer.size != (export_w, export_h):
+                art_layer = art_layer.resize((export_w, export_h), Image.LANCZOS)
+            canvas_img.alpha_composite(_apply_layer_opacity(art_layer, art_op))
+            del art_layer
         else:
             art_layout = (card.get("layout") or {}).get("art") or DEFAULT_LAYOUT["art"]
             art_img = None
             if card.get("custom_art_data"):
                 _, b64_raw = card["custom_art_data"].split(",", 1)
-                art_img = Image.open(io.BytesIO(base64.b64decode(b64_raw))).convert("RGBA")
+                with Image.open(io.BytesIO(base64.b64decode(b64_raw))) as raw_custom:
+                    art_img = raw_custom.convert("RGBA")
             elif card.get("art_crop_url"):
                 resp = tornado.httpclient.HTTPClient().fetch(
                     card["art_crop_url"],
@@ -596,22 +663,31 @@ def compose_card_pdf(card, card_name, target_dir, art_overlay_b64, text_overlay_
                     connect_timeout=10,
                 )
                 if resp.code == 200:
-                    art_img = Image.open(io.BytesIO(resp.body)).convert("RGBA")
+                    with Image.open(io.BytesIO(resp.body)) as raw_fetched:
+                        art_img = raw_fetched.convert("RGBA")
 
             if art_img:
-                aw, ah = int(art_layout["w"]), int(art_layout["h"])
-                ax, ay = int(art_layout["x"]), int(art_layout["y"])
+                aw = max(1, int(round(float(art_layout["w"]) * export_scale)))
+                ah = max(1, int(round(float(art_layout["h"]) * export_scale)))
+                ax = int(round(float(art_layout["x"]) * export_scale))
+                ay = int(round(float(art_layout["y"]) * export_scale))
                 scale = float(art_layout.get("scale", 1.0))
-                ox = int(art_layout.get("offset_x", 0))
-                oy = int(art_layout.get("offset_y", 0))
+                ox = int(round(float(art_layout.get("offset_x", 0)) * export_scale))
+                oy = int(round(float(art_layout.get("offset_y", 0)) * export_scale))
                 base_scale = max(aw / art_img.width, ah / art_img.height) * scale
                 dw, dh = max(1, int(art_img.width * base_scale)), max(1, int(art_img.height * base_scale))
                 resized_art = art_img.resize((dw, dh), Image.LANCZOS)
-                art_box_canvas = Image.new("RGBA", (aw, ah), (0, 0, 0, 0))
-                art_box_canvas.paste(resized_art, ((aw - dw) // 2 + ox, (ah - dh) // 2 + oy))
-                canvas_img.paste(art_box_canvas, (ax, ay), art_box_canvas)
+                del art_img
+                art_box_canvas = Image.new("RGBA", (export_w, export_h), (0, 0, 0, 0))
+                crop_box = Image.new("RGBA", (aw, ah), (0, 0, 0, 0))
+                crop_box.paste(resized_art, ((aw - dw) // 2 + ox, (ah - dh) // 2 + oy))
+                del resized_art
+                art_box_canvas.paste(crop_box, (ax, ay))
+                del crop_box
+                canvas_img.alpha_composite(_apply_layer_opacity(art_box_canvas, art_op))
+                del art_box_canvas
 
-    def _composite_comp(comp_key):
+    def _composite_comp(comp_key, crop_y_range=None):
         comp_op = _layer_op(comp_key)
         if comp_op <= 0.001:
             return
@@ -621,44 +697,69 @@ def compose_card_pdf(card, card_name, target_dir, art_overlay_b64, text_overlay_
         pdf_p = jpg_rel_path_to_pdf_abs_path(rel_p)
         if not pdf_p:
             return
-        used_pdf_components.append(os.path.relpath(pdf_p, ASSETS_DIR))
-        comp_rgba = render_pdf_layer_rgba(pdf_p, STANDARD_CARD_W_PX, STANDARD_CARD_H_PX)
+        rel_used = os.path.relpath(pdf_p, ASSETS_DIR)
+        if rel_used not in used_pdf_components:
+            used_pdf_components.append(rel_used)
+        comp_rgba = render_pdf_layer_rgba(pdf_p, export_w, export_h)
+        if crop_y_range is not None:
+            y0, y1 = crop_y_range
+            clipped = Image.new("RGBA", (export_w, export_h), (0, 0, 0, 0))
+            band = comp_rgba.crop((0, y0, export_w, y1))
+            clipped.paste(band, (0, y0))
+            del band
+            del comp_rgba
+            comp_rgba = clipped
         canvas_img.alpha_composite(_apply_layer_opacity(comp_rgba, comp_op))
+        del comp_rgba
 
-    art_drawn = False
-    for comp_key in layer_order:
-        if comp_key == "background":
-            if bg_opacity < 0.999:
-                if not art_drawn:
-                    _composite_art()
-                    art_drawn = True
-                _composite_comp("background")
+    art_over_top = bool(card.get("art_over_top"))
+    if art_over_top:
+        split_y = int(round(583 * export_h / 1050.0))
+        for comp_key in layer_order:
+            if comp_key in ("art", "pt_box"):
+                continue
+            if comp_key in ("pinlines", "border"):
+                _composite_comp(comp_key, (0, split_y))
             else:
-                _composite_comp("background")
-                if not art_drawn:
-                    _composite_art()
-                    art_drawn = True
-        else:
-            _composite_comp(comp_key)
-    if not art_drawn:
+                _composite_comp(comp_key)
         _composite_art()
+        for comp_key in layer_order:
+            if comp_key in ("pinlines", "border"):
+                _composite_comp(comp_key, (split_y, export_h))
+            elif comp_key == "pt_box":
+                _composite_comp(comp_key)
+    else:
+        for comp_key in layer_order:
+            if comp_key == "art":
+                _composite_art()
+            else:
+                _composite_comp(comp_key)
 
-    # 4. Superponer la capa transparente de textos e iconos
-    if text_overlay_b64 and active_rel_paths:
+    # Superponer la capa transparente de textos e iconos
+    if text_overlay_b64 and has_any_fc:
         _, b64_txt = text_overlay_b64.split(",", 1) if "," in text_overlay_b64 else ("", text_overlay_b64)
-        txt_img = Image.open(io.BytesIO(base64.b64decode(b64_txt))).convert("RGBA")
-        if txt_img.size != (STANDARD_CARD_W_PX, STANDARD_CARD_H_PX):
-            txt_img = txt_img.resize((STANDARD_CARD_W_PX, STANDARD_CARD_H_PX), Image.LANCZOS)
+        with Image.open(io.BytesIO(base64.b64decode(b64_txt))) as raw_txt:
+            txt_img = raw_txt.convert("RGBA")
+        if txt_img.size != (export_w, export_h):
+            txt_img = txt_img.resize((export_w, export_h), Image.LANCZOS)
         canvas_img.alpha_composite(txt_img)
+        del txt_img
         final_rgb = canvas_img.convert("RGB")
     elif fallback_full_b64:
         _, b64_full = fallback_full_b64.split(",", 1) if "," in fallback_full_b64 else ("", fallback_full_b64)
-        full_img = Image.open(io.BytesIO(base64.b64decode(b64_full))).convert("RGB")
-        final_rgb = ImageOps.fit(full_img, (STANDARD_CARD_W_PX, STANDARD_CARD_H_PX), method=Image.LANCZOS)
+        with Image.open(io.BytesIO(base64.b64decode(b64_full))) as raw_full:
+            full_img = raw_full.convert("RGB")
+        final_rgb = ImageOps.fit(full_img, (export_w, export_h), method=Image.LANCZOS)
+        del full_img
     else:
         final_rgb = canvas_img.convert("RGB")
 
-    final_rgb.save(dest_path, format="PDF", resolution=DPI)
+    del canvas_img
+    gc.collect()
+
+    final_rgb.save(dest_path, format="PDF", resolution=float(effective_dpi))
+    del final_rgb
+    gc.collect()
 
     return dest_path, used_pdf_components
 
@@ -674,18 +775,26 @@ class CardBuilderExportPdfHandler(tornado.web.RequestHandler):
             art_overlay_b64 = body.get("art_overlay_data_url", "")
             text_overlay_b64 = body.get("text_overlay_data_url", "")
             fallback_full_b64 = body.get("image_data_url", "")
+            requested_dpi = clamp_export_dpi(body.get("export_dpi", card.get("export_dpi", DEFAULT_EXPORT_DPI)))
 
             loop = asyncio.get_running_loop()
             dest_path, used_pdf_components = await loop.run_in_executor(
                 None,
                 lambda: compose_card_pdf(
-                    card, card_name, target_dir, art_overlay_b64, text_overlay_b64, fallback_full_b64
+                    card,
+                    card_name,
+                    target_dir,
+                    art_overlay_b64,
+                    text_overlay_b64,
+                    fallback_full_b64,
+                    export_dpi=requested_dpi,
                 ),
             )
 
             self.write(json.dumps({
                 "status": "ok",
                 "pdf_path": dest_path,
+                "dpi": requested_dpi,
                 "pdf_components_used": used_pdf_components,
             }))
         except Exception as e:

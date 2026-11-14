@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <title>DeckGen Sheet Generator</title>
-  <link rel="stylesheet" href="/static/css/main.css?v=2">
-  <script src="/static/js/common.js?v=2" defer></script>
-  <script src="/static/js/deck_generator.js?v=2" defer></script>
+  <link rel="stylesheet" href="/static/css/main.css?v=4">
+  <script src="/static/js/common.js?v=4" defer></script>
+  <script src="/static/js/deck_generator.js?v=4" defer></script>
 </head>
 <body>
   $navbar
@@ -20,17 +20,17 @@
       <div class="panel-head">
         <h1>DeckGen Sheet Generator</h1>
         <div class="head-actions">
-          <button type="button" id="panel-toggle" class="icon-btn" title="Hide options panel" aria-label="Hide options panel" aria-expanded="true" aria-controls="options-panel">«</button>
+          <button type="button" id="panel-toggle" class="icon-btn" title="Hide options panel" aria-label="Hide options panel" aria-expanded="true" aria-controls="options-panel">◀</button>
         </div>
       </div>
-      <form id="deckform" method="post" action="/generate" enctype="multipart/form-data">
-        <div class="deck-tabs" role="tablist">
-          <button type="button" class="deck-tab active" data-tab="fronts" role="tab" aria-selected="true">Fronts</button>
-          <button type="button" class="deck-tab" data-tab="backs" role="tab" aria-selected="false">Backs</button>
-          <button type="button" class="deck-tab" data-tab="export" role="tab" aria-selected="false">Export</button>
+      <form id="deckform" method="post" action="/generate" enctype="multipart/form-data" class="ps-form-flex">
+        <div class="deck-tabs ps-tabs" role="tablist">
+          <button type="button" class="deck-tab ps-tab active" data-tab="fronts" role="tab" aria-selected="true">Fronts</button>
+          <button type="button" class="deck-tab ps-tab" data-tab="backs" role="tab" aria-selected="false">Backs</button>
+          <button type="button" class="deck-tab ps-tab" data-tab="export" role="tab" aria-selected="false">Export</button>
         </div>
 
-        <div class="deck-tab-panel active" data-panel="fronts" role="tabpanel">
+        <div class="deck-tab-panel ps-tab-panel active" data-panel="fronts" role="tabpanel">
           <div class="ps-section">
             <div class="ps-group-title">Source</div>
             <div class="ps-row-between">
@@ -49,7 +49,7 @@
               <option value="a4-3" $paper_a4_3_selected>a4-3</option>
             </select>
 
-            <label class="ps-label" style="display: flex; align-items: center; gap: 6px; margin-top: 8px; cursor: pointer;">
+            <label class="ps-checkbox-inline" style="margin-top: 8px;">
               <input type="checkbox" name="landscape" id="landscape-check" value="true" $landscape_checked>
               <span>Landscape</span>
             </label>
@@ -75,7 +75,7 @@
             <label class="ps-label" for="color-text">Cut color (hex)</label>
             <div class="ps-row-between">
               <input type="text" name="color" id="color-text" class="ps-input" value="$color" required style="flex: 1;">
-              <input type="color" id="color-picker" value="$color" style="width: 34px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: transparent; cursor: pointer;">
+              <input type="color" id="color-picker" value="$color" style="width: 34px; height: 25px; padding: 0; border: 1px solid var(--border); border-radius: 3px; background: transparent; cursor: pointer;">
             </div>
 
             <div class="ps-row-between" style="margin-top: 6px;">
@@ -91,7 +91,7 @@
           </div>
         </div>
 
-        <div class="deck-tab-panel" data-panel="backs" role="tabpanel">
+        <div class="deck-tab-panel ps-tab-panel" data-panel="backs" role="tabpanel">
           <input type="hidden" name="duplex_flip" id="duplex-flip" value="true">
           <div class="ps-section">
             <div class="ps-group-title">Generic Card Back</div>
@@ -108,7 +108,7 @@
           </div>
         </div>
 
-        <div class="deck-tab-panel" data-panel="export" role="tabpanel">
+        <div class="deck-tab-panel ps-tab-panel" data-panel="export" role="tabpanel">
           <div class="ps-section">
             <div class="ps-group-title">Destination</div>
             <label class="ps-label" for="export-dir">Export directory</label>
@@ -127,7 +127,7 @@
             </select>
 
             <div class="ps-row-between" style="margin-top: 10px;">
-              <button type="submit" class="ps-btn primary" style="flex: 1;">Generate PDF</button>
+              <button type="submit" class="ps-btn ps-btn-primary" style="flex: 1;">Generate PDF</button>
               <button type="button" id="preview-btn" class="ps-btn">Preview</button>
             </div>
             <button type="button" id="clear-cache-btn" class="ps-btn" style="width: 100%; margin-top: 6px;" title="Delete cached previews">Clear cache</button>
@@ -138,7 +138,7 @@
       <div id="save-result"></div>
     </div>
     <div class="panel-rail">
-      <button type="button" id="panel-rail-toggle" class="icon-btn" title="Show options panel" aria-label="Show options panel" aria-expanded="false" aria-controls="options-panel">»</button>
+      <button type="button" id="panel-rail-toggle" class="icon-btn" title="Show options panel" aria-label="Show options panel" aria-expanded="false" aria-controls="options-panel">▶</button>
     </div>
     <div class="preview">
       <div id="preview-pager" class="preview-pager">
@@ -173,7 +173,7 @@
         <div id="dir-browser-error" style="color: var(--danger); font-size: 12px; display: none;"></div>
         <div style="display: flex; justify-content: flex-end; gap: 8px;">
           <button type="button" id="dir-browser-cancel-btn" class="ps-btn">Cancel</button>
-          <button type="button" id="dir-browser-select-btn" class="ps-btn primary">Select This Folder</button>
+          <button type="button" id="dir-browser-select-btn" class="ps-btn ps-btn-primary">Select This Folder</button>
         </div>
       </div>
     </div>
@@ -208,11 +208,11 @@
         <div style="display: flex; gap: 0.8em; align-items: center; margin-bottom: 1em; flex-wrap: wrap;">
           <label style="font-weight: 600; font-size: 0.9em; margin: 0;">Deck list (.txt / .xml):</label>
           <select id="xml-select" style="flex: 1; min-width: 200px; padding: 0.4em; border-radius: 4px; border: 1px solid var(--border);"></select>
-          <label class="btn-secondary" style="margin: 0; padding: 0.4em 0.8em; cursor: pointer; border-radius: 4px; font-size: 0.85em; display: inline-flex; align-items: center; gap: 0.3em;">
+          <label class="ps-btn" style="margin: 0; cursor: pointer;">
             <span>📁</span> Upload TXT / XML
             <input type="file" id="xml-file-input" accept=".xml,.txt,text/plain" style="display: none;">
           </label>
-          <button type="button" id="xml-refresh-btn" class="btn-secondary" style="margin: 0; padding: 0.4em 0.8em; font-size: 0.85em;">↻ Reload</button>
+          <button type="button" id="xml-refresh-btn" class="ps-btn">↻ Reload</button>
         </div>
 
         <div id="deck-stats" class="stats-grid">
@@ -226,10 +226,10 @@
         <div id="deck-feedback" style="display: none; padding: 0.6em 0.8em; border-radius: 4px; margin-bottom: 0.8em; font-size: 0.85em;"></div>
 
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8em; gap: 1em; flex-wrap: wrap;">
-          <button type="button" id="auto-duplicate-btn" style="margin: 0; background: var(--ok); color: #fff; font-weight: bold; padding: 0.5em 1em; border: none; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 0.4em;">
+          <button type="button" id="auto-duplicate-btn" class="ps-btn ps-btn-ok" style="height: 28px; padding: 0 12px;">
             <span>⚡</span> Duplicate repeated cards per list
           </button>
-          <input type="text" id="deck-search-input" placeholder="Filter by name..." style="width: 220px; padding: 0.4em 0.6em; border-radius: 4px; border: 1px solid var(--border); margin: 0; font-size: 0.85em;">
+          <input type="text" id="deck-search-input" class="ps-input" placeholder="Filter by name..." style="width: 220px;">
         </div>
 
         <div class="modal-tabs">
@@ -259,7 +259,7 @@
         </div>
       </div>
       <div style="display: flex; justify-content: flex-end; padding: 0.8em 1.2em; border-top: 1px solid var(--table-border); background: var(--modal-footer-bg);">
-        <button type="button" class="btn-secondary" id="modal-close-footer-btn" style="margin: 0; padding: 0.4em 1em;">Close</button>
+        <button type="button" class="ps-btn" id="modal-close-footer-btn">Close</button>
       </div>
     </div>
   </div>
@@ -298,19 +298,19 @@
         <div id="cb-feedback" style="display: none; padding: 0.6em 0.8em; border-radius: 4px; margin-bottom: 0.8em; font-size: 0.85em;"></div>
 
         <div style="display: flex; gap: 0.6em; align-items: center; margin-bottom: 0.8em; flex-wrap: wrap;">
-          <input type="text" id="cb-search-input" placeholder="Search card by name or file..." style="flex: 1; min-width: 180px; padding: 0.45em 0.8em; font-size: 0.85em; border: 1px solid var(--border); border-radius: 4px;">
-          <select id="cb-filter-select" style="padding: 0.45em 0.8em; font-size: 0.85em; border: 1px solid var(--border); border-radius: 4px;">
+          <input type="text" id="cb-search-input" class="ps-input" placeholder="Search card by name or file..." style="flex: 1; min-width: 180px;">
+          <select id="cb-filter-select" class="ps-select" style="width: auto; min-width: 160px;">
             <option value="all">All cards</option>
             <option value="custom">Only with custom back</option>
             <option value="generic">Only generic back</option>
           </select>
-          <button type="button" id="cb-autodetect-btn" style="background: var(--info); color: #fff; padding: 0.45em 0.8em; font-size: 0.85em; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 0.3em;">
+          <button type="button" id="cb-autodetect-btn" class="ps-btn" style="background: var(--info); color: #fff; border-color: var(--info);">
             <span>⚡</span> Auto-detect
           </button>
-          <button type="button" id="cb-bulk-assign-btn" style="background: var(--accent); color: #fff; padding: 0.45em 0.8em; font-size: 0.85em; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 0.3em;">
+          <button type="button" id="cb-bulk-assign-btn" class="ps-btn ps-btn-primary">
             <span>📤</span> Assign PDF to selected (<span id="cb-selected-count">0</span>)
           </button>
-          <button type="button" id="cb-bulk-remove-btn" style="background: var(--danger); color: #fff; padding: 0.45em 0.8em; font-size: 0.85em; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 0.3em;">
+          <button type="button" id="cb-bulk-remove-btn" class="ps-btn" style="background: var(--danger); color: #fff; border-color: var(--danger);">
             <span>✕</span> Remove custom
           </button>
         </div>
@@ -340,7 +340,7 @@
         <div style="font-size: 0.82em; color: var(--muted);">
           Directory: <strong id="cb-footer-dir" style="color: var(--fg);">-</strong>
         </div>
-        <button type="button" id="cb-modal-footer-close-btn" class="btn-secondary" style="margin: 0; padding: 0.45em 1.2em; font-weight: 600; cursor: pointer;">Close</button>
+        <button type="button" id="cb-modal-footer-close-btn" class="ps-btn">Close</button>
       </div>
     </div>
   </div>

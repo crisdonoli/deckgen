@@ -4,6 +4,21 @@
 
 A web-based GUI toolkit for building custom proxy cards, assembling print-ready card sheets, and converting card images to standard-size PDFs.
 
+## Preview & Quick Workflow
+
+| 1. Build & Customize (`Card Builder`) | 2. Arrange & Print (`Deck Generator`) |
+| :---: | :---: |
+| [gui/static/images/2.png] | [gui/static/images/3.png] |
+| Search Scryfall or import `.txt`, reorder/hide frame layers, customize text & export up to 2400 DPI PDFs. | Load `fronts/`, configure paper, cut marks & MDFC backs, and generate print-ready PDFs. |
+
+<details>
+<summary>🎬 Watch full walkthrough (GIF / Video)</summary>
+
+<!-- Pega aquí la URL de video que genera GitHub al arrastrar un .mp4, o un GIF local: -->
+[gui/static/images/how-to-use.gif]
+
+</details>
+
 ---
 
 ## Requirements

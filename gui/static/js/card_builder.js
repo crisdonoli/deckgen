@@ -1,4 +1,12 @@
 (function () {
+  function deepClone(obj) {
+    return JSON.parse(JSON.stringify(obj));
+  }
+
+  const MIN_EXPORT_DPI = 500;
+  const MAX_EXPORT_DPI = 2400;
+  const DEFAULT_EXPORT_DPI = 1200;
+
   const canvas = document.getElementById("card-canvas");
   const ctx = canvas.getContext("2d");
   const overlay = document.getElementById("loading-overlay");
@@ -19,16 +27,22 @@
   const undoBtn = document.getElementById("cb-undo-btn");
   const redoBtn = document.getElementById("cb-redo-btn");
   const resetLayoutBtn = document.getElementById("cb-reset-layout-btn");
+  const toggleAllPosBtn = document.getElementById("cb-toggle-all-pos-btn");
+  const exportDpiInput = document.getElementById("cb-export-dpi");
 
   const styleSelect = document.getElementById("cb-style-select");
   const autoLayerBtn = document.getElementById("cb-autolayer-btn");
+  const artOverTopCheck = document.getElementById("cb-art-over-top");
   const layerPickersContainer = document.getElementById("cb-layer-pickers-container");
 
   const hoverPreviewBox = document.getElementById("cb-layer-hover-preview");
   const hoverPreviewImg = document.getElementById("cb-layer-hover-img");
   const hoverPreviewCaption = document.getElementById("cb-layer-hover-caption");
 
-  const colorHeaderInput = document.getElementById("cb-color-header");
+  // Independent Font Color Inputs
+  const colorTitleInput = document.getElementById("cb-color-title");
+  const colorOfficialInput = document.getElementById("cb-color-official");
+  const colorTypeInput = document.getElementById("cb-color-type");
   const colorOracleInput = document.getElementById("cb-color-oracle");
   const autoContrastBtn = document.getElementById("cb-auto-contrast-btn");
 
@@ -59,6 +73,9 @@
     titleX: document.getElementById("pos-title-x"),
     titleY: document.getElementById("pos-title-y"),
     titleSize: document.getElementById("pos-title-size"),
+    officialX: document.getElementById("pos-official-x"),
+    officialY: document.getElementById("pos-official-y"),
+    officialSize: document.getElementById("pos-official-size"),
     manaX: document.getElementById("pos-mana-x"),
     manaY: document.getElementById("pos-mana-y"),
     manaSize: document.getElementById("pos-mana-size"),
@@ -80,6 +97,7 @@
     canvas: { w: 750, h: 1050 },
     art: { x: 64, y: 136, w: 622, h: 446, scale: 1.0, offset_x: 0, offset_y: 0 },
     title: { x: 84, y: 116, max_w: 450, font_size: 28, color: "#111111" },
+    official_title: { x: 84, y: 138, max_w: 450, font_size: 16, color: "#111111" },
     mana_cost: { x: 664, y: 116, size: 25, align: "right" },
     type_line: { x: 84, y: 622, max_w: 500, font_size: 23, color: "#111111" },
     set_symbol: { x: 664, y: 614, size: 32, align: "right" },
@@ -88,6 +106,7 @@
     pt_text: { x: 624, y: 941, font_size: 29, color: "#111111" },
     artist: { x: 76, y: 990, font_size: 14, color: "#ffffff" },
   };
+
   const STATIC_FRAME_GEOMETRY = {
     titleBar: { x: 64, y: 78, w: 622, h: 58, r: 14 },
     artFrame: { x: 64, y: 136, w: 622, h: 446 },
@@ -98,13 +117,20 @@
 
   const LAYER_DEFINITIONS = [
     { key: "background", label: "Background" },
-    { key: "pinlines", label: "Pinlines & Textbox" },
-    { key: "name_box", label: "Name & Title Box" },
-    { key: "crown", label: "Legendary Crown" },
+    { key: "art", label: "Artwork", isArt: true },
+    { key: "pinlines", label: "Pinlines & Text" },
+    { key: "name_box", label: "Name & Title" },
+    { key: "crown", label: "Legend Crown" },
     { key: "border", label: "Border" },
     { key: "pt_box", label: "PT Box" },
   ];
   const DEFAULT_LAYER_ORDER = LAYER_DEFINITIONS.map((d) => d.key);
+
+  function clampExportDpi(val) {
+    const parsed = Math.round(Number(val));
+    if (!Number.isFinite(parsed)) return DEFAULT_EXPORT_DPI;
+    return Math.max(MIN_EXPORT_DPI, Math.min(MAX_EXPORT_DPI, parsed));
+  }
 
   function getCardLayerOrder(card) {
     const raw = Array.isArray(card?.layer_order) ? card.layer_order : [];
@@ -122,12 +148,53 @@
     return out;
   }
 
+  function isLayerHidden(card, key) {
+    if (!card || !card.hidden_layers) return false;
+    if (Array.isArray(card.hidden_layers)) {
+      return card.hidden_layers.includes(key);
+    }
+    return Boolean(card.hidden_layers[key]);
+  }
+
+  function setLayerHidden(card, key, hidden) {
+    if (!card) return;
+    if (!card.hidden_layers || Array.isArray(card.hidden_layers)) {
+      const prevList = Array.isArray(card.hidden_layers) ? card.hidden_layers : [];
+      card.hidden_layers = {};
+      prevList.forEach((k) => {
+        card.hidden_layers[k] = true;
+      });
+    }
+    if (hidden) {
+      card.hidden_layers[key] = true;
+    } else {
+      delete card.hidden_layers[key];
+    }
+  }
+
   function syncLayerOrderDOM(card) {
     if (!layerPickersContainer) return;
     const order = getCardLayerOrder(card);
     order.forEach((key) => {
       const el = layerPickersContainer.querySelector(`.cb-visual-picker[data-layer-key="${key}"]`);
       if (el) layerPickersContainer.appendChild(el);
+    });
+  }
+
+  function syncLayerVisibilityUI(card) {
+    if (!layerPickersContainer) return;
+    LAYER_DEFINITIONS.forEach((def) => {
+      const wrapper = layerPickersContainer.querySelector(`.cb-visual-picker[data-layer-key="${def.key}"]`);
+      if (!wrapper) return;
+      const hidden = isLayerHidden(card, def.key);
+      wrapper.classList.toggle("is-hidden-layer", hidden);
+      const visBtn = wrapper.querySelector(".cb-layer-vis-btn");
+      if (visBtn) {
+        visBtn.classList.toggle("is-hidden", hidden);
+        visBtn.textContent = hidden ? "🚫" : "👁";
+        visBtn.title = hidden ? `Show ${def.label}` : `Hide ${def.label}`;
+        visBtn.setAttribute("aria-pressed", hidden ? "true" : "false");
+      }
     });
   }
 
@@ -169,6 +236,30 @@
     statusMsg.style.color = isError ? "var(--danger)" : "var(--ok)";
   }
 
+  // --- Collapsible Positions Sections ---
+  function updateToggleAllPosButtonLabel() {
+    if (!toggleAllPosBtn) return;
+    const detailsList = Array.from(document.querySelectorAll('.ps-tab-panel[data-panel="positions"] details.ps-collapsible'));
+    const anyOpen = detailsList.some((d) => d.open);
+    toggleAllPosBtn.textContent = anyOpen ? "Collapse All" : "Expand All";
+  }
+
+  if (toggleAllPosBtn) {
+    toggleAllPosBtn.addEventListener("click", () => {
+      const detailsList = Array.from(document.querySelectorAll('.ps-tab-panel[data-panel="positions"] details.ps-collapsible'));
+      const anyOpen = detailsList.some((d) => d.open);
+      detailsList.forEach((d) => {
+        d.open = !anyOpen;
+      });
+      updateToggleAllPosButtonLabel();
+    });
+  }
+
+  document.querySelectorAll('.ps-tab-panel[data-panel="positions"] details.ps-collapsible').forEach((d) => {
+    d.addEventListener("toggle", updateToggleAllPosButtonLabel);
+  });
+  updateToggleAllPosButtonLabel();
+
   // --- Floating JPG Hover Preview ---
   function showLayerHoverPreview(item, anchorRect) {
     if (!item || !item.url) {
@@ -193,34 +284,49 @@
 
   function initLayerPickers() {
     layerPickersContainer.innerHTML = "";
+    let draggedLayerKey = null;
+
+    if (artOverTopCheck) {
+      artOverTopCheck.addEventListener("change", () => {
+        if (activeIndex < 0 || !cards[activeIndex]) return;
+        pushUndoState();
+        cards[activeIndex].art_over_top = artOverTopCheck.checked;
+        saveCardBuilderState();
+        renderCardCanvas();
+      });
+    }
+
     LAYER_DEFINITIONS.forEach((def) => {
       const wrapper = document.createElement("div");
       wrapper.className = "cb-visual-picker";
       wrapper.dataset.layerKey = def.key;
-      wrapper.innerHTML = `
-        <div class="cb-visual-picker-row">
-          <span class="cb-visual-picker-label">${def.label}</span>
-          <button type="button" class="cb-visual-picker-trigger" data-layer="${def.key}">
+      wrapper.draggable = true;
+      const pickerControlHtml = def.isArt
+        ? `<span class="cb-vp-text" style="flex:1; opacity:0.75; font-size:11px; padding:3px 6px;">Card Artwork</span>`
+        : `<button type="button" class="cb-visual-picker-trigger" data-layer="${def.key}">
             <span class="cb-vp-text">None</span>
             <span class="cb-vp-caret">▾</span>
-          </button>
-          <div style="display: flex; gap: 2px; flex-shrink: 0;">
-            <button type="button" class="ps-mini-btn cb-layer-move" data-dir="-1" title="Move back (draw earlier)">↑</button>
-            <button type="button" class="ps-mini-btn cb-layer-move" data-dir="1" title="Move forward (draw later)">↓</button>
-          </div>
+          </button>`;
+      wrapper.innerHTML = `
+        <div class="cb-visual-picker-row">
+          <span class="cb-drag-handle" title="Drag to reorder layer">⠿</span>
+          <button type="button" class="cb-layer-vis-btn" data-layer="${def.key}" title="Hide ${def.label}" aria-label="Toggle ${def.label} visibility" aria-pressed="false">👁</button>
+          <span class="cb-visual-picker-label" title="Drag to reorder">${def.label}</span>
+          ${pickerControlHtml}
         </div>
-        <div class="ps-slider-row cb-layer-opacity-row" style="margin-top: 3px; margin-bottom: 4px;">
+        <div class="ps-slider-row cb-layer-opacity-row" style="margin-top: 3px; margin-bottom: 2px;">
           <span style="font-size: 10px; opacity: 0.8;">Opacity</span>
           <input type="range" class="cb-layer-opacity" data-layer="${def.key}" min="0" max="1" step="0.05" value="1">
           <span class="ps-val cb-layer-opacity-val" style="min-width: 34px;">100%</span>
         </div>
-        <div class="cb-visual-picker-menu" hidden>
+        ${def.isArt ? "" : `<div class="cb-visual-picker-menu" hidden>
           <input type="text" class="ps-input cb-vp-search" placeholder="Filter layer...">
           <ul class="cb-vp-list"></ul>
-        </div>
+        </div>`}
       `;
       layerPickersContainer.appendChild(wrapper);
 
+      const visBtn = wrapper.querySelector(".cb-layer-vis-btn");
       const trigger = wrapper.querySelector(".cb-visual-picker-trigger");
       const textSpan = wrapper.querySelector(".cb-vp-text");
       const menu = wrapper.querySelector(".cb-visual-picker-menu");
@@ -228,29 +334,38 @@
       const listEl = wrapper.querySelector(".cb-vp-list");
       const opacitySlider = wrapper.querySelector(".cb-layer-opacity");
       const opacityVal = wrapper.querySelector(".cb-layer-opacity-val");
-      const moveBtns = wrapper.querySelectorAll(".cb-layer-move");
 
-      moveBtns.forEach((btn) => {
-        btn.addEventListener("click", (e) => {
+      if (visBtn) {
+        visBtn.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+          wrapper.draggable = false;
+        });
+        visBtn.addEventListener("pointerup", () => {
+          wrapper.draggable = true;
+        });
+        visBtn.addEventListener("click", (e) => {
           e.stopPropagation();
           if (activeIndex < 0 || !cards[activeIndex]) return;
           const card = cards[activeIndex];
-          const dir = parseInt(btn.dataset.dir, 10);
-          const order = getCardLayerOrder(card);
-          const idx = order.indexOf(def.key);
-          const swapIdx = idx + dir;
-          if (idx < 0 || swapIdx < 0 || swapIdx >= order.length) return;
           pushUndoState();
-          const tmp = order[idx];
-          order[idx] = order[swapIdx];
-          order[swapIdx] = tmp;
-          card.layer_order = order;
-          syncLayerOrderDOM(card);
+          const nextHidden = !isLayerHidden(card, def.key);
+          setLayerHidden(card, def.key, nextHidden);
+          syncLayerVisibilityUI(card);
+          saveCardBuilderState();
           renderCardCanvas();
         });
-      });
+      }
 
       if (opacitySlider) {
+        opacitySlider.addEventListener("pointerdown", () => {
+          wrapper.draggable = false;
+        });
+        opacitySlider.addEventListener("pointerup", () => {
+          wrapper.draggable = true;
+        });
+        opacitySlider.addEventListener("pointercancel", () => {
+          wrapper.draggable = true;
+        });
         opacitySlider.addEventListener("focus", () => pushUndoState());
         opacitySlider.addEventListener("input", () => {
           if (activeIndex < 0 || !cards[activeIndex]) return;
@@ -262,6 +377,71 @@
           renderCardCanvas();
         });
       }
+
+      wrapper.addEventListener("dragstart", (e) => {
+        if (e.target && e.target.closest("input, button, .cb-visual-picker-menu")) {
+          e.preventDefault();
+          return;
+        }
+        draggedLayerKey = def.key;
+        wrapper.classList.add("cb-layer-dragging");
+        hideLayerHoverPreview();
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", def.key);
+        }
+      });
+
+      wrapper.addEventListener("dragover", (e) => {
+        if (!draggedLayerKey || draggedLayerKey === def.key) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+        const rect = wrapper.getBoundingClientRect();
+        const insertAfter = e.clientY - rect.top > rect.height / 2;
+        wrapper.classList.toggle("cb-layer-drag-over-top", !insertAfter);
+        wrapper.classList.toggle("cb-layer-drag-over-bottom", insertAfter);
+      });
+
+      wrapper.addEventListener("dragleave", () => {
+        wrapper.classList.remove("cb-layer-drag-over", "cb-layer-drag-over-top", "cb-layer-drag-over-bottom");
+      });
+
+      wrapper.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const rect = wrapper.getBoundingClientRect();
+        const insertAfter = e.clientY - rect.top > rect.height / 2;
+        wrapper.classList.remove("cb-layer-drag-over", "cb-layer-drag-over-top", "cb-layer-drag-over-bottom");
+        if (!draggedLayerKey || draggedLayerKey === def.key) return;
+        if (activeIndex < 0 || !cards[activeIndex]) return;
+        const card = cards[activeIndex];
+        const order = getCardLayerOrder(card);
+        const fromIdx = order.indexOf(draggedLayerKey);
+        if (fromIdx < 0) return;
+        pushUndoState();
+        order.splice(fromIdx, 1);
+        const targetIdx = order.indexOf(def.key);
+        if (targetIdx < 0) return;
+        order.splice(insertAfter ? targetIdx + 1 : targetIdx, 0, draggedLayerKey);
+        card.layer_order = order;
+        syncLayerOrderDOM(card);
+        saveCardBuilderState();
+        renderCardCanvas();
+      });
+
+      wrapper.addEventListener("dragend", () => {
+        draggedLayerKey = null;
+        wrapper.draggable = true;
+        layerPickersContainer.querySelectorAll(".cb-visual-picker").forEach((el) => {
+          el.classList.remove(
+            "cb-layer-dragging",
+            "cb-layer-drag-over",
+            "cb-layer-drag-over-top",
+            "cb-layer-drag-over-bottom"
+          );
+        });
+      });
+
+      if (def.isArt) return;
 
       let currentItems = [];
       let currentValue = "";
@@ -309,6 +489,13 @@
         trigger.title = found ? found.rel_path : "None";
       }
 
+      trigger.addEventListener("pointerdown", () => {
+        wrapper.draggable = false;
+      });
+      trigger.addEventListener("pointerup", () => {
+        wrapper.draggable = true;
+      });
+
       trigger.addEventListener("click", (e) => {
         e.stopPropagation();
         const wasHidden = menu.hidden;
@@ -353,6 +540,7 @@
       cards[activeIndex].frame_components = { style: styleSelect.value };
     }
     cards[activeIndex].frame_components[layerKey] = relPath;
+    saveCardBuilderState();
     renderCardCanvas();
   }
 
@@ -365,28 +553,33 @@
   }
 
   function cloneCardState(card) {
-    return JSON.parse(
-      JSON.stringify({
-        name: card.name,
-        mana_cost: card.mana_cost,
-        type_line: card.type_line,
-        set: card.set,
-        rarity: card.rarity,
-        oracle_text: card.oracle_text,
-        flavor_text: card.flavor_text,
-        power: card.power,
-        toughness: card.toughness,
-        artist: card.artist,
-        art_crop_url: card.art_crop_url,
-        frame_components: card.frame_components,
-        layout: card.layout,
-        custom_layout: Boolean(card.custom_layout),
-      })
-    );
+    return deepClone({
+      name: card.name,
+      official_name: card.official_name || "",
+      mana_cost: card.mana_cost,
+      type_line: card.type_line,
+      set: card.set,
+      rarity: card.rarity,
+      oracle_text: card.oracle_text,
+      flavor_text: card.flavor_text,
+      power: card.power,
+      toughness: card.toughness,
+      artist: card.artist,
+      art_crop_url: card.art_crop_url,
+      custom_art_data: card.custom_art_data || null,
+      art_over_top: Boolean(card.art_over_top),
+      frame_opacity: card.frame_opacity !== undefined ? card.frame_opacity : 1.0,
+      layer_opacities: card.layer_opacities || {},
+      layer_order: getCardLayerOrder(card),
+      hidden_layers: card.hidden_layers || {},
+      frame_components: card.frame_components,
+      layout: card.layout,
+      custom_layout: Boolean(card.custom_layout),
+    });
   }
 
   function applyCardSnapshot(card, snap) {
-    Object.assign(card, JSON.parse(JSON.stringify(snap)));
+    Object.assign(card, deepClone(snap));
   }
 
   function pushUndoState(customSnapshot = null) {
@@ -724,6 +917,9 @@
   }
 
   function populatePositionInputsFromLayout(L) {
+    if (!L.official_title) {
+      L.official_title = { ...DEFAULT_LAYOUT.official_title };
+    }
     artScaleInput.value = L.art.scale ?? 1.0;
     artOxInput.value = Math.round(L.art.offset_x ?? 0);
     artOyInput.value = Math.round(L.art.offset_y ?? 0);
@@ -738,6 +934,10 @@
     posInputs.titleX.value = Math.round(L.title.x);
     posInputs.titleY.value = Math.round(L.title.y);
     posInputs.titleSize.value = Math.round(L.title.font_size);
+    const ot = L.official_title;
+    if (posInputs.officialX) posInputs.officialX.value = Math.round(ot.x);
+    if (posInputs.officialY) posInputs.officialY.value = Math.round(ot.y);
+    if (posInputs.officialSize) posInputs.officialSize.value = Math.round(ot.font_size);
     posInputs.manaX.value = Math.round(L.mana_cost.x);
     posInputs.manaY.value = Math.round(L.mana_cost.y);
     posInputs.manaSize.value = Math.round(L.mana_cost.size);
@@ -753,7 +953,9 @@
     posInputs.ptY.value = Math.round(L.pt_text.y);
     posInputs.ptSize.value = Math.round(L.pt_text.font_size);
 
-    if (colorHeaderInput) colorHeaderInput.value = L.title.color || "#111111";
+    if (colorTitleInput) colorTitleInput.value = L.title.color || "#111111";
+    if (colorOfficialInput) colorOfficialInput.value = ot.color || "#111111";
+    if (colorTypeInput) colorTypeInput.value = L.type_line.color || "#111111";
     if (colorOracleInput) colorOracleInput.value = L.oracle_box.color || "#111111";
   }
 
@@ -783,6 +985,7 @@
     document.getElementById("cb-editor-title").textContent = card.name;
     fieldName.value = card.name || "";
     if (fieldOfficialName) fieldOfficialName.value = card.official_name || "";
+    if (artOverTopCheck) artOverTopCheck.checked = Boolean(card.art_over_top);
     const fOp = card.frame_opacity !== undefined ? Number(card.frame_opacity) : 1.0;
     if (frameOpacityInput) {
       frameOpacityInput.value = Number.isFinite(fOp) ? fOp : 1.0;
@@ -791,6 +994,7 @@
     }
     syncLayerOpacitySliders(card);
     syncLayerOrderDOM(card);
+    syncLayerVisibilityUI(card);
     fieldMana.value = card.mana_cost || "";
     fieldType.value = card.type_line || "";
     fieldSet.value = card.set || "";
@@ -813,15 +1017,19 @@
   }
 
   function normalizeCardLayout(card, forceReset = false) {
-    const base = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
+    const base = deepClone(DEFAULT_LAYOUT);
     if (!card.layout || forceReset || !card.custom_layout) {
-      const prevHeaderColor = card.layout?.title?.color || base.title.color;
+      const prevTitleColor = card.layout?.title?.color || base.title.color;
+      const prevOfficialColor = card.layout?.official_title?.color || base.official_title.color;
+      const prevTypeColor = card.layout?.type_line?.color || base.type_line.color;
       const prevOracleColor = card.layout?.oracle_box?.color || base.oracle_box.color;
+      const prevPtColor = card.layout?.pt_text?.color || prevOracleColor;
       card.layout = base;
-      card.layout.title.color = prevHeaderColor;
-      card.layout.type_line.color = prevHeaderColor;
-      card.layout.pt_text.color = prevHeaderColor;
+      card.layout.title.color = prevTitleColor;
+      card.layout.official_title.color = prevOfficialColor;
+      card.layout.type_line.color = prevTypeColor;
       card.layout.oracle_box.color = prevOracleColor;
+      card.layout.pt_text.color = prevPtColor;
     } else {
       for (const section of Object.keys(base)) {
         if (!card.layout[section] || typeof card.layout[section] !== "object") {
@@ -875,26 +1083,42 @@
     });
   }
 
-  // --- Font Color & Auto-Contrast ---
-  function applyFontColor(group, hexColor) {
+  // --- Independent Font Colors & Auto-Contrast ---
+  function applyFontColor(target, hexColor) {
     if (activeIndex < 0 || !cards[activeIndex]) return;
     pushUndoState();
     const L = cards[activeIndex].layout;
-    if (group === "header") {
+    if (!L.official_title) L.official_title = { ...DEFAULT_LAYOUT.official_title };
+
+    if (target === "title") {
       L.title.color = hexColor;
+      if (colorTitleInput) colorTitleInput.value = hexColor;
+    } else if (target === "official_title") {
+      L.official_title.color = hexColor;
+      if (colorOfficialInput) colorOfficialInput.value = hexColor;
+    } else if (target === "type_line") {
       L.type_line.color = hexColor;
-      L.pt_text.color = hexColor;
-      if (colorHeaderInput) colorHeaderInput.value = hexColor;
-    } else if (group === "oracle") {
+      if (colorTypeInput) colorTypeInput.value = hexColor;
+    } else if (target === "oracle") {
       L.oracle_box.color = hexColor;
+      L.pt_text.color = hexColor;
       if (colorOracleInput) colorOracleInput.value = hexColor;
     }
+    saveCardBuilderState();
     renderCardCanvas();
   }
 
-  if (colorHeaderInput) {
-    colorHeaderInput.addEventListener("focus", () => pushUndoState());
-    colorHeaderInput.addEventListener("input", () => applyFontColor("header", colorHeaderInput.value));
+  if (colorTitleInput) {
+    colorTitleInput.addEventListener("focus", () => pushUndoState());
+    colorTitleInput.addEventListener("input", () => applyFontColor("title", colorTitleInput.value));
+  }
+  if (colorOfficialInput) {
+    colorOfficialInput.addEventListener("focus", () => pushUndoState());
+    colorOfficialInput.addEventListener("input", () => applyFontColor("official_title", colorOfficialInput.value));
+  }
+  if (colorTypeInput) {
+    colorTypeInput.addEventListener("focus", () => pushUndoState());
+    colorTypeInput.addEventListener("input", () => applyFontColor("type_line", colorTypeInput.value));
   }
   if (colorOracleInput) {
     colorOracleInput.addEventListener("focus", () => pushUndoState());
@@ -912,6 +1136,7 @@
       if (activeIndex < 0 || !cards[activeIndex]) return;
       await renderCardCanvas(true);
       const L = cards[activeIndex].layout;
+      if (!L.official_title) L.official_title = { ...DEFAULT_LAYOUT.official_title };
 
       function sampleRegionBrightness(x, y, w, h) {
         const sx = Math.max(0, Math.min(740, Math.round(x)));
@@ -929,19 +1154,28 @@
         return count ? lumSum / count : 128;
       }
 
-      const headerLum = sampleRegionBrightness(L.title.x, L.title.y - 24, 320, 32);
+      const titleLum = sampleRegionBrightness(L.title.x, L.title.y - 24, 320, 30);
+      const officialLum = sampleRegionBrightness(L.official_title.x, L.official_title.y - 16, 320, 22);
+      const typeLum = sampleRegionBrightness(L.type_line.x, L.type_line.y - 22, 320, 28);
       const oracleLum = sampleRegionBrightness(L.oracle_box.x, L.oracle_box.y, L.oracle_box.w, L.oracle_box.h);
 
       pushUndoState();
-      const headerColor = headerLum < 120 ? "#ffffff" : "#111111";
+      const titleColor = titleLum < 120 ? "#ffffff" : "#111111";
+      const officialColor = officialLum < 120 ? "#ffffff" : "#111111";
+      const typeColor = typeLum < 120 ? "#ffffff" : "#111111";
       const oracleColor = oracleLum < 120 ? "#ffffff" : "#111111";
-      L.title.color = headerColor;
-      L.type_line.color = headerColor;
-      L.pt_text.color = headerColor;
-      L.oracle_box.color = oracleColor;
 
-      if (colorHeaderInput) colorHeaderInput.value = headerColor;
+      L.title.color = titleColor;
+      L.official_title.color = officialColor;
+      L.type_line.color = typeColor;
+      L.oracle_box.color = oracleColor;
+      L.pt_text.color = oracleColor;
+
+      if (colorTitleInput) colorTitleInput.value = titleColor;
+      if (colorOfficialInput) colorOfficialInput.value = officialColor;
+      if (colorTypeInput) colorTypeInput.value = typeColor;
       if (colorOracleInput) colorOracleInput.value = oracleColor;
+      saveCardBuilderState();
       renderCardCanvas(false);
     });
   }
@@ -974,6 +1208,19 @@
       h: L.title.font_size * 1.15,
       resizable: true,
     });
+
+    if ((card.official_name || "").trim()) {
+      const ot = L.official_title || DEFAULT_LAYOUT.official_title;
+      regions.push({
+        key: "official_title",
+        label: "Official Title",
+        x: ot.x,
+        y: ot.y - ot.font_size * 0.9,
+        w: ot.max_w || 450,
+        h: ot.font_size * 1.15,
+        resizable: true,
+      });
+    }
 
     const setSize = L.set_symbol.size || 30;
     const setY = L.set_symbol.y ?? L.type_line.y;
@@ -1126,34 +1373,40 @@
     ctx.fillStyle = "#111111";
     ctx.fillRect(0, 0, 750, 1050);
 
-    ctx.fillStyle = primaryHex;
-    ctx.beginPath();
-    ctx.roundRect(38, 38, 674, 950, 24);
-    ctx.fill();
+    if (!isLayerHidden(card, "background")) {
+      ctx.fillStyle = primaryHex;
+      ctx.beginPath();
+      ctx.roundRect(38, 38, 674, 950, 24);
+      ctx.fill();
+    }
 
     ctx.fillStyle = "#f3f1ea";
     ctx.strokeStyle = accentHex;
     ctx.lineWidth = 4;
 
-    const tb = STATIC_FRAME_GEOMETRY.titleBar;
-    ctx.beginPath();
-    ctx.roundRect(tb.x, tb.y, tb.w, tb.h, tb.r);
-    ctx.fill();
-    ctx.stroke();
+    if (!isLayerHidden(card, "name_box")) {
+      const tb = STATIC_FRAME_GEOMETRY.titleBar;
+      ctx.beginPath();
+      ctx.roundRect(tb.x, tb.y, tb.w, tb.h, tb.r);
+      ctx.fill();
+      ctx.stroke();
+    }
 
-    const af = STATIC_FRAME_GEOMETRY.artFrame;
-    ctx.strokeRect(af.x, af.y, af.w, af.h);
+    if (!isLayerHidden(card, "pinlines")) {
+      const af = STATIC_FRAME_GEOMETRY.artFrame;
+      ctx.strokeRect(af.x, af.y, af.w, af.h);
 
-    const tyb = STATIC_FRAME_GEOMETRY.typeBar;
-    ctx.beginPath();
-    ctx.roundRect(tyb.x, tyb.y, tyb.w, tyb.h, tyb.r);
-    ctx.fill();
-    ctx.stroke();
+      const tyb = STATIC_FRAME_GEOMETRY.typeBar;
+      ctx.beginPath();
+      ctx.roundRect(tyb.x, tyb.y, tyb.w, tyb.h, tyb.r);
+      ctx.fill();
+      ctx.stroke();
 
-    const ofr = STATIC_FRAME_GEOMETRY.oracleFrame;
-    ctx.fillStyle = "#f7f5f0";
-    ctx.fillRect(ofr.x, ofr.y, ofr.w, ofr.h);
-    ctx.strokeRect(ofr.x, ofr.y, ofr.w, ofr.h);
+      const ofr = STATIC_FRAME_GEOMETRY.oracleFrame;
+      ctx.fillStyle = "#f7f5f0";
+      ctx.fillRect(ofr.x, ofr.y, ofr.w, ofr.h);
+      ctx.strokeRect(ofr.x, ofr.y, ofr.w, ofr.h);
+    }
     ctx.restore();
   }
 
@@ -1421,9 +1674,12 @@
 
   function drawAllTextsAndIcons(targetCtx, card) {
     const L = card.layout;
-    const titleColor = L.title.color || "#111111";
-    const typeColor = L.type_line.color || titleColor;
-    const ptColor = L.pt_text.color || titleColor;
+    const titleColor = L.title?.color || "#111111";
+    const ot = L.official_title || DEFAULT_LAYOUT.official_title;
+    const otColor = ot.color || "#111111";
+    const typeColor = L.type_line?.color || "#111111";
+    const oracleColor = L.oracle_box?.color || "#111111";
+    const ptColor = L.pt_text?.color || oracleColor;
 
     targetCtx.save();
     targetCtx.fillStyle = titleColor;
@@ -1432,13 +1688,19 @@
     targetCtx.textAlign = "left";
     targetCtx.textBaseline = "alphabetic";
     targetCtx.fillText(card.name || "", L.title.x, L.title.y, L.title.max_w || 470);
+    targetCtx.restore();
+
     const officialTitle = (card.official_name || "").trim();
     if (officialTitle) {
-      const subSize = Math.max(12, Math.round(L.title.font_size * 0.56));
-      targetCtx.font = `italic ${subSize}px "BelerenLocal", "MPlantinLocal", Georgia, serif`;
-      targetCtx.fillText(`(${officialTitle})`, L.title.x, L.title.y + Math.round(L.title.font_size * 0.78), L.title.max_w || 470);
+      targetCtx.save();
+      targetCtx.fillStyle = otColor;
+      applyTextShadowIfLight(targetCtx, otColor);
+      targetCtx.font = `italic ${ot.font_size}px "BelerenLocal", "MPlantinLocal", Georgia, serif`;
+      targetCtx.textAlign = "left";
+      targetCtx.textBaseline = "alphabetic";
+      targetCtx.fillText(`(${officialTitle})`, ot.x, ot.y, ot.max_w || 450);
+      targetCtx.restore();
     }
-    targetCtx.restore();
 
     drawManaCost(targetCtx, card.mana_cost || "", L.mana_cost.x, L.mana_cost.y, L.mana_cost.size);
 
@@ -1476,25 +1738,45 @@
     targetCtx.restore();
   }
 
-  function renderTextOnlyDataUrl(card) {
-    const off = document.createElement("canvas");
-    off.width = 750;
-    off.height = 1050;
-    const octx = off.getContext("2d");
-    drawAllTextsAndIcons(octx, card);
-    return off.toDataURL("image/png");
+  function renderTextOnlyDataUrl(card, requestedScale = 4) {
+    let scale = Math.max(1.5, Math.min(8.0, Number(requestedScale) || 4));
+    while (scale >= 1.5) {
+      const off = document.createElement("canvas");
+      try {
+        off.width = Math.round(750 * scale);
+        off.height = Math.round(1050 * scale);
+        const octx = off.getContext("2d");
+        if (!octx) throw new Error("Canvas context unavailable");
+        octx.scale(scale, scale);
+        drawAllTextsAndIcons(octx, card);
+        const dataUrl = off.toDataURL("image/png");
+        off.width = 0;
+        off.height = 0;
+        return dataUrl;
+      } catch (e) {
+        off.width = 0;
+        off.height = 0;
+        scale -= 1.0;
+      }
+    }
+    return "";
   }
 
-  async function renderArtOnlyDataUrl(card) {
+  async function renderArtOnlyDataUrl(card, requestedScale = 4) {
+    if (isLayerHidden(card, "art")) return "";
     const L = card.layout;
     const artSrc = card.custom_art_data || card.art_crop_url;
     const artImg = await loadImage(artSrc);
     if (!artImg) return "";
 
+    // Cap client-side art buffer to 4x (3000x4200) to avoid browser RAM exhaustion;
+    // Python backend resizes to exact target DPI with Lanczos.
+    const exportScale = Math.max(1.5, Math.min(4.0, Number(requestedScale) || 4));
     const off = document.createElement("canvas");
-    off.width = 750;
-    off.height = 1050;
+    off.width = Math.round(750 * exportScale);
+    off.height = Math.round(1050 * exportScale);
     const octx = off.getContext("2d");
+    octx.scale(exportScale, exportScale);
 
     octx.save();
     octx.beginPath();
@@ -1509,7 +1791,10 @@
     octx.drawImage(artImg, dx, dy, drawW, drawH);
     octx.restore();
 
-    return off.toDataURL("image/png");
+    const dataUrl = off.toDataURL("image/png");
+    off.width = 0;
+    off.height = 0;
+    return dataUrl;
   }
 
   async function renderCardCanvas(skipOverlays = false) {
@@ -1534,7 +1819,7 @@
     const artImg = await loadImage(artSrc);
 
     const drawArtLayer = () => {
-      if (!artImg) return;
+      if (!artImg || isLayerHidden(card, "art")) return;
       ctx.save();
       ctx.beginPath();
       ctx.rect(L.art.x, L.art.y, L.art.w, L.art.h);
@@ -1559,51 +1844,67 @@
       ctx.fillStyle = "#111111";
       ctx.fillRect(0, 0, 750, 1050);
 
-      const bgOp = getLayerOpacity(card, "background");
-      const order = getCardLayerOrder(card);
-      let artDrawn = false;
-
-      const drawBg = async () => {
-        if (fc.background && bgOp > 0.001) {
-          const bgImg = await loadImage(relPathToAssetUrl(fc.background));
-          if (bgImg) {
-            ctx.save();
-            ctx.globalAlpha = bgOp;
-            ctx.drawImage(bgImg, 0, 0, 750, 1050);
-            ctx.restore();
-          }
+      const drawCompLayer = async (compKey, clipYRange = null) => {
+        if (isLayerHidden(card, compKey)) return;
+        const compOp = getLayerOpacity(card, compKey);
+        if (compOp <= 0.001) return;
+        let imgSource = null;
+        if (compKey === "background") {
+          if (fc.background) imgSource = await loadImage(relPathToAssetUrl(fc.background));
+        } else if (fc[compKey]) {
+          imgSource = await loadTransparentLayerJpg(fc[compKey]);
         }
+        if (!imgSource) return;
+        ctx.save();
+        if (clipYRange) {
+          ctx.beginPath();
+          ctx.rect(0, clipYRange[0], 750, clipYRange[1] - clipYRange[0]);
+          ctx.clip();
+        }
+        ctx.globalAlpha = compOp;
+        ctx.drawImage(imgSource, 0, 0, 750, 1050);
+        ctx.restore();
       };
 
-      for (const compKey of order) {
-        if (compKey === "background") {
-          if (bgOp < 0.999) {
-            if (!artDrawn) {
-              drawArtLayer();
-              artDrawn = true;
-            }
-            await drawBg();
+      const order = getCardLayerOrder(card);
+      if (card.art_over_top) {
+        const splitY = 583;
+        for (const compKey of order) {
+          if (compKey === "art" || compKey === "pt_box") continue;
+          if (compKey === "pinlines" || compKey === "border") {
+            await drawCompLayer(compKey, [0, splitY]);
           } else {
-            await drawBg();
-            if (!artDrawn) {
-              drawArtLayer();
-              artDrawn = true;
-            }
+            await drawCompLayer(compKey);
           }
-          continue;
         }
-        const compOp = getLayerOpacity(card, compKey);
-        if (fc[compKey] && compOp > 0.001) {
-          const layerCanvas = await loadTransparentLayerJpg(fc[compKey]);
-          if (layerCanvas) {
+        const artOp = getLayerOpacity(card, "art");
+        if (artOp > 0.001 && !isLayerHidden(card, "art")) {
+          ctx.save();
+          ctx.globalAlpha = artOp;
+          drawArtLayer();
+          ctx.restore();
+        }
+        for (const compKey of order) {
+          if (compKey === "pinlines" || compKey === "border") {
+            await drawCompLayer(compKey, [splitY, 1050]);
+          } else if (compKey === "pt_box") {
+            await drawCompLayer(compKey);
+          }
+        }
+      } else {
+        for (const compKey of order) {
+          if (compKey === "art") {
+            const artOp = getLayerOpacity(card, "art");
+            if (artOp <= 0.001 || isLayerHidden(card, "art")) continue;
             ctx.save();
-            ctx.globalAlpha = compOp;
-            ctx.drawImage(layerCanvas, 0, 0, 750, 1050);
+            ctx.globalAlpha = artOp;
+            drawArtLayer();
             ctx.restore();
+          } else {
+            await drawCompLayer(compKey);
           }
         }
       }
-      if (!artDrawn) drawArtLayer();
     } else {
       if (frameOpacity < 1.0) {
         drawArtLayer();
@@ -1615,7 +1916,12 @@
         drawProceduralFrame(card);
         drawArtLayer();
       }
-      if (card.power !== null && card.power !== undefined && String(card.power).trim() !== "") {
+      if (
+        !isLayerHidden(card, "pt_box") &&
+        card.power !== null &&
+        card.power !== undefined &&
+        String(card.power).trim() !== ""
+      ) {
         const ptf = L.pt_box || STATIC_FRAME_GEOMETRY.ptFrame;
         ctx.save();
         ctx.fillStyle = "#f3f1ea";
@@ -1647,6 +1953,7 @@
     } else {
       autoPickClientLayers(card, st);
     }
+    saveCardBuilderState();
     renderCardCanvas();
   });
 
@@ -1657,6 +1964,7 @@
       const st = styleSelect.value || "Automated Templates/normal";
       styleSelect.value = st;
       autoPickClientLayers(cards[activeIndex], st);
+      saveCardBuilderState();
       renderCardCanvas();
     });
   }
@@ -1705,7 +2013,7 @@
 
     selectedElementKey = hit.key;
     const preDragSnapshot = cloneCardState(card);
-    const clonedLayout = JSON.parse(JSON.stringify(card.layout));
+    const clonedLayout = deepClone(card.layout);
 
     if (hit.type === "handle") {
       dragState = {
@@ -1781,6 +2089,11 @@
       } else if (k === "title") {
         L.title.x = init.title.x + dx;
         L.title.y = init.title.y + dy;
+      } else if (k === "official_title") {
+        if (!L.official_title) L.official_title = { ...DEFAULT_LAYOUT.official_title };
+        const otInit = init.official_title || DEFAULT_LAYOUT.official_title;
+        L.official_title.x = otInit.x + dx;
+        L.official_title.y = otInit.y + dy;
       } else if (k === "mana_cost") {
         L.mana_cost.x = init.mana_cost.x + dx;
         L.mana_cost.y = init.mana_cost.y + dy;
@@ -1830,8 +2143,11 @@
         targetCur.y = ny;
         targetCur.w = nw;
         targetCur.h = nh;
-      } else if (k === "title" || k === "type_line") {
-        const tInit = init[k];
+      } else if (k === "title" || k === "type_line" || k === "official_title") {
+        if (k === "official_title" && !L.official_title) {
+          L.official_title = { ...DEFAULT_LAYOUT.official_title };
+        }
+        const tInit = init[k] || DEFAULT_LAYOUT[k];
         const tCur = L[k];
         if (h.includes("e")) tCur.max_w = Math.max(100, (tInit.max_w || 470) + dx);
         if (h.includes("w")) {
@@ -1840,7 +2156,7 @@
         }
         if (h.includes("s") || h.includes("n")) {
           const deltaFont = h.includes("s") ? dy : -dy;
-          tCur.font_size = Math.max(12, Math.min(72, tInit.font_size + deltaFont * 0.5));
+          tCur.font_size = Math.max(10, Math.min(72, tInit.font_size + deltaFont * 0.5));
         }
       } else if (k === "mana_cost") {
         const delta = h.includes("s") || h.includes("e") ? dy + dx * 0.3 : -(dy + dx * 0.3);
@@ -1865,6 +2181,7 @@
     if (dragState) {
       if (dragState.changed) {
         pushUndoState(dragState.preDragSnapshot);
+        saveCardBuilderState();
       }
       dragState = null;
       renderCardCanvas();
@@ -1893,6 +2210,9 @@
         L.oracle_box.font_size = Math.max(12, Math.min(48, L.oracle_box.font_size + dir));
       } else if (hit.key === "title") {
         L.title.font_size = Math.max(14, Math.min(72, L.title.font_size + dir));
+      } else if (hit.key === "official_title") {
+        if (!L.official_title) L.official_title = { ...DEFAULT_LAYOUT.official_title };
+        L.official_title.font_size = Math.max(10, Math.min(64, L.official_title.font_size + dir));
       } else if (hit.key === "type_line") {
         L.type_line.font_size = Math.max(12, Math.min(54, L.type_line.font_size + dir));
       } else if (hit.key === "mana_cost") {
@@ -1904,6 +2224,7 @@
       }
 
       populatePositionInputsFromLayout(L);
+      saveCardBuilderState();
       renderCardCanvas();
     },
     { passive: false }
@@ -1920,6 +2241,7 @@
       cards[activeIndex].custom_layout = false;
       normalizeCardLayout(cards[activeIndex], true);
       populatePositionInputsFromLayout(cards[activeIndex].layout);
+      saveCardBuilderState();
       renderCardCanvas();
     });
   }
@@ -1939,7 +2261,7 @@
           card.layer_opacities[def.key] = nextOp;
         });
         syncLayerOpacitySliders(card);
-    syncLayerOrderDOM(card);
+        syncLayerOrderDOM(card);
       }
       const valEl = document.getElementById("val-frame-opacity");
       if (valEl) valEl.textContent = Math.round(nextOp * 100) + "%";
@@ -1971,6 +2293,10 @@
     L.title.x = parseInt(posInputs.titleX.value, 10) || DEFAULT_LAYOUT.title.x;
     L.title.y = parseInt(posInputs.titleY.value, 10) || DEFAULT_LAYOUT.title.y;
     L.title.font_size = parseInt(posInputs.titleSize.value, 10) || DEFAULT_LAYOUT.title.font_size;
+    if (!L.official_title) L.official_title = { ...DEFAULT_LAYOUT.official_title };
+    if (posInputs.officialX) L.official_title.x = parseInt(posInputs.officialX.value, 10) || DEFAULT_LAYOUT.official_title.x;
+    if (posInputs.officialY) L.official_title.y = parseInt(posInputs.officialY.value, 10) || DEFAULT_LAYOUT.official_title.y;
+    if (posInputs.officialSize) L.official_title.font_size = parseInt(posInputs.officialSize.value, 10) || DEFAULT_LAYOUT.official_title.font_size;
     L.mana_cost.x = parseInt(posInputs.manaX.value, 10) || DEFAULT_LAYOUT.mana_cost.x;
     L.mana_cost.y = parseInt(posInputs.manaY.value, 10) || DEFAULT_LAYOUT.mana_cost.y;
     L.mana_cost.size = parseInt(posInputs.manaSize.value, 10) || DEFAULT_LAYOUT.mana_cost.size;
@@ -2001,12 +2327,20 @@
     el.addEventListener("input", syncEditorToCard);
   });
 
+  if (exportDpiInput) {
+    exportDpiInput.addEventListener("change", () => {
+      exportDpiInput.value = clampExportDpi(exportDpiInput.value);
+      saveCardBuilderState();
+    });
+  }
+
   artFileInput.addEventListener("change", function () {
     if (!this.files || !this.files[0] || activeIndex < 0) return;
     pushUndoState();
     const reader = new FileReader();
     reader.onload = (e) => {
       cards[activeIndex].custom_art_data = e.target.result;
+      saveCardBuilderState();
       renderCardCanvas();
     };
     reader.readAsDataURL(this.files[0]);
@@ -2142,11 +2476,17 @@
   document.getElementById("cb-export-pdf-btn").addEventListener("click", async () => {
     if (activeIndex < 0) return;
     const card = cards[activeIndex];
-    setLoading(true, "Compositing high-res PDF from .pdf layer assets...");
+    const exportDpi = clampExportDpi(exportDpiInput ? exportDpiInput.value : DEFAULT_EXPORT_DPI);
+    if (exportDpiInput) exportDpiInput.value = exportDpi;
+    const exportScale = exportDpi / 300.0;
+    const exportW = Math.round(750 * exportScale);
+    const exportH = Math.round(1050 * exportScale);
+
+    setLoading(true, `Compositing ${exportDpi} DPI PDF (${exportW}×${exportH} px) from .pdf layer assets...`);
     await renderCardCanvas(true);
     const fullDataUrl = canvas.toDataURL("image/png");
-    const artOverlayDataUrl = await renderArtOnlyDataUrl(card);
-    const textOverlayDataUrl = renderTextOnlyDataUrl(card);
+    const artOverlayDataUrl = await renderArtOnlyDataUrl(card, exportScale);
+    const textOverlayDataUrl = renderTextOnlyDataUrl(card, exportScale);
     renderCardCanvas(false);
 
     try {
@@ -2157,6 +2497,7 @@
           card,
           card_name: card.name,
           target_dir: targetDirInput.value.trim(),
+          export_dpi: exportDpi,
           art_overlay_data_url: artOverlayDataUrl,
           text_overlay_data_url: textOverlayDataUrl,
           image_data_url: fullDataUrl,
@@ -2167,7 +2508,8 @@
         showStatus(data.error, true);
       } else {
         const countPdf = (data.pdf_components_used || []).length;
-        showStatus(`Exported PDF: ${data.pdf_path} (${countPdf} .pdf layers)`, false);
+        const usedDpi = data.dpi || exportDpi;
+        showStatus(`Exported ${usedDpi} DPI PDF: ${data.pdf_path} (${countPdf} .pdf layers)`, false);
       }
     } catch (err) {
       showStatus("PDF export error: " + err.message, true);
@@ -2235,14 +2577,12 @@
     const sw = cropRect.w * cropScale;
     const sh = cropRect.h * cropScale;
 
-    // Dim exterior
     cropCtx.fillStyle = "rgba(0, 0, 0, 0.62)";
     cropCtx.beginPath();
     cropCtx.rect(0, 0, cw, ch);
     cropCtx.rect(sx, sy, sw, sh);
     cropCtx.fill("evenodd");
 
-    // Rule-of-thirds grid
     cropCtx.strokeStyle = "rgba(255, 255, 255, 0.25)";
     cropCtx.lineWidth = 1;
     cropCtx.beginPath();
@@ -2254,12 +2594,10 @@
     }
     cropCtx.stroke();
 
-    // Crop border
     cropCtx.strokeStyle = "#38bdf8";
     cropCtx.lineWidth = 2;
     cropCtx.strokeRect(sx, sy, sw, sh);
 
-    // Corner & edge handles
     const hs = 10;
     cropCtx.fillStyle = "#38bdf8";
     const handles = [
@@ -2539,6 +2877,8 @@
       );
       try {
         const dataUrl = off.toDataURL("image/png");
+        off.width = 0;
+        off.height = 0;
         pushUndoState();
         card.custom_art_data = dataUrl;
         if (!card.layout) card.layout = deepClone(DEFAULT_LAYOUT);
@@ -2547,10 +2887,13 @@
         card.layout.art.offset_x = 0;
         card.layout.art.offset_y = 0;
         refreshInputsFromActiveCard();
+        saveCardBuilderState();
         renderCardCanvas();
         closeCropModal();
         showStatus("Artwork cropped to Art Box.");
       } catch (err) {
+        off.width = 0;
+        off.height = 0;
         showStatus("Could not export cropped image (CORS restriction).", true);
       }
     });
@@ -2690,6 +3033,7 @@
   function getCardBuilderStateObject() {
     return {
       target_dir: targetDirInput ? targetDirInput.value.trim() : "",
+      export_dpi: clampExportDpi(exportDpiInput ? exportDpiInput.value : DEFAULT_EXPORT_DPI),
       active_index: activeIndex,
       cards: Array.isArray(cards) ? cards : [],
     };
@@ -2700,7 +3044,6 @@
     try {
       localStorage.setItem(CB_STATE_KEY, JSON.stringify(state));
     } catch (e) {
-      // Fallback: strip heavy base64 custom_art_data if localStorage quota is exceeded
       try {
         const lightCards = (state.cards || []).map((c, idx) => {
           if (idx === state.active_index || !c || !c.custom_art_data) return c;
@@ -2728,10 +3071,14 @@
     if (targetDirInput && typeof state.target_dir === "string") {
       targetDirInput.value = state.target_dir;
     }
+    if (exportDpiInput && state.export_dpi !== undefined) {
+      exportDpiInput.value = clampExportDpi(state.export_dpi);
+    }
     if (Array.isArray(state.cards) && state.cards.length > 0) {
       cards = state.cards;
       const idx = typeof state.active_index === "number" ? state.active_index : 0;
       activeIndex = Math.max(0, Math.min(cards.length - 1, idx));
+      normalizeCardLayout(cards[activeIndex]);
       renderCardList();
       refreshInputsFromActiveCard();
       renderCardCanvas();

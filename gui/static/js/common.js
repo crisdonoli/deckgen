@@ -4,22 +4,30 @@
   var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
   document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
 })();
+
 (function() {
-  var saved = null;
-  try { saved = localStorage.getItem('deckgen-panel-collapsed'); } catch (e) {}
-  var collapsed = saved === null ? window.matchMedia('(max-width: 900px)').matches : saved === '1';
-  if (collapsed) document.documentElement.setAttribute('data-panel-collapsed', '');
+  var savedLeft = null;
+  var savedRight = null;
+  try {
+    savedLeft = localStorage.getItem('deckgen-panel-collapsed');
+    savedRight = localStorage.getItem('deckgen-inspector-collapsed');
+  } catch (e) {}
+  var collapsedLeft = savedLeft === null ? window.matchMedia('(max-width: 900px)').matches : savedLeft === '1';
+  if (collapsedLeft) document.documentElement.setAttribute('data-panel-collapsed', '');
+  if (savedRight === '1') document.documentElement.setAttribute('data-inspector-collapsed', '');
 })();
 
 const themeToggle = document.getElementById('theme-toggle');
 const panelToggle = document.getElementById('panel-toggle');
 const panelRailToggle = document.getElementById('panel-rail-toggle');
+const inspectorToggle = document.getElementById('inspector-toggle');
+const inspectorRailToggle = document.getElementById('inspector-rail-toggle');
 
 function applyTheme(theme) {
   const dark = theme === 'dark';
   document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
   if (themeToggle) {
-    themeToggle.textContent = dark ? '☀' : '🌙';
+    themeToggle.textContent = dark ? '☀️' : '🌙';
     const label = dark ? 'Switch to light theme' : 'Switch to dark theme';
     themeToggle.title = label;
     themeToggle.setAttribute('aria-label', label);
@@ -41,7 +49,7 @@ function applyPanelCollapsed(collapsed) {
     const label = collapsed ? 'Show' : 'Hide';
     panelToggle.title = label + ' options panel';
     panelToggle.setAttribute('aria-label', label + ' options panel');
-    panelToggle.textContent = collapsed ? '»' : '«';
+    panelToggle.textContent = collapsed ? '▶' : '◀';
   }
   if (panelRailToggle) {
     panelRailToggle.title = 'Show options panel';
@@ -53,8 +61,21 @@ function isPanelCollapsed() {
   return document.documentElement.hasAttribute('data-panel-collapsed');
 }
 
+function applyInspectorCollapsed(collapsed) {
+  document.documentElement.toggleAttribute('data-inspector-collapsed', collapsed);
+  [inspectorToggle, inspectorRailToggle].forEach(function(btn) {
+    if (!btn) return;
+    btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  });
+}
+
+function isInspectorCollapsed() {
+  return document.documentElement.hasAttribute('data-inspector-collapsed');
+}
+
 applyTheme(currentTheme());
 applyPanelCollapsed(isPanelCollapsed());
+applyInspectorCollapsed(isInspectorCollapsed());
 
 if (themeToggle) {
   themeToggle.addEventListener('click', function() {
@@ -73,12 +94,28 @@ function setPanelCollapsed(collapsed, moveFocus) {
   }
 }
 
+function setInspectorCollapsed(collapsed, moveFocus) {
+  applyInspectorCollapsed(collapsed);
+  try { localStorage.setItem('deckgen-inspector-collapsed', collapsed ? '1' : '0'); } catch (e) {}
+  if (moveFocus) {
+    const target = collapsed ? inspectorRailToggle : inspectorToggle;
+    if (target) target.focus();
+  }
+}
+
 if (panelToggle) {
   panelToggle.addEventListener('click', function() { setPanelCollapsed(true, true); });
 }
 if (panelRailToggle) {
   panelRailToggle.addEventListener('click', function() { setPanelCollapsed(false, true); });
 }
+if (inspectorToggle) {
+  inspectorToggle.addEventListener('click', function() { setInspectorCollapsed(true, true); });
+}
+if (inspectorRailToggle) {
+  inspectorRailToggle.addEventListener('click', function() { setInspectorCollapsed(false, true); });
+}
+
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape' && isPanelCollapsed() && panelRailToggle) {
     panelRailToggle.focus();
@@ -117,14 +154,12 @@ document.addEventListener('keydown', function(e) {
       const cbState = typeof window.__deckgenGetCardBuilderState === 'function'
         ? window.__deckgenGetCardBuilderState()
         : readStorageJson('deckgen-cb-state');
-
       const payload = {
         version: 1,
         saved_at: new Date().toISOString(),
         deck_generator: dgState,
         card_builder: cbState,
       };
-
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
