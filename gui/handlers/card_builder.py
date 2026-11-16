@@ -41,16 +41,16 @@ def pt(points):
 
 DEFAULT_LAYOUT = {
     "canvas": {"w": STANDARD_CARD_W_PX, "h": STANDARD_CARD_H_PX},
-    "art": {"x": 64, "y": 136, "w": 622, "h": 446, "scale": 1.0, "offset_x": 0, "offset_y": 0},
-    "title": {"x": 84, "y": 118, "max_w": 450, "font_size": pt(9.0), "color": "#111111"},
-    "official_title": {"x": 84, "y": 140, "max_w": 450, "font_size": pt(5.5), "color": "#111111"},
-    "mana_cost": {"x": 664, "y": 116, "size": pt(8.5), "align": "right"},
-    "type_line": {"x": 84, "y": 622, "max_w": 500, "font_size": pt(7.5), "color": "#111111"},
-    "set_symbol": {"x": 664, "y": 614, "size": pt(9.8), "align": "right"},
-    "oracle_box": {"x": 84, "y": 654, "w": 582, "h": 284, "font_size": pt(7.2), "color": "#111111"},
-    "pt_box": {"x": 562, "y": 908, "w": 123, "h": 66},
-    "pt_text": {"x": 624, "y": 941, "font_size": pt(9.2), "color": "#111111"},
-    "artist": {"x": 76, "y": 990, "font_size": pt(4.3), "color": "#ffffff"},
+    "art": {"x": 34, "y": 109, "w": 682, "h": 477, "scale": 1.0, "offset_x": 0, "offset_y": 0},
+    "title": {"x": 56, "y": 90, "max_w": 490, "font_size": pt(9.0), "color": "#111111"},
+    "official_title": {"x": 56, "y": 114, "max_w": 490, "font_size": pt(5.5), "color": "#111111"},
+    "mana_cost": {"x": 692, "y": 88, "size": pt(8.5), "align": "right"},
+    "type_line": {"x": 56, "y": 629, "max_w": 550, "font_size": pt(7.5), "color": "#111111"},
+    "set_symbol": {"x": 692, "y": 620, "size": pt(9.8), "align": "right"},
+    "oracle_box": {"x": 56, "y": 663, "w": 638, "h": 303, "font_size": pt(7.2), "color": "#111111"},
+    "pt_box": {"x": 580, "y": 934, "w": 135, "h": 71},
+    "pt_text": {"x": 648, "y": 970, "font_size": pt(9.2), "color": "#111111"},
+    "artist": {"x": 47, "y": 1022, "font_size": pt(4.3), "color": "#ffffff"},
 }
 
 GUILD_PAIRS = ["WU", "UB", "BR", "RG", "GW", "WB", "BG", "GU", "UR", "RW"]
@@ -264,6 +264,7 @@ def extract_scryfall_card_payload(raw_card, count=1, catalog=None):
         "normal_image_url": image_uris.get("normal", ""),
         "custom_art_data": None,
         "hidden_layers": {},
+        "layout_bleed_cropped": True,
         "layout": json.loads(json.dumps(DEFAULT_LAYOUT)),
     }
     base_info["frame_components"] = auto_select_frame_components(base_info, default_style, catalog=catalog)
@@ -631,14 +632,21 @@ class CardBuilderSaveCardHandler(tornado.web.RequestHandler):
 
 
 def render_pdf_layer_rgba(file_path, target_w, target_h):
-    """Renderiza una capa PDF o imagen preservando su canal alfa nativo; solo limpia fondo sólido si es opaca."""
+    """Renderiza una capa PDF o imagen recortando el bleed (3288x4488 -> 3000x4200) y preservando alfa."""
     if file_path.lower().endswith(".pdf"):
         doc = pymupdf.open(file_path)
         try:
             page = doc[0]
             rect = page.rect
-            mat = pymupdf.Matrix(target_w / rect.width, target_h / rect.height)
-            pix = page.get_pixmap(matrix=mat, alpha=True)
+            ratio = rect.width / rect.height if rect.height else 0.0
+            if rect.width < rect.height and 0.724 <= ratio <= 0.742:
+                bx = rect.width * (144.0 / 3288.0)
+                by = rect.height * (144.0 / 4488.0)
+                clip = pymupdf.Rect(bx, by, rect.width - bx, rect.height - by)
+            else:
+                clip = rect
+            mat = pymupdf.Matrix(target_w / clip.width, target_h / clip.height)
+            pix = page.get_pixmap(matrix=mat, clip=clip, alpha=True)
             rgba = Image.frombytes("RGBA", (pix.width, pix.height), pix.samples)
             del pix
             if rgba.size != (target_w, target_h):
@@ -647,7 +655,14 @@ def render_pdf_layer_rgba(file_path, target_w, target_h):
             doc.close()
     else:
         with Image.open(file_path) as src_img:
-            rgba = src_img.convert("RGBA").resize((target_w, target_h), Image.LANCZOS)
+            rgba = src_img.convert("RGBA")
+            w, h = rgba.size
+            ratio = w / h if h else 0.0
+            if w < h and 0.724 <= ratio <= 0.742:
+                bx = int(round(w * (144.0 / 3288.0)))
+                by = int(round(h * (144.0 / 4488.0)))
+                rgba = rgba.crop((bx, by, w - bx, h - by))
+            rgba = rgba.resize((target_w, target_h), Image.LANCZOS)
 
     extrema = rgba.getextrema()
     if len(extrema) >= 4 and extrema[3] == (255, 255):
@@ -796,7 +811,7 @@ def compose_card_pdf(
 
     art_over_top = bool(card.get("art_over_top"))
     if art_over_top:
-        split_y = int(round(583 * export_h / 1050.0))
+        split_y = int(round(587 * export_h / 1050.0))
         for comp_key in layer_order:
             if comp_key in ("art", "pt_box"):
                 continue

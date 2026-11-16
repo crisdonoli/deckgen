@@ -107,24 +107,24 @@
 
   const DEFAULT_LAYOUT = {
     canvas: { w: CANVAS_W, h: CANVAS_H },
-    art: { x: 64, y: 136, w: 622, h: 446, scale: 1.0, offset_x: 0, offset_y: 0 },
-    title: { x: 84, y: 118, max_w: 450, font_size: pt(9.0), color: "#111111" },
-    official_title: { x: 84, y: 140, max_w: 450, font_size: pt(5.5), color: "#111111" },
-    mana_cost: { x: 664, y: 116, size: pt(8.5), align: "right" },
-    type_line: { x: 84, y: 622, max_w: 500, font_size: pt(7.5), color: "#111111" },
-    set_symbol: { x: 664, y: 614, size: pt(9.8), align: "right" },
-    oracle_box: { x: 84, y: 654, w: 582, h: 284, font_size: pt(7.2), color: "#111111" },
-    pt_box: { x: 562, y: 908, w: 123, h: 66 },
-    pt_text: { x: 624, y: 941, font_size: pt(9.2), color: "#111111" },
-    artist: { x: 76, y: 990, font_size: pt(4.3), color: "#ffffff" },
+    art: { x: 34, y: 109, w: 682, h: 477, scale: 1.0, offset_x: 0, offset_y: 0 },
+    title: { x: 56, y: 90, max_w: 490, font_size: pt(9.0), color: "#111111" },
+    official_title: { x: 56, y: 114, max_w: 490, font_size: pt(5.5), color: "#111111" },
+    mana_cost: { x: 692, y: 88, size: pt(8.5), align: "right" },
+    type_line: { x: 56, y: 629, max_w: 550, font_size: pt(7.5), color: "#111111" },
+    set_symbol: { x: 692, y: 620, size: pt(9.8), align: "right" },
+    oracle_box: { x: 56, y: 663, w: 638, h: 303, font_size: pt(7.2), color: "#111111" },
+    pt_box: { x: 580, y: 934, w: 135, h: 71 },
+    pt_text: { x: 648, y: 970, font_size: pt(9.2), color: "#111111" },
+    artist: { x: 47, y: 1022, font_size: pt(4.3), color: "#ffffff" },
   };
 
   const STATIC_FRAME_GEOMETRY = {
-    titleBar: { x: 64, y: 78, w: 622, h: 58, r: 14 },
-    artFrame: { x: 64, y: 136, w: 622, h: 446 },
-    typeBar: { x: 64, y: 586, w: 622, h: 56, r: 14 },
-    oracleFrame: { x: 64, y: 642, w: 622, h: 303 },
-    ptFrame: { x: 562, y: 908, w: 123, h: 66, r: 12 },
+    titleBar: { x: 34, y: 47, w: 682, h: 62, r: 14 },
+    artFrame: { x: 34, y: 109, w: 682, h: 477 },
+    typeBar: { x: 34, y: 590, w: 682, h: 60, r: 14 },
+    oracleFrame: { x: 34, y: 650, w: 682, h: 324 },
+    ptFrame: { x: 580, y: 934, w: 135, h: 71, r: 12 },
   };
 
   const LAYER_DEFINITIONS = [
@@ -756,6 +756,17 @@
     });
   }
 
+  function getBleedCropRect(imgW, imgH) {
+    if (!imgW || !imgH) return { sx: 0, sy: 0, sw: imgW, sh: imgH };
+    const ratio = imgW / imgH;
+    if (imgW < imgH && ratio >= 0.724 && ratio <= 0.742) {
+      const bx = imgW * (144 / 3288);
+      const by = imgH * (144 / 4488);
+      return { sx: bx, sy: by, sw: imgW - 2 * bx, sh: imgH - 2 * by };
+    }
+    return { sx: 0, sy: 0, sw: imgW, sh: imgH };
+  }
+
   async function loadTransparentLayerJpg(relPath) {
     if (!relPath) return null;
     if (transparentLayerCache.has(relPath)) {
@@ -769,7 +780,8 @@
     off.width = 750;
     off.height = 1050;
     const octx = off.getContext("2d");
-    octx.drawImage(img, 0, 0, 750, 1050);
+    const crop = getBleedCropRect(img.width, img.height);
+    octx.drawImage(img, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, 750, 1050);
 
     try {
       const imgData = octx.getImageData(0, 0, 750, 1050);
@@ -1029,6 +1041,44 @@
     }
   }
 
+  function migrateBleedLayoutIfNeeded(card) {
+    if (!card || card.layout_bleed_cropped) return;
+    if (card.layout && card.custom_layout) {
+      const sx = 3288 / 3000;
+      const sy = 4488 / 4200;
+      const bx = 750 * (144 / 3288);
+      const by = 1050 * (144 / 4488);
+      const tx = (v) => Math.round((v - bx) * sx);
+      const ty = (v) => Math.round((v - by) * sy);
+      const tw = (v) => Math.round(v * sx);
+      const th = (v) => Math.round(v * sy);
+      ["art", "oracle_box", "pt_box"].forEach((k) => {
+        const s = card.layout[k];
+        if (!s) return;
+        if (typeof s.x === "number") s.x = tx(s.x);
+        if (typeof s.y === "number") s.y = ty(s.y);
+        if (typeof s.w === "number") s.w = tw(s.w);
+        if (typeof s.h === "number") s.h = th(s.h);
+      });
+      ["title", "official_title", "mana_cost", "type_line", "set_symbol", "pt_text", "artist"].forEach((k) => {
+        const s = card.layout[k];
+        if (!s) return;
+        if (typeof s.x === "number") s.x = tx(s.x);
+        if (typeof s.y === "number") s.y = ty(s.y);
+        if (typeof s.max_w === "number") s.max_w = tw(s.max_w);
+      });
+      if (Array.isArray(card.shapes)) {
+        card.shapes.forEach((sh) => {
+          if (typeof sh.x === "number") sh.x = tx(sh.x);
+          if (typeof sh.y === "number") sh.y = ty(sh.y);
+          if (typeof sh.w === "number") sh.w = tw(sh.w);
+          if (typeof sh.h === "number") sh.h = th(sh.h);
+        });
+      }
+    }
+    card.layout_bleed_cropped = true;
+  }
+
   function normalizeCardLayout(card, forceReset = false) {
     const base = deepClone(DEFAULT_LAYOUT);
     if (!card.layout || forceReset || !card.custom_layout) {
@@ -1043,7 +1093,9 @@
       card.layout.type_line.color = prevTypeColor;
       card.layout.oracle_box.color = prevOracleColor;
       card.layout.pt_text.color = prevPtColor;
+      card.layout_bleed_cropped = true;
     } else {
+      migrateBleedLayoutIfNeeded(card);
       for (const section of Object.keys(base)) {
         if (!card.layout[section] || typeof card.layout[section] !== "object") {
           card.layout[section] = base[section];
@@ -2038,13 +2090,18 @@
           ctx.clip();
         }
         ctx.globalAlpha = compOp;
-        ctx.drawImage(imgSource, 0, 0, 750, 1050);
+        if (compKey === "background") {
+          const crop = getBleedCropRect(imgSource.width, imgSource.height);
+          ctx.drawImage(imgSource, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, 750, 1050);
+        } else {
+          ctx.drawImage(imgSource, 0, 0, 750, 1050);
+        }
         ctx.restore();
       };
 
       const order = getCardLayerOrder(card);
       if (card.art_over_top) {
-        const splitY = 583;
+        const splitY = 587;
         for (const compKey of order) {
           if (compKey === "art" || compKey === "pt_box") continue;
           if (compKey === "pinlines" || compKey === "border") {
@@ -3501,9 +3558,9 @@
     if (Array.isArray(state.cards)) {
       cards = state.cards;
       if (cards.length > 0) {
+        cards.forEach((c) => normalizeCardLayout(c));
         const idx = typeof state.active_index === "number" ? state.active_index : 0;
         activeIndex = Math.max(0, Math.min(cards.length - 1, idx));
-        normalizeCardLayout(cards[activeIndex]);
         renderCardList();
         refreshInputsFromActiveCard();
         renderCardCanvas();
