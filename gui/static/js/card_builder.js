@@ -2858,7 +2858,7 @@
         if (artUrlInput) artUrlInput.value = thumbUrl;
         saveCardBuilderState();
         renderCardCanvas();
-        if (artPrintsModal) artPrintsModal.classList.remove("open");
+        if (artPrintsModal) artPrintsModal.classList.remove("active");
       });
       artPrintsGridEl.appendChild(btn);
     });
@@ -2899,16 +2899,16 @@
           b.classList.toggle("active", b.dataset.filter === "all");
         });
       }
-      artPrintsModal.classList.add("open");
+      artPrintsModal.classList.add("active");
       fetchAndShowArtPrints(defaultQuery);
     });
   }
   if (artPrintsCloseBtn && artPrintsModal) {
-    artPrintsCloseBtn.addEventListener("click", () => artPrintsModal.classList.remove("open"));
+    artPrintsCloseBtn.addEventListener("click", () => artPrintsModal.classList.remove("active"));
   }
   if (artPrintsModal) {
     artPrintsModal.addEventListener("click", (e) => {
-      if (e.target === artPrintsModal) artPrintsModal.classList.remove("open");
+      if (e.target === artPrintsModal) artPrintsModal.classList.remove("active");
     });
   }
   if (artPrintsSearchBtn && artPrintsQueryInput) {

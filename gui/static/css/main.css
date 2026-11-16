@@ -1680,3 +1680,30 @@ button:hover { background: var(--hover-bg); }
   background: var(--hover-bg);
   color: var(--fg);
 }
+
+.landing-support {
+  margin-top: 28px;
+  display: flex;
+  justify-content: center;
+}
+
+.bmc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  background: #ffdd00;
+  color: #111111;
+  font-weight: 700;
+  font-size: 14px;
+  text-decoration: none;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+  transition: transform 0.12s, filter 0.12s;
+}
+
+.bmc-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(0.96);
+}
