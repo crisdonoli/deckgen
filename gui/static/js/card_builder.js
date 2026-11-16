@@ -47,6 +47,10 @@
   const autoContrastBtn = document.getElementById("cb-auto-contrast-btn");
 
   const artUrlInput = document.getElementById("cb-art-url");
+  const shapesListEl = document.getElementById("cb-shapes-list");
+  const addRectBtn = document.getElementById("cb-add-rect-btn");
+  const addRoundBtn = document.getElementById("cb-add-round-btn");
+  const addCircleBtn = document.getElementById("cb-add-circle-btn");
   const artFileInput = document.getElementById("cb-art-file");
   const artScaleInput = document.getElementById("cb-art-scale");
   const artOxInput = document.getElementById("cb-art-ox");
@@ -106,9 +110,9 @@
     art: { x: 64, y: 136, w: 622, h: 446, scale: 1.0, offset_x: 0, offset_y: 0 },
     title: { x: 84, y: 118, max_w: 450, font_size: pt(9.0), color: "#111111" },
     official_title: { x: 84, y: 140, max_w: 450, font_size: pt(5.5), color: "#111111" },
-    mana_cost: { x: 664, y: 116, size: pt(6.5), align: "right" },
+    mana_cost: { x: 664, y: 116, size: pt(8.5), align: "right" },
     type_line: { x: 84, y: 622, max_w: 500, font_size: pt(7.5), color: "#111111" },
-    set_symbol: { x: 664, y: 614, size: pt(8.0), align: "right" },
+    set_symbol: { x: 664, y: 614, size: pt(9.8), align: "right" },
     oracle_box: { x: 84, y: 654, w: 582, h: 284, font_size: pt(7.2), color: "#111111" },
     pt_box: { x: 562, y: 908, w: 123, h: 66 },
     pt_text: { x: 624, y: 941, font_size: pt(9.2), color: "#111111" },
@@ -994,6 +998,7 @@
     fieldName.value = card.name || "";
     if (fieldOfficialName) fieldOfficialName.value = card.official_name || "";
     if (artOverTopCheck) artOverTopCheck.checked = Boolean(card.art_over_top);
+    renderShapesList();
     const fOp = card.frame_opacity !== undefined ? Number(card.frame_opacity) : 1.0;
     if (frameOpacityInput) {
       frameOpacityInput.value = Number.isFinite(fOp) ? fOp : 1.0;
@@ -1296,6 +1301,20 @@
       h: L.art.h,
       resizable: true,
     });
+
+    if (Array.isArray(card.shapes)) {
+      card.shapes.forEach((s, i) => {
+        regions.push({
+          key: `shape:${s.id}`,
+          label: `Shape ${i + 1} (${s.type})`,
+          x: s.x,
+          y: s.y,
+          w: s.w,
+          h: s.h,
+          resizable: true,
+        });
+      });
+    }
 
     return regions;
   }
@@ -1681,7 +1700,155 @@
     targetCtx.restore();
   }
 
+  function drawOverlayShapes(targetCtx, card) {
+    if (!Array.isArray(card.shapes) || card.shapes.length === 0) return;
+    card.shapes.forEach((s) => {
+      const op = s.opacity !== undefined ? Math.max(0, Math.min(1, Number(s.opacity))) : 0.5;
+      if (op <= 0.001) return;
+      targetCtx.save();
+      targetCtx.globalAlpha = op;
+      targetCtx.fillStyle = s.color || "#000000";
+      if (s.type === "circle") {
+        targetCtx.beginPath();
+        targetCtx.ellipse(
+          s.x + s.w / 2,
+          s.y + s.h / 2,
+          Math.max(1, s.w / 2),
+          Math.max(1, s.h / 2),
+          0,
+          0,
+          Math.PI * 2
+        );
+        targetCtx.fill();
+      } else if (s.type === "rounded") {
+        const r = Math.min(Math.max(0, Number(s.radius ?? 14)), s.w / 2, s.h / 2);
+        roundRectPath(targetCtx, s.x, s.y, s.w, s.h, r);
+        targetCtx.fill();
+      } else {
+        targetCtx.fillRect(s.x, s.y, s.w, s.h);
+      }
+      targetCtx.restore();
+    });
+  }
+
+  function renderShapesList() {
+    if (!shapesListEl) return;
+    shapesListEl.innerHTML = "";
+    if (activeIndex < 0 || !cards[activeIndex]) return;
+    const card = cards[activeIndex];
+    const shapes = Array.isArray(card.shapes) ? card.shapes : [];
+    if (!shapes.length) {
+      shapesListEl.innerHTML = '<div style="font-size:11px; opacity:0.65;">No shapes added. Add one to highlight text.</div>';
+      return;
+    }
+
+    shapes.forEach((s, idx) => {
+      const item = document.createElement("div");
+      const key = `shape:${s.id}`;
+      item.className = "cb-shape-item" + (selectedElementKey === key ? " active" : "");
+      const opPct = Math.round((s.opacity ?? 0.5) * 100);
+      const radVal = Math.round(s.radius ?? 14);
+      const labelMap = { rect: "Box", rounded: "Rounded", circle: "Circle" };
+      item.innerHTML = `
+        <div class="cb-shape-head">
+          <span>${labelMap[s.type] || "Shape"} #${idx + 1}</span>
+          <div class="cb-shape-controls">
+            <input type="color" class="cb-shape-color" value="${s.color || "#000000"}" title="Shape color">
+            <button type="button" class="ps-mini-btn cb-shape-del" title="Remove shape">✕</button>
+          </div>
+        </div>
+        <div class="ps-slider-row" style="margin-top:4px; margin-bottom:2px;">
+          <span style="font-size:10px; opacity:0.8;">Opacity</span>
+          <input type="range" class="cb-shape-op" min="0" max="1" step="0.05" value="${s.opacity ?? 0.5}">
+          <span class="ps-val cb-shape-op-val" style="min-width:34px;">${opPct}%</span>
+        </div>
+        ${s.type === "rounded" ? `
+        <div class="ps-slider-row" style="margin-top:2px; margin-bottom:0;">
+          <span style="font-size:10px; opacity:0.8;">Radius</span>
+          <input type="range" class="cb-shape-rad" min="0" max="60" step="2" value="${radVal}">
+          <span class="ps-val cb-shape-rad-val" style="min-width:34px;">${radVal}px</span>
+        </div>` : ""}
+      `;
+
+      item.querySelector(".cb-shape-head").addEventListener("click", (e) => {
+        if (e.target && e.target.closest("input, button")) return;
+        selectedElementKey = key;
+        renderShapesList();
+        renderCardCanvas();
+      });
+
+      const colorIn = item.querySelector(".cb-shape-color");
+      colorIn.addEventListener("input", () => {
+        s.color = colorIn.value;
+        saveCardBuilderState();
+        renderCardCanvas();
+      });
+
+      const opIn = item.querySelector(".cb-shape-op");
+      const opValEl = item.querySelector(".cb-shape-op-val");
+      opIn.addEventListener("focus", () => pushUndoState());
+      opIn.addEventListener("input", () => {
+        s.opacity = Math.max(0, Math.min(1, parseFloat(opIn.value) || 0));
+        if (opValEl) opValEl.textContent = Math.round(s.opacity * 100) + "%";
+        saveCardBuilderState();
+        renderCardCanvas();
+      });
+
+      const radIn = item.querySelector(".cb-shape-rad");
+      const radValEl = item.querySelector(".cb-shape-rad-val");
+      if (radIn) {
+        radIn.addEventListener("focus", () => pushUndoState());
+        radIn.addEventListener("input", () => {
+          s.radius = Math.max(0, Math.min(60, parseInt(radIn.value, 10) || 0));
+          if (radValEl) radValEl.textContent = s.radius + "px";
+          saveCardBuilderState();
+          renderCardCanvas();
+        });
+      }
+
+      item.querySelector(".cb-shape-del").addEventListener("click", () => {
+        pushUndoState();
+        card.shapes = card.shapes.filter((sh) => sh.id !== s.id);
+        if (selectedElementKey === key) selectedElementKey = null;
+        renderShapesList();
+        saveCardBuilderState();
+        renderCardCanvas();
+      });
+
+      shapesListEl.appendChild(item);
+    });
+  }
+
+  function addOverlayShape(type) {
+    if (activeIndex < 0 || !cards[activeIndex]) return;
+    const card = cards[activeIndex];
+    pushUndoState();
+    if (!Array.isArray(card.shapes)) card.shapes = [];
+    const id = "s_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
+    const shape = {
+      id,
+      type,
+      x: 74,
+      y: 646,
+      w: 602,
+      h: 296,
+      color: "#000000",
+      opacity: 0.55,
+      radius: type === "rounded" ? 16 : 0,
+    };
+    card.shapes.push(shape);
+    selectedElementKey = `shape:${id}`;
+    renderShapesList();
+    saveCardBuilderState();
+    renderCardCanvas();
+  }
+
+  if (addRectBtn) addRectBtn.addEventListener("click", () => addOverlayShape("rect"));
+  if (addRoundBtn) addRoundBtn.addEventListener("click", () => addOverlayShape("rounded"));
+  if (addCircleBtn) addCircleBtn.addEventListener("click", () => addOverlayShape("circle"));
+
   function drawAllTextsAndIcons(targetCtx, card) {
+    drawOverlayShapes(targetCtx, card);
     const L = card.layout;
     const titleColor = L.title?.color || "#111111";
     const ot = L.official_title || DEFAULT_LAYOUT.official_title;
@@ -2021,8 +2188,10 @@
     }
 
     selectedElementKey = hit.key;
+    if (hit.key && hit.key.startsWith("shape:")) renderShapesList();
     const preDragSnapshot = cloneCardState(card);
     const clonedLayout = deepClone(card.layout);
+    const clonedShapes = deepClone(card.shapes || []);
 
     if (hit.type === "handle") {
       dragState = {
@@ -2032,6 +2201,7 @@
         startX: mx,
         startY: my,
         initialLayout: clonedLayout,
+        initialShapes: clonedShapes,
         preDragSnapshot,
         changed: false,
       };
@@ -2042,6 +2212,7 @@
         startX: mx,
         startY: my,
         initialLayout: clonedLayout,
+        initialShapes: clonedShapes,
         preDragSnapshot,
         changed: false,
       };
@@ -2052,6 +2223,7 @@
         startX: mx,
         startY: my,
         initialLayout: clonedLayout,
+        initialShapes: clonedShapes,
         preDragSnapshot,
         changed: false,
       };
@@ -2121,10 +2293,42 @@
       } else if (k === "artist") {
         L.artist.x = init.artist.x + dx;
         L.artist.y = init.artist.y + dy;
+      } else if (k.startsWith("shape:") && Array.isArray(card.shapes)) {
+        const sid = k.slice(6);
+        const sInit = (dragState.initialShapes || []).find((s) => s.id === sid);
+        const sCur = card.shapes.find((s) => s.id === sid);
+        if (sInit && sCur) {
+          sCur.x = sInit.x + dx;
+          sCur.y = sInit.y + dy;
+        }
       }
     } else if (dragState.mode === "resize") {
       const h = dragState.handle;
-      if (k === "art" || k === "oracle_box") {
+      if (k.startsWith("shape:") && Array.isArray(card.shapes)) {
+        const sid = k.slice(6);
+        const sInit = (dragState.initialShapes || []).find((s) => s.id === sid);
+        const sCur = card.shapes.find((s) => s.id === sid);
+        if (sInit && sCur) {
+          let nx = sInit.x;
+          let ny = sInit.y;
+          let nw = sInit.w;
+          let nh = sInit.h;
+          if (h.includes("e")) nw = Math.max(20, sInit.w + dx);
+          if (h.includes("s")) nh = Math.max(20, sInit.h + dy);
+          if (h.includes("w")) {
+            const pw = sInit.w - dx;
+            if (pw >= 20) { nw = pw; nx = sInit.x + dx; }
+          }
+          if (h.includes("n")) {
+            const ph = sInit.h - dy;
+            if (ph >= 20) { nh = ph; ny = sInit.y + dy; }
+          }
+          sCur.x = nx;
+          sCur.y = ny;
+          sCur.w = nw;
+          sCur.h = nh;
+        }
+      } else if (k === "art" || k === "oracle_box") {
         const targetInit = init[k];
         const targetCur = L[k];
         let nx = targetInit.x;
@@ -2230,6 +2434,13 @@
         L.set_symbol.size = Math.max(14, Math.min(68, (L.set_symbol.size || 30) + dir));
       } else if (hit.key === "pt_text") {
         L.pt_text.font_size = Math.max(14, Math.min(64, L.pt_text.font_size + dir));
+      } else if (hit.key.startsWith("shape:") && Array.isArray(card.shapes)) {
+        const sid = hit.key.slice(6);
+        const s = card.shapes.find((sh) => sh.id === sid);
+        if (s) {
+          s.opacity = Math.max(0.05, Math.min(1.0, Math.round(((s.opacity ?? 0.55) + dir * 0.05) * 100) / 100));
+          renderShapesList();
+        }
       }
 
       populatePositionInputsFromLayout(L);
@@ -2482,6 +2693,36 @@
     renderCardCanvas(false);
   });
 
+  async function exportSingleCardToPdf(card, exportDpi, fullDataUrl = "", signal = undefined) {
+    normalizeCardLayout(card);
+    if (!card.frame_components && typeof autoPickClientLayers === "function") {
+      autoPickClientLayers(card, "Automated Templates/normal");
+    }
+    const exportScale = exportDpi / BASE_DPI;
+    const artOverlayDataUrl = await renderArtOnlyDataUrl(card, exportScale);
+    const textOverlayDataUrl = renderTextOnlyDataUrl(card, exportScale);
+
+    const res = await fetch("/api/card-builder/export-pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        card,
+        card_name: card.name,
+        target_dir: targetDirInput.value.trim(),
+        export_dpi: exportDpi,
+        art_overlay_data_url: artOverlayDataUrl,
+        text_overlay_data_url: textOverlayDataUrl,
+        image_data_url: fullDataUrl,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    return data;
+  }
+
   document.getElementById("cb-export-pdf-btn").addEventListener("click", async () => {
     if (activeIndex < 0) return;
     const card = cards[activeIndex];
@@ -2494,38 +2735,205 @@
     setLoading(true, `Compositing ${exportDpi} DPI PDF (${exportW}×${exportH} px) from .pdf layer assets...`);
     await renderCardCanvas(true);
     const fullDataUrl = canvas.toDataURL("image/png");
-    const artOverlayDataUrl = await renderArtOnlyDataUrl(card, exportScale);
-    const textOverlayDataUrl = renderTextOnlyDataUrl(card, exportScale);
     renderCardCanvas(false);
 
     try {
-      const res = await fetch("/api/card-builder/export-pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          card,
-          card_name: card.name,
-          target_dir: targetDirInput.value.trim(),
-          export_dpi: exportDpi,
-          art_overlay_data_url: artOverlayDataUrl,
-          text_overlay_data_url: textOverlayDataUrl,
-          image_data_url: fullDataUrl,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) {
-        showStatus(data.error, true);
-      } else {
-        const countPdf = (data.pdf_components_used || []).length;
-        const usedDpi = data.dpi || exportDpi;
-        showStatus(`Exported ${usedDpi} DPI PDF: ${data.pdf_path} (${countPdf} .pdf layers)`, false);
-      }
+      const data = await exportSingleCardToPdf(card, exportDpi, fullDataUrl);
+      const countPdf = (data.pdf_components_used || []).length;
+      const usedDpi = data.dpi || exportDpi;
+      showStatus(`Exported ${usedDpi} DPI PDF: ${data.pdf_path} (${countPdf} .pdf layers)`, false);
     } catch (err) {
       showStatus("PDF export error: " + err.message, true);
     } finally {
       setLoading(false);
     }
   });
+
+  const exportAllPdfBtn = document.getElementById("cb-export-all-pdf-btn");
+  if (exportAllPdfBtn) {
+    exportAllPdfBtn.addEventListener("click", async () => {
+      if (!Array.isArray(cards) || cards.length === 0) {
+        showStatus("No cards loaded to export.", true);
+        return;
+      }
+      const exportDpi = clampExportDpi(exportDpiInput ? exportDpiInput.value : DEFAULT_EXPORT_DPI);
+      if (exportDpiInput) exportDpiInput.value = exportDpi;
+
+      const controller = new AbortController();
+      let cancelled = false;
+      if (cancelLoadingBtn) {
+        cancelLoadingBtn.style.display = "inline-flex";
+        cancelLoadingBtn.onclick = () => {
+          cancelled = true;
+          controller.abort();
+        };
+      }
+
+      let exportedCount = 0;
+      const failed = [];
+      setLoading(true, `Exporting 1/${cards.length}: ${cards[0].name}...`);
+      try {
+        for (let i = 0; i < cards.length; i++) {
+          if (cancelled) break;
+          const card = cards[i];
+          if (progressStatus) {
+            progressStatus.textContent = `Exporting PDF ${i + 1}/${cards.length} (${exportDpi} DPI): ${card.name}...`;
+          }
+          try {
+            await exportSingleCardToPdf(card, exportDpi, "", controller.signal);
+            exportedCount++;
+          } catch (err) {
+            if (err && err.name === "AbortError") {
+              cancelled = true;
+              break;
+            }
+            failed.push(`${card.name}: ${err.message}`);
+          }
+        }
+        const targetDir = targetDirInput.value.trim() || "./exports";
+        if (cancelled) {
+          showStatus(`Batch export cancelled (${exportedCount}/${cards.length} exported).`, false);
+        } else if (failed.length) {
+          showStatus(`Exported ${exportedCount}/${cards.length} PDFs (${failed.length} failed: ${failed[0]})`, true);
+        } else {
+          showStatus(`Exported ${exportedCount}/${cards.length} PDFs at ${exportDpi} DPI to ${targetDir}/fronts`, false);
+        }
+      } finally {
+        if (cancelLoadingBtn) {
+          cancelLoadingBtn.style.display = "none";
+          cancelLoadingBtn.onclick = null;
+        }
+        setLoading(false);
+      }
+    });
+  }
+
+  // --- Scryfall Alternate Arts Browser ---
+  const browseArtsBtn = document.getElementById("cb-browse-arts-btn");
+  const artPrintsModal = document.getElementById("cb-art-prints-modal");
+  const artPrintsCloseBtn = document.getElementById("cb-art-prints-close-btn");
+  const artPrintsQueryInput = document.getElementById("cb-art-prints-query");
+  const artPrintsSearchBtn = document.getElementById("cb-art-prints-search-btn");
+  const artPrintsFullCardCheck = document.getElementById("cb-art-prints-full-card");
+  const artPrintsFiltersEl = document.getElementById("cb-art-prints-filters");
+  const artPrintsStatusEl = document.getElementById("cb-art-prints-status");
+  const artPrintsGridEl = document.getElementById("cb-art-prints-grid");
+  let loadedArtPrints = [];
+  let activeArtFilter = "all";
+
+  function renderArtPrintsGrid() {
+    if (!artPrintsGridEl) return;
+    artPrintsGridEl.innerHTML = "";
+    const useFull = Boolean(artPrintsFullCardCheck && artPrintsFullCardCheck.checked);
+    const filtered = activeArtFilter === "all"
+      ? loadedArtPrints
+      : loadedArtPrints.filter((p) => Array.isArray(p.tags) && p.tags.includes(activeArtFilter));
+
+    if (!filtered.length) {
+      artPrintsGridEl.innerHTML = '<div style="font-size:12px; opacity:0.75; grid-column:1/-1;">No arts match this filter.</div>';
+      return;
+    }
+
+    filtered.forEach((p) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cb-art-print-card";
+      const thumbUrl = useFull ? (p.full_image_url || p.art_crop_url) : (p.art_crop_url || p.full_image_url);
+      const tagsHtml = (p.tags || []).map((t) => `<span class="cb-art-print-tag">${t}</span>`).join("");
+      btn.innerHTML = `
+        <img src="${thumbUrl}" alt="${p.name}" loading="lazy">
+        <div class="cb-art-print-tags">${tagsHtml}</div>
+        <div class="cb-art-print-meta"><strong>${p.set}</strong> #${p.collector_number}<br>${p.artist || "Unknown"}</div>
+      `;
+      btn.addEventListener("click", () => {
+        if (activeIndex < 0 || !cards[activeIndex]) return;
+        const card = cards[activeIndex];
+        pushUndoState();
+        card.custom_art_data = null;
+        card.art_crop_url = thumbUrl;
+        if (p.artist) {
+          card.artist = p.artist;
+          if (fieldArtist) fieldArtist.value = p.artist;
+        }
+        if (artUrlInput) artUrlInput.value = thumbUrl;
+        saveCardBuilderState();
+        renderCardCanvas();
+        if (artPrintsModal) artPrintsModal.classList.remove("open");
+      });
+      artPrintsGridEl.appendChild(btn);
+    });
+  }
+
+  async function fetchAndShowArtPrints(query) {
+    const cleanQ = (query || "").trim();
+    if (!cleanQ) return;
+    if (artPrintsStatusEl) artPrintsStatusEl.textContent = `Searching Scryfall prints for "${cleanQ}"...`;
+    if (artPrintsGridEl) artPrintsGridEl.innerHTML = "";
+    try {
+      const res = await fetch(`/api/card-builder/art-prints?name=${encodeURIComponent(cleanQ)}`);
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        if (artPrintsStatusEl) artPrintsStatusEl.textContent = data.error || "Error fetching prints.";
+        return;
+      }
+      loadedArtPrints = data.prints || [];
+      if (artPrintsStatusEl) artPrintsStatusEl.textContent = `Found ${loadedArtPrints.length} printing(s). Click any art to apply.`;
+      renderArtPrintsGrid();
+    } catch (err) {
+      if (artPrintsStatusEl) artPrintsStatusEl.textContent = "Search error: " + err.message;
+    }
+  }
+
+  if (browseArtsBtn && artPrintsModal) {
+    browseArtsBtn.addEventListener("click", () => {
+      if (activeIndex < 0 || !cards[activeIndex]) {
+        showStatus("Select a card first.", true);
+        return;
+      }
+      const card = cards[activeIndex];
+      const defaultQuery = (card.official_name || "").trim() || card.name || "";
+      if (artPrintsQueryInput) artPrintsQueryInput.value = defaultQuery;
+      activeArtFilter = "all";
+      if (artPrintsFiltersEl) {
+        artPrintsFiltersEl.querySelectorAll(".cb-art-filter-btn").forEach((b) => {
+          b.classList.toggle("active", b.dataset.filter === "all");
+        });
+      }
+      artPrintsModal.classList.add("open");
+      fetchAndShowArtPrints(defaultQuery);
+    });
+  }
+  if (artPrintsCloseBtn && artPrintsModal) {
+    artPrintsCloseBtn.addEventListener("click", () => artPrintsModal.classList.remove("open"));
+  }
+  if (artPrintsModal) {
+    artPrintsModal.addEventListener("click", (e) => {
+      if (e.target === artPrintsModal) artPrintsModal.classList.remove("open");
+    });
+  }
+  if (artPrintsSearchBtn && artPrintsQueryInput) {
+    artPrintsSearchBtn.addEventListener("click", () => fetchAndShowArtPrints(artPrintsQueryInput.value));
+    artPrintsQueryInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        fetchAndShowArtPrints(artPrintsQueryInput.value);
+      }
+    });
+  }
+  if (artPrintsFullCardCheck) {
+    artPrintsFullCardCheck.addEventListener("change", renderArtPrintsGrid);
+  }
+  if (artPrintsFiltersEl) {
+    artPrintsFiltersEl.addEventListener("click", (e) => {
+      const btn = e.target.closest(".cb-art-filter-btn");
+      if (!btn) return;
+      activeArtFilter = btn.dataset.filter || "all";
+      artPrintsFiltersEl.querySelectorAll(".cb-art-filter-btn").forEach((b) => {
+        b.classList.toggle("active", b === btn);
+      });
+      renderArtPrintsGrid();
+    });
+  }
 
   // --- Interactive Art Crop Modal ---
   const cropArtBtn = document.getElementById("cb-crop-art-btn");

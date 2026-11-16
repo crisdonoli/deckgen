@@ -1577,3 +1577,106 @@ button:hover { background: var(--hover-bg); }
 @media (max-width: 760px) {
   .landing-howto-grid { grid-template-columns: 1fr; }
 }
+
+.cb-shapes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cb-shape-item {
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg);
+  font-size: 11px;
+}
+
+.cb-shape-item.active {
+  border-color: var(--accent);
+}
+
+.cb-shape-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.cb-shape-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cb-shape-color {
+  width: 24px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.cb-art-filter-btn.active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
+.cb-art-prints-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+  max-height: 58vh;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.cb-art-print-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  cursor: pointer;
+  text-align: left;
+  color: var(--fg);
+  transition: border-color 0.12s, transform 0.1s;
+}
+
+.cb-art-print-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.cb-art-print-card img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #111;
+}
+
+.cb-art-print-meta {
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.cb-art-print-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.cb-art-print-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--hover-bg);
+  color: var(--fg);
+}

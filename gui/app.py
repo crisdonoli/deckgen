@@ -11,7 +11,7 @@ import tornado.ioloop
 import tornado.web
 
 from config import PORT, ASSETS_DIR
-from handlers.card_builder import CardBuilderHandler
+from handlers.card_builder import CardBuilderArtPrintsHandler, CardBuilderHandler
 from handlers.browse_dirs import BrowseDirsHandler
 from handlers.clear_cache import ClearCacheHandler
 from handlers.convert import ConvertImagesHandler
@@ -40,6 +40,7 @@ def make_app():
             (r"/", LandingHandler),
             (r"/card-builder", CardBuilderHandler),
             (r"/api/card-builder/search", CardBuilderSearchHandler),
+            (r"/api/card-builder/art-prints", CardBuilderArtPrintsHandler),
             (r"/api/card-builder/upload-txt", CardBuilderUploadTxtHandler),
             (r"/api/card-builder/templates", CardBuilderTemplatesHandler),
             (r"/api/card-builder/save-card", CardBuilderSaveCardHandler),

@@ -21,7 +21,7 @@
     }
   </style>
   <script src="/static/js/common.js?v=5" defer></script>
-  <script src="/static/js/card_builder.js?v=11" defer></script>
+  <script src="/static/js/card_builder.js?v=14" defer></script>
 </head>
 <body>
   $navbar
@@ -97,6 +97,35 @@
           <button type="button" id="cb-crop-cancel-btn" class="ps-btn">Cancel</button>
           <button type="button" id="cb-crop-apply-btn" class="ps-btn ps-btn-primary">Apply Crop</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scryfall Alternate Arts Modal -->
+  <div id="cb-art-prints-modal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 860px; width: 94vw;">
+      <div class="modal-header">
+        <span>🎨 Scryfall Alternate Arts</span>
+        <button type="button" id="cb-art-prints-close-btn" class="modal-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+          <input type="text" id="cb-art-prints-query" class="ps-input" placeholder="Card name on Scryfall..." style="flex: 1; min-width: 180px;">
+          <button type="button" id="cb-art-prints-search-btn" class="ps-btn ps-btn-primary">Search</button>
+          <label style="display: flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; margin: 0;">
+            <input type="checkbox" id="cb-art-prints-full-card" style="width: auto;">
+            <span>Use Full Card Image (for Borderless/Full Art)</span>
+          </label>
+        </div>
+        <div id="cb-art-prints-filters" style="display: flex; gap: 6px; flex-wrap: wrap;">
+          <button type="button" class="ps-mini-btn cb-art-filter-btn active" data-filter="all">All</button>
+          <button type="button" class="ps-mini-btn cb-art-filter-btn" data-filter="Extended Art">Extended Art</button>
+          <button type="button" class="ps-mini-btn cb-art-filter-btn" data-filter="Borderless">Borderless</button>
+          <button type="button" class="ps-mini-btn cb-art-filter-btn" data-filter="Showcase">Showcase</button>
+          <button type="button" class="ps-mini-btn cb-art-filter-btn" data-filter="Full Art">Full Art</button>
+        </div>
+        <div id="cb-art-prints-status" style="font-size: 12px; opacity: 0.8;"></div>
+        <div id="cb-art-prints-grid" class="cb-art-prints-grid"></div>
       </div>
     </div>
   </div>
@@ -184,6 +213,7 @@
             <option value="2400"></option>
           </datalist>
           <button type="button" id="cb-export-pdf-btn" class="ps-btn ps-btn-ok">Export PDF</button>
+          <button type="button" id="cb-export-all-pdf-btn" class="ps-btn ps-btn-ok" title="Export all loaded cards to PDF">Export All PDF</button>
         </div>
       </div>
     </div>
@@ -238,6 +268,7 @@
           <div class="ps-group-title">Artwork</div>
           <label class="ps-label" for="cb-art-url">Art URL</label>
           <input type="text" id="cb-art-url" class="ps-input" placeholder="https://cards.scryfall.io/art_crop/...">
+          <button type="button" id="cb-browse-arts-btn" class="ps-btn" style="width: 100%; margin-top: 6px;">🎨 Browse Scryfall Arts (Extended / Borderless)</button>
           <label class="ps-label" for="cb-art-file" style="margin-top: 6px;">Upload Local Art</label>
           <input type="file" id="cb-art-file" class="ps-file-input" accept="image/png,image/jpeg,image/webp">
           <button type="button" id="cb-crop-art-btn" class="ps-btn" style="width: 100%; margin-top: 6px;">✂ Crop Art to Box</button>
@@ -256,6 +287,18 @@
             <input type="range" id="cb-art-oy" min="-400" max="400" step="2" value="0">
             <span class="ps-val" id="val-art-oy">0px</span>
           </div>
+        </div>
+
+        <div class="ps-section">
+          <div class="ps-row-between">
+            <div class="ps-group-title" style="margin:0;">Overlay Shapes</div>
+            <div style="display:flex; gap:4px;">
+              <button type="button" id="cb-add-rect-btn" class="ps-mini-btn" title="Add rectangle backdrop">+ Box</button>
+              <button type="button" id="cb-add-round-btn" class="ps-mini-btn" title="Add rounded box backdrop">+ Rounded</button>
+              <button type="button" id="cb-add-circle-btn" class="ps-mini-btn" title="Add circle/ellipse backdrop">+ Circle</button>
+            </div>
+          </div>
+          <div id="cb-shapes-list" class="cb-shapes-list" style="margin-top:6px;"></div>
         </div>
       </div>
 

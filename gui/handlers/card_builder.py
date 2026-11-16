@@ -44,9 +44,9 @@ DEFAULT_LAYOUT = {
     "art": {"x": 64, "y": 136, "w": 622, "h": 446, "scale": 1.0, "offset_x": 0, "offset_y": 0},
     "title": {"x": 84, "y": 118, "max_w": 450, "font_size": pt(9.0), "color": "#111111"},
     "official_title": {"x": 84, "y": 140, "max_w": 450, "font_size": pt(5.5), "color": "#111111"},
-    "mana_cost": {"x": 664, "y": 116, "size": pt(6.5), "align": "right"},
+    "mana_cost": {"x": 664, "y": 116, "size": pt(8.5), "align": "right"},
     "type_line": {"x": 84, "y": 622, "max_w": 500, "font_size": pt(7.5), "color": "#111111"},
-    "set_symbol": {"x": 664, "y": 614, "size": pt(8.0), "align": "right"},
+    "set_symbol": {"x": 664, "y": 614, "size": pt(9.8), "align": "right"},
     "oracle_box": {"x": 84, "y": 654, "w": 582, "h": 284, "font_size": pt(7.2), "color": "#111111"},
     "pt_box": {"x": 562, "y": 908, "w": 123, "h": 66},
     "pt_text": {"x": 624, "y": 941, "font_size": pt(9.2), "color": "#111111"},
@@ -292,6 +292,79 @@ async def fetch_card_from_scryfall(query, exact=False):
     except Exception:
         return None
     return None
+
+
+async def fetch_card_prints_from_scryfall(query):
+    """Obtiene todas las impresiones y artes alternativos (Extended Art, Borderless, Showcase, etc.) desde Scryfall."""
+    client = tornado.httpclient.AsyncHTTPClient()
+    headers = {"User-Agent": "DeckGenCardBuilder/1.0", "Accept": "application/json"}
+    clean_q = (query or "").strip()
+    if not clean_q:
+        return []
+
+    urls = [
+        f"https://api.scryfall.com/cards/search?q={urllib.parse.quote(f'!\"{clean_q}\"')}&unique=prints&order=released",
+        f"https://api.scryfall.com/cards/search?q={urllib.parse.quote(clean_q)}&unique=prints&order=released",
+    ]
+    raw_items = []
+    for url in urls:
+        try:
+            resp = await client.fetch(
+                url, headers=headers, raise_error=False, request_timeout=30, connect_timeout=10
+            )
+            if resp.code == 200:
+                payload = json.loads(resp.body.decode("utf-8"))
+                raw_items = payload.get("data") or []
+                if raw_items:
+                    break
+        except Exception:
+            continue
+
+    prints = []
+    for raw_card in raw_items[:60]:
+        faces = raw_card.get("card_faces")
+        primary = faces[0] if faces else raw_card
+        image_uris = primary.get("image_uris") or raw_card.get("image_uris") or {}
+        art_crop = image_uris.get("art_crop", "")
+        full_img = image_uris.get("border_crop") or image_uris.get("large") or image_uris.get("normal") or ""
+        if not art_crop and not full_img:
+            continue
+
+        effects = [str(e).lower() for e in (raw_card.get("frame_effects") or [])]
+        border_color = str(raw_card.get("border_color") or "").lower()
+        is_full_art = bool(raw_card.get("full_art"))
+        promo_types = [str(p).lower() for p in (raw_card.get("promo_types") or [])]
+
+        tags = []
+        if "extendedart" in effects:
+            tags.append("Extended Art")
+        if border_color == "borderless":
+            tags.append("Borderless")
+        if "showcase" in effects:
+            tags.append("Showcase")
+        if is_full_art:
+            tags.append("Full Art")
+        if "etched" in effects:
+            tags.append("Etched")
+        if not tags:
+            tags.append("Standard")
+
+        prints.append({
+            "id": raw_card.get("id", ""),
+            "name": primary.get("name") or raw_card.get("name", ""),
+            "set": str(raw_card.get("set", "")).upper(),
+            "set_name": raw_card.get("set_name", ""),
+            "collector_number": str(raw_card.get("collector_number", "")),
+            "artist": primary.get("artist") or raw_card.get("artist", ""),
+            "art_crop_url": art_crop or full_img,
+            "full_image_url": full_img or art_crop,
+            "tags": tags,
+            "frame_effects": effects,
+            "border_color": border_color,
+            "full_art": is_full_art,
+            "promo_types": promo_types,
+        })
+    return prints
 
 
 def get_json_dir(target_dir):
@@ -771,6 +844,18 @@ def compose_card_pdf(
     gc.collect()
 
     return dest_path, used_pdf_components
+
+
+class CardBuilderArtPrintsHandler(tornado.web.RequestHandler):
+    async def get(self):
+        self.set_header("Content-Type", "application/json")
+        query = self.get_argument("name", "").strip()
+        if not query:
+            self.set_status(400)
+            self.write(json.dumps({"error": "Missing card name."}))
+            return
+        prints = await fetch_card_prints_from_scryfall(query)
+        self.write(json.dumps({"prints": prints}))
 
 
 class CardBuilderExportPdfHandler(tornado.web.RequestHandler):
