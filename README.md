@@ -17,8 +17,7 @@ Launcher options (`run.py`):
 ### Assets & Custom Landing Background
 - Create the `assets/` folder (`mana-master`, `keyrune-master`, `Automated Templates`, `Manual Templates`, and HQ Arts) in the project root.
 - Download [Templates](https://drive.google.com/file/d/1C5r1OsjAq7FGWpso7icj8tdvipJ35DfH/view?usp=drive_link) and [Complementary Arts](https://drive.google.com/file/d/1zORJ_leLgLwO7drID9IsoIF91zrIoK4M/view?usp=sharing) and extract both archives into `assets/`.
-- *(Optional)* Place a custom landing background image at `gui/static/images/landing-bg.png` (or `.jpg` / `.webp`, recommended **1920×1080 px** or **2560×1440 px**, 16:9).
-
+- 
 Your directory tree should look like:
 
 ```text
