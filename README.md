@@ -1,4 +1,4 @@
-# DeckGen Studio v2
+# DeckGen Studio
 
 Hybrid local web application (**Python FastAPI** backend + **HTML/CSS/Vanilla ES Modules** frontend, zero build step) for designing high-resolution Magic: The Gathering proxy cards and laying out print-ready PDF sheets.
 
@@ -15,8 +15,43 @@ Launcher options (`run.py`):
 - `--no-browser` (starts the server without opening a browser tab)
 
 ### Assets & Custom Landing Background
-- Place your `assets/` folder (`mana-master`, `keyrune-master`, `Automated Templates`, `Manual Templates`) in the project root.
+- Create the `assets/` folder (`mana-master`, `keyrune-master`, `Automated Templates`, `Manual Templates`, and HQ Arts) in the project root.
+- Download [Templates](https://drive.google.com/file/d/1C5r1OsjAq7FGWpso7icj8tdvipJ35DfH/view?usp=drive_link) and [Complementary Arts](https://drive.google.com/file/d/1zORJ_leLgLwO7drID9IsoIF91zrIoK4M/view?usp=sharing) and extract both archives into `assets/`.
 - *(Optional)* Place a custom landing background image at `gui/static/images/landing-bg.png` (or `.jpg` / `.webp`, recommended **1920×1080 px** or **2560×1440 px**, 16:9).
+
+Your directory tree should look like:
+
+```text
+.
+├── assets
+│   ├── artofmtg_artists_cards.json
+│   ├── artofmtg_cards.json
+│   ├── Automated Templates
+│   ├── bloomburrow.json
+│   ├── foundations.json
+│   ├── keyrune-master
+│   ├── lost-caverns.json
+│   ├── mana-master
+│   ├── Manual Templates
+│   ├── murders-karlov.json
+│   └── wild-eldraine.json
+├── gui
+│   ├── app.py
+│   ├── config.py
+│   ├── core
+│   ├── data
+│   ├── __init__.py
+│   ├── __main__.py
+│   ├── routes
+│   ├── services
+│   ├── static
+│   ├── templates
+│   └── utils
+├── tests
+├── README.md
+├── requirements.txt
+└── run.py
+```
 
 ## Key Features
 
@@ -47,3 +82,16 @@ Launcher options (`run.py`):
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+
+## External Tools & Credits
+
+- [Art of MtG](http://www.artofmtg.com/) — High-resolution Magic: The Gathering artwork archive.
+- [Scryfall API](https://scryfall.com/docs/api) — Card metadata, printings, and fallback artwork lookup.
+
+## Support
+
+If you find this project useful, you can support its development here: [Buy Me a Coffee](https://buymeacoffee.com/cridonoso)
+
+## License
+
+This project is free and open-source software licensed under the **MIT License**.
