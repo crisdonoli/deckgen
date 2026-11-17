@@ -14,10 +14,9 @@ Launcher options (`run.py`):
 - `--host 127.0.0.1`
 - `--no-browser` (starts the server without opening a browser tab)
 
-### Assets & Custom Landing Background
-- Create the `assets/` folder (`mana-master`, `keyrune-master`, `Automated Templates`, `Manual Templates`, and HQ Arts) in the project root.
-- Download [Templates](https://drive.google.com/file/d/1C5r1OsjAq7FGWpso7icj8tdvipJ35DfH/view?usp=drive_link) and [Complementary Arts](https://drive.google.com/file/d/1zORJ_leLgLwO7drID9IsoIF91zrIoK4M/view?usp=sharing) and extract both archives into `assets/`.
-- 
+### Assets & Custom Landing Background (`mana-master`, `keyrune-master`, `Automated Templates`, `Manual Templates`, and HQ Arts) 
+- Download [Templates](https://drive.google.com/file/d/1C5r1OsjAq7FGWpso7icj8tdvipJ35DfH/view?usp=drive_link) and extract it into the root folder of this project. 
+
 Your directory tree should look like:
 
 ```text
