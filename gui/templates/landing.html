@@ -1,47 +1,55 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>DeckGen</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" media="print" onload="this.media='all'">
-  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"></noscript>
-  <link rel="stylesheet" href="/static/css/main.css?v=3">
-  <script src="/static/js/common.js?v=5" defer></script>
+  <title>DeckGen Studio</title>
+  <link rel="stylesheet" href="/static/css/main.css?v=24">
+  <script type="module" src="/static/js/landing.js?v=23"></script>
 </head>
 <body>
   $navbar
-  <main class="landing">
-    <div class="landing-hero-banner">
-      <img class="landing-hero-banner-img" src="/static/images/landing-banner.svg" alt="DeckGen banner">
-      <div class="landing-hero-banner-overlay">
-        <h1>DeckGen</h1>
-        <p>Another tool for creating your proxy decks</p>
+  <main class="landing-minimal">
+    <div class="landing-card-box">
+      <img class="landing-logo" src="/static/images/card-builder.svg" alt="DeckGen Studio">
+      <h1>DeckGen Studio</h1>
+      <p class="landing-subtitle">Design high-resolution proxy cards and lay out print-ready sheets.</p>
+      <div class="landing-cta-row">
+        <button type="button" id="btn-create-project" class="btn btn-primary btn-lg">✨ Create Project</button>
+        <button type="button" id="btn-load-project" class="btn btn-lg">📂 Load Project</button>
+      </div>
+      <div id="landing-active-info" class="landing-recent" style="display:none;">
+        <div>Active project: <strong id="landing-project-name"></strong></div>
+        <div id="landing-project-path" style="font-family:monospace; font-size:11px; margin:4px 0 10px;"></div>
+        <div class="row" style="justify-content:center; flex-wrap:wrap;">
+          <a href="/card-builder" class="btn btn-primary btn-sm">Open Card Builder</a>
+          <a href="/deck-generator" class="btn btn-sm">Open Deck Generator</a>
+          <button type="button" id="btn-clear-active-project" class="btn btn-sm" title="Clear active project without deleting files">🧹 Clear Project</button>
+        </div>
+      </div>
+      <div id="landing-projects-section" class="landing-recent" style="display:none; text-align:left;">
+        <div style="font-weight:600; margin-bottom:8px; color:var(--text);">📋 Saved Projects (only the selected one is loaded)</div>
+        <div id="landing-projects-list" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto;"></div>
+      </div>
+      <div style="margin-top: 16px; font-size: 12px;">
+        <a href="/tutorial" style="color: var(--accent); text-decoration: none;">📖 User Guide (Tutorial)</a> &nbsp;·&nbsp; <a href="https://buymeacoffee.com/cridonoso" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: none;">☕ Buy Me a Coffee</a>
       </div>
     </div>
-    <div class="cards-grid">
-      <a class="landing-card" href="/card-builder">
-        <span class="landing-icon"><img src="/static/images/card-builder.svg" alt="Card Builder"></span>
-        <h2>Card Builder</h2>
-        <p>Build and edit individual cards before exporting them.</p>
-      </a>
-      <a class="landing-card" href="/deck-generator">
-        <span class="landing-icon"><img src="/static/images/deck-generator.svg" alt="Deck Generator"></span>
-        <h2>Deck Generator</h2>
-        <p>Generate print sheets, verify decks and assign card backs.</p>
-      </a>
-      <a class="landing-card" href="/image-converter">
-        <span class="landing-icon"><img src="/static/images/image-converter.svg" alt="Image Converter"></span>
-        <h2>Image Converter</h2>
-        <p>Convert PNG and JPG images into standard PDF files.</p>
-      </a>
-    </div>
-    <div class="landing-support">
-      <a class="bmc-btn" href="https://buymeacoffee.com/cridonoso" target="_blank" rel="noopener noreferrer">
-        <span>☕ Buy Me a Coffee</span>
-      </a>
-    </div>
   </main>
+
+  <!-- Load Project Choice Modal -->
+  <div id="load-choice-modal" class="modal-overlay">
+    <div class="modal-content" style="width: 440px; max-width: 94vw;">
+      <div class="modal-header">
+        <span>📂 Load Project</span>
+        <button type="button" class="modal-close" id="load-choice-close">&times;</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
+        <p style="margin:0; color:var(--text-muted);">Choose how to restore your project:</p>
+        <button type="button" id="btn-load-by-folder" class="btn btn-primary">📁 Select Root Directory</button>
+        <button type="button" id="btn-load-by-file" class="btn">📄 Load state.json file</button>
+        <input type="file" id="load-state-file-input" accept=".json,application/json" hidden>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

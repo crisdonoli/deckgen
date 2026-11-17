@@ -1,118 +1,49 @@
-![DeckGen Banner](gui/static/images/landing-banner.svg)
+# DeckGen Studio v2
 
-# DeckGen
+Hybrid local web application (**Python FastAPI** backend + **HTML/CSS/Vanilla ES Modules** frontend, zero build step) for designing high-resolution Magic: The Gathering proxy cards and laying out print-ready PDF sheets.
 
-A web-based GUI toolkit for building custom proxy cards, assembling print-ready card sheets, and converting card images to standard-size PDFs.
-
-## Preview & Quick Workflow
-
-| 1. Build & Customize (`Card Builder`) | 2. Arrange & Print (`Deck Generator`) |
-| :---: | :---: |
-| [gui/static/images/2.png] | [gui/static/images/3.png] |
-| Search Scryfall or import `.txt`, reorder/hide frame layers, customize text & export up to 2400 DPI PDFs. | Load `fronts/`, configure paper, cut marks & MDFC backs, and generate print-ready PDFs. |
-
-<details>
-<summary>🎬 Watch full walkthrough (GIF / Video)</summary>
-
-<!-- Pega aquí la URL de video que genera GitHub al arrastrar un .mp4, o un GIF local: -->
-[gui/static/images/how-to-use.gif]
-
-</details>
-
----
-
-## Requirements
-
-- **Python 3.10+**
-- **Poppler (`pdftoppm`)** installed and available on your `PATH` (used for rendering PDF pages to PNG previews and print sheets)
-  - Linux (Debian/Ubuntu): `sudo apt install poppler-utils`
-  - macOS (Homebrew): `brew install poppler`
-  - Windows: install Poppler for Windows and add its `bin/` folder to `PATH`
-- **Assets folder (Required)**:
-  Download the `assets` package from [Google Drive](https://drive.google.com/file/d/1C5r1OsjAq7FGWpso7icj8tdvipJ35DfH/view?usp=sharing) and extract it into the **root directory of the project** so that `assets/` sits alongside `requirements.txt` and `gui/`:
-  ```text
-  deckgen/
-  ├── assets/
-  ├── gui/
-  ├── requirements.txt
-  └── README.md
-  ```
-
-### Python Dependencies
-
-Install the required Python packages with:
+## Quick Start
 
 ```bash
 pip install -r requirements.txt
+python run.py
 ```
 
----
+Launcher options (`run.py`):
+- `--port 8766` (automatically picks the next free port if busy)
+- `--host 127.0.0.1`
+- `--no-browser` (starts the server without opening a browser tab)
 
-## Launching the GUI
+### Assets & Custom Landing Background
+- Place your `assets/` folder (`mana-master`, `keyrune-master`, `Automated Templates`, `Manual Templates`) in the project root.
+- *(Optional)* Place a custom landing background image at `gui/static/images/landing-bg.png` (or `.jpg` / `.webp`, recommended **1920×1080 px** or **2560×1440 px**, 16:9).
 
-Start the local web server from the project root:
+## Key Features
+
+- **Landing & Workspace Root**:
+  - `Create Project` / `Load Project` linked to a Root Directory with `state.json` persistence.
+  - **Saved Projects** list tracking last-updated timestamps (only the active project is loaded into memory) + `Clear Project`.
+- **Card Builder**:
+  - Import MTGO `.txt` decklists (with live progress bar), single `.png` files, `.png` folders, or search by name (`gui/data/unified_art.json` + extra `gui/data/*.json` via inverted-token & fuzzy search, with rate-limited Scryfall fallback and `/api/art/proxy`).
+  - `Loaded Cards` vs. `Ready to Export` workflow with `Select All`, per-card single-export collision check, and batch export progress bar.
+  - Interactive preview (click/drag/resize/wheel), **Undo / Redo** (`Ctrl+Z` / `Ctrl+Y`), independent per-element text colors, automatic parenthesized **Original Name**, **Art Over Title / Frame (Pop-Out)**, duplicable translucent **Background Boxes**, **Template Crop Masks**, independent **Layer Manager** with drag & drop indicator, and **Frame Components** hover previews.
+- **Deck Generator**:
+  - Unified Office Ribbon toolbar with **Fronts Folder**, **Set Back (PDF/PNG)** (auto-converts PNG/JPG to PDF), paper/cut-mark settings, **Dual Preview** (`Both`, `Only Fronts`, `Only Backs`), and individual card scaling.
+  - Click any **Front** card to open the **Custom Back** modal (shows project card thumbnails + upload from computer for flip/DFC cards) and update **Backs** immediately.
+- **Tutorial**: Built-in interactive User Guide tab covering the full workflow.
+
+## Project Structure
+
+- `run.py`: Cross-platform standalone launcher (Linux, macOS, Windows).
+- `gui/app.py`: FastAPI server, static/assets mounting, and no-cache headers.
+- `gui/core/workspace.py`: Root Directory management, atomic `state.json` persistence, and collision versioning (`-1`, `-2`).
+- `gui/core/art_index.py`: $O(1)$ + inverted-token + fuzzy index over `gui/data/unified_art.json` and extra JSONs, plus Scryfall cache.
+- `gui/core/card_renderer.py`: Independent layer composition, pop-out art, brightness, background color, and PDF/PNG export.
+- `gui/core/sheets.py` & `gui/services/deck_service.py`: Sheet layout, individual card scaling, custom backs, and background PNG/JPG → PDF conversion.
+- `gui/static/js/modules/`: Modular ES6 frontend (`workspace_client.js`, `crop_masks.js`, `layer_manager.js`).
+
+## Tests
 
 ```bash
-python gui
+python3 -m unittest discover -s tests -v
 ```
-
-Then open your browser at `http://localhost:8888`.
-
----
-
-## Using the GUI
-
-### Navigation Bar (Top)
-- **Home / Card Builder / Deck Generator**: Switch between tools. Your current workspace state is preserved automatically in browser storage.
-- **💾 Save Project**: Downloads a complete snapshot (`state_<date>.json`) containing both your Card Builder and Deck Generator settings, folder paths, and loaded cards.
-- **📂 Load Project**: Restores a previously saved `state_<date>.json` file so you can resume right where you left off.
-- **🌙 / ☀**: Toggle between light and dark themes.
-
----
-
-### 1. Card Builder (`/card-builder`)
-Design and customize individual cards before exporting them as standard-size PDFs:
-
-1. **Deck Folder**: Click **📁 Browse** to select (or create) your working deck folder.
-2. **Load Cards**:
-   - **Scryfall Search**: Enter a card name and click **Search** to fetch card metadata, artwork, and auto-selected frame layers.
-   - **Import MTGO List (`.txt`)**: Select an MTGO-format `.txt` decklist and click **Parse .txt & Save JSONs** (you can click **✕ Cancel** at any time to abort). Parsed cards are cached inside `<deck-folder>/json/` so subsequent loads are instant.
-3. **Customize**:
-   - **Frame Style & Layers**: Pick frame styles (e.g., `Automated Templates/normal`) and individual frame layer components.
-   - **Artwork**: Paste an image URL or upload local artwork, adjust zoom/offset sliders, or click **✂️ Crop Art to Box** to interactively crop the image (drag to move, drag edges/corners to resize, or enable *Aspect Lock* to match the Art Box ratio).
-   - **Text & Layout**: Edit card name, mana cost, type line, set code/rarity, oracle/flavor text, P/T, artist, contrast colors, and enable **Interactive Mode** to drag/resize elements directly on the canvas. Use **Undo / Redo** as needed.
-4. **Save & Export**:
-   - **Save JSON** saves the card configuration to `<deck-folder>/json/`.
-   - **Export PDF** composites a high-resolution PDF into `<deck-folder>/fronts/`.
-
----
-
-### 2. Deck Generator (`/deck-generator`)
-Arrange your card PDFs into print-ready sheets with cut marks and card backs:
-
-1. **Fronts Tab**:
-   - Load card PDFs via **📁 Load PDF Folder** or set the **Export directory** in the **Export** tab.
-   - Click **📋 Verify** to inspect your deck against an `.xml` or MTGO `.txt` list and duplicate any missing repeated cards.
-   - Configure **Paper** (`a3`, `a4`, `a4-3`), **Landscape**, **Cut lines** (`none`, `full`, `corners`), **Card spacing (mm)**, **Cut color**, **Thickness**, and **Mark length**.
-2. **Backs Tab**:
-   - Optionally upload a generic **Card back** (PDF or image). If omitted, cards without a custom back render as blank white backs.
-   - Click **🔄 Custom backs / MDFC (PDF)** to assign specific PDF backs to double-faced or selected cards.
-3. **Live Paginated Preview**:
-   - The main preview area automatically renders your sheets for both **Fronts** and **Backs** (mirroring backs for duplex printing by default).
-   - Use **◀ / ▶** at the top of the preview to browse across all pages, and any updates to card PDFs in your deck folder will refresh automatically.
-4. **Export Tab**:
-   - Click **📁 Browse** to choose or create the destination folder.
-   - Select **Face** (`fronts` or `backs`) and click **Generate PDF** to build the final multi-page print sheet PDF.
-
----
-
-### 3. Image Converter (`/image-converter`)
-Quickly convert `.png` or `.jpg` card images into standard-sized PDF files ready for Deck Generator.
-
----
-
-## Support
-
-If you find DeckGen useful, you can support the project here:
-
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-cridonoso-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/cridonoso)

@@ -1,16 +1,17 @@
 <header class="navbar">
-  <a class="navbar-brand" href="/">DeckGen</a>
-  <nav class="navbar-links">
-    <a class="navbar-link" href="/">Home</a>
-    <a class="navbar-link" href="/card-builder">Card Builder</a>
-    <a class="navbar-link" href="/deck-generator">Deck Generator</a>
-    <a class="navbar-link" href="/image-converter">Image Converter</a>
-  </nav>
+  <div class="navbar-left">
+    <a class="navbar-brand" href="/">DeckGen Studio</a>
+    <nav class="navbar-links">
+      <a class="navbar-link" data-nav="home" href="/">Home</a>
+      <a class="navbar-link" data-nav="card-builder" href="/card-builder">Card Builder</a>
+      <a class="navbar-link" data-nav="deck-generator" href="/deck-generator">Deck Generator</a>
+      <a class="navbar-link" data-nav="tutorial" href="/tutorial">Tutorial</a>
+    </nav>
+  </div>
   <div class="navbar-actions">
-    <button type="button" id="nav-save-project-btn" class="navbar-btn" title="Save complete project state (state_date.json)">Save Project</button>
-    <button type="button" id="nav-load-project-btn" class="navbar-btn" title="Load previous project state (.json)">Load Project</button>
-    <button type="button" id="nav-clean-all-btn" class="navbar-btn" title="Clear all loaded project state and cache">Clean All</button>
-    <input type="file" id="nav-load-project-input" accept=".json,application/json" hidden>
-    <button type="button" id="theme-toggle" class="icon-btn" title="Switch to dark theme" aria-label="Switch to dark theme">🌙</button>
+    <a href="https://buymeacoffee.com/cridonoso" target="_blank" rel="noopener noreferrer" class="btn btn-sm" style="background:#ffdd00; color:#111111; border-color:#e6c700; font-weight:600; text-decoration:none;">☕ Buy Me a Coffee</a>
+    <span id="nav-project-badge" class="project-badge" title="Active Workspace Root">No project</span>
+    <button type="button" id="nav-save-state-btn" class="btn btn-sm" title="Save progress to state.json" disabled>💾 Save</button>
+    <button type="button" id="theme-toggle" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">🌙</button>
   </div>
 </header>

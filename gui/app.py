@@ -1,97 +1,47 @@
 import logging
 import os
 import sys
-import webbrowser
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_GUI_DIR = os.path.dirname(os.path.abspath(__file__))
+if _GUI_DIR not in sys.path:
+    sys.path.insert(0, _GUI_DIR)
 
-import tornado.httpserver
-import tornado.httputil
-import tornado.ioloop
-import tornado.web
+from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 
-from config import PORT, ASSETS_DIR
-from handlers.card_builder import CardBuilderArtPrintsHandler, CardBuilderHandler
-from handlers.browse_dirs import BrowseDirsHandler
-from handlers.clear_cache import ClearCacheHandler
-from handlers.convert import ConvertImagesHandler
-from handlers.custom_backs import CustomBacksHandler
-from handlers.deck import DeckCheckHandler, DeckDuplicateHandler, DeckWatchHandler
-from handlers.deck_generator import DeckGeneratorHandler
-from handlers.download import DownloadHandler
-from handlers.generate import GenerateHandler
-from handlers.image_converter import ImageConverterHandler
-from handlers.landing import LandingHandler
-from handlers.preview import PreviewHandler
-from handlers.progress import ProgressHandler
-from handlers.card_builder import (
-    CardBuilderHandler,
-    CardBuilderSearchHandler,
-    CardBuilderUploadTxtHandler,
-    CardBuilderTemplatesHandler,
-    CardBuilderSaveCardHandler,
-    CardBuilderExportPdfHandler,
-)
-
-def make_app():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    return tornado.web.Application(
-        [
-            (r"/", LandingHandler),
-            (r"/card-builder", CardBuilderHandler),
-            (r"/api/card-builder/search", CardBuilderSearchHandler),
-            (r"/api/card-builder/art-prints", CardBuilderArtPrintsHandler),
-            (r"/api/card-builder/upload-txt", CardBuilderUploadTxtHandler),
-            (r"/api/card-builder/templates", CardBuilderTemplatesHandler),
-            (r"/api/card-builder/save-card", CardBuilderSaveCardHandler),
-            (r"/api/card-builder/export-pdf", CardBuilderExportPdfHandler),
-            (r"/assets/(.*)", tornado.web.StaticFileHandler, {"path": ASSETS_DIR}),
-            (r"/deck-generator", DeckGeneratorHandler),
-            (r"/image-converter", ImageConverterHandler),
-            (r"/generate", GenerateHandler),
-            (r"/download", DownloadHandler),
-            (r"/progress", ProgressHandler),
-            (r"/preview", PreviewHandler),
-            (r"/convert", ConvertImagesHandler),
-            (r"/clear-cache", ClearCacheHandler),
-            (r"/deck/check", DeckCheckHandler),
-            (r"/deck/duplicate", DeckDuplicateHandler),
-            (r"/deck/watch", DeckWatchHandler),
-            (r"/deck/custom_backs", CustomBacksHandler),
-            (r"/browse-dirs", BrowseDirsHandler),
-        ],
-        static_path=os.path.join(base_dir, "static"),
-    )
+from config import ASSETS_DIR
+from core.art_index import art_index
+from routes import art, card_builder, deck_generator, pages, workspace
 
 
-def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    app = make_app()
-    tornado.httputil.set_parse_body_config(
-        tornado.httputil.ParseBodyConfig(
-            multipart=tornado.httputil.ParseMultipartConfig(max_parts=100000)
-        )
-    )
-    server = tornado.httpserver.HTTPServer(
-        app,
-        max_body_size=2 * 1024 ** 3,
-        max_buffer_size=2 * 1024 ** 3,
-    )
-    port = PORT
-    for offset in range(10):
-        try:
-            server.listen(port)
-            break
-        except OSError as e:
-            if e.errno == 98 and offset < 9:
-                port += 1
-                continue
-            raise
-    url = f"http://127.0.0.1:{port}/"
-    print(f"Listening on {url}")
-    webbrowser.open(url)
-    tornado.ioloop.IOLoop.current().start()
+def create_app() -> FastAPI:
+    app = FastAPI(title="DeckGen Studio", version="2.0.0")
+
+    static_dir = os.path.join(_GUI_DIR, "static")
+    if os.path.isdir(static_dir):
+        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+    if os.path.isdir(ASSETS_DIR):
+        app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
+
+    app.include_router(pages.router)
+    app.include_router(workspace.router)
+    app.include_router(art.router)
+    app.include_router(card_builder.router)
+    app.include_router(deck_generator.router)
+
+    @app.on_event("startup")
+    async def _warm_art_index():
+        art_index.ensure_loaded()
+
+    @app.middleware("http")
+    async def _no_cache_static(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/") or request.url.path in ("/", "/card-builder", "/deck-generator", "/tutorial"):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
+    return app
 
 
-if __name__ == "__main__":
-    main()
+app = create_app()

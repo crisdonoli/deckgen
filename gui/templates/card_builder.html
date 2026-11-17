@@ -1,9 +1,9 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Card Builder - DeckGen</title>
-  <link rel="stylesheet" href="/static/css/main.css?v=4">
+  <title>Card Builder - DeckGen Studio</title>
+  <link rel="stylesheet" href="/static/css/main.css?v=21">
   <link rel="stylesheet" href="/assets/mana-master/css/mana.min.css">
   <link rel="stylesheet" href="/assets/keyrune-master/css/keyrune.min.css">
   <style>
@@ -11,471 +11,351 @@
       font-family: "BelerenLocal";
       src: url("/assets/mana-master/docs/fonts/beleren.woff") format("woff"),
            url("/assets/mana-master/docs/fonts/beleren.ttf") format("truetype");
-      font-weight: bold;
+      font-weight: normal;
+      font-style: normal;
     }
     @font-face {
       font-family: "MPlantinLocal";
       src: url("/assets/mana-master/docs/fonts/mplantin.woff") format("woff"),
            url("/assets/mana-master/docs/fonts/mplantin.ttf") format("truetype");
       font-weight: normal;
+      font-style: normal;
     }
   </style>
-  <script src="/static/js/common.js?v=5" defer></script>
-  <script src="/static/js/card_builder.js?v=17" defer></script>
+  <script type="module" src="/static/js/card_builder.js?v=21"></script>
 </head>
 <body>
   $navbar
-
-  <!-- Preload local MTG icon & card fonts -->
-  <div aria-hidden="true" style="position:absolute; width:0; height:0; overflow:hidden; opacity:0; pointer-events:none;">
-    <i class="ms ms-w ms-cost"></i>
+  <div aria-hidden="true" style="position:fixed; left:-9999px; top:-9999px; opacity:0; pointer-events:none;">
+    <i class="ms ms-w"></i>
     <i class="ss ss-mtg"></i>
-    <span style="font-family: 'BelerenLocal';">A</span>
-    <span style="font-family: 'MPlantinLocal';">A</span>
+    <span style="font-family:'BelerenLocal';">A</span>
+    <span style="font-family:'MPlantinLocal';">A</span>
   </div>
 
-  <!-- Floating JPG Layer Preview Tooltip -->
-  <div id="cb-layer-hover-preview" class="cb-layer-hover-preview" hidden>
-    <img id="cb-layer-hover-img" alt="Layer preview">
-    <div id="cb-layer-hover-caption"></div>
-  </div>
+  <main class="cb-shell">
+    <!-- VIEW 1: DUAL LISTS (Loaded Cards vs Ready to Export) -->
+    <section id="cb-lists-view" class="cb-lists-view">
+      <div class="cb-toolbar-card">
+        <div class="row" style="flex-wrap:wrap; flex:1;">
+          <div>
+            <label class="label" style="margin-top:0;">Search Card (HD JSON / Scryfall)</label>
+            <div class="row">
+              <input type="text" id="cb-search-input" class="input" placeholder="e.g. Sol Ring" style="width:210px;">
+              <button type="button" id="cb-search-btn" class="btn btn-primary">Search</button>
+            </div>
+          </div>
+          <div>
+            <label class="label" style="margin-top:0;">Import Deck / Images</label>
+            <div class="row">
+              <button type="button" id="cb-import-txt-btn" class="btn">📄 MTGO .txt</button>
+              <input type="file" id="cb-import-txt-input" accept=".txt,text/plain" hidden>
+              <button type="button" id="cb-import-png-btn" class="btn">🖼 Single .png</button>
+              <input type="file" id="cb-import-png-input" accept=".png,.jpg,.jpeg,.webp" multiple hidden>
+              <button type="button" id="cb-import-dir-btn" class="btn">📁 .png Folder</button>
+            </div>
+          </div>
+          <div>
+            <label class="label" style="margin-top:0;">Global Variant (Library)</label>
+            <div class="row">
+              <select id="cb-global-style-select" class="select" style="width:200px;"></select>
+              <button type="button" id="cb-apply-global-style-btn" class="btn">Apply to entire library</button>
+            </div>
+          </div>
+        </div>
+      </div>
 
-  <div id="loading-overlay" class="overlay">
-    <div class="progress-box">
-      <div class="progress-bar-bg"><div id="progress-bar" class="progress-bar-fill indeterminate" style="width: 100%;"></div></div>
-      <div id="progress-status">Processing...</div>
-      <button type="button" id="cb-cancel-loading-btn" class="ps-btn" style="margin-top: 10px; display: none;">✕ Cancel</button>
-    </div>
-  </div>
+      <div class="cb-lists-columns">
+        <!-- Lista 1: Loaded Cards -->
+        <div class="cb-list-panel">
+          <div class="row-between">
+            <h2 style="margin:0; font-size:15px;">Loaded Cards (<span id="cb-loaded-count">0</span>)</h2>
+            <div class="row" style="gap:6px;"><button type="button" id="cb-select-all-btn" class="btn btn-sm">☑ Select All</button><input type="text" id="cb-filter-input" class="input" placeholder="Filter cards..." style="width:185px;"></div>
+          </div>
+          <div id="cb-loaded-grid" class="cb-card-grid"></div>
+        </div>
 
-  <!-- Deck Folder Browser Modal -->
-  <div id="cb-dir-browser-modal" class="modal-overlay">
-    <div class="modal-content" style="max-width: 560px; width: 92vw;">
+        <!-- Lista 2: Ready to Export -->
+        <div class="cb-list-panel">
+          <div class="row-between">
+            <h2 style="margin:0; font-size:15px;">Ready to Export (<span id="cb-ready-count">0</span>)</h2>
+          </div>
+          <div id="cb-ready-list" class="cb-ready-list"></div>
+          <div style="border-top:1px solid var(--border); padding-top:10px; display:flex; flex-direction:column; gap:8px;">
+            <div class="row">
+              <div style="flex:1;">
+                <label class="label" style="margin-top:0;">Destination</label>
+                <select id="cb-export-face" class="select">
+                  <option value="fronts">cards/fronts</option>
+                  <option value="backs">cards/backs</option>
+                </select>
+              </div>
+              <div style="flex:1;">
+                <label class="label" style="margin-top:0;">Format</label>
+                <select id="cb-export-format" class="select">
+                  <option value="pdf">PDF (Print)</option>
+                  <option value="png">PNG</option>
+                </select>
+              </div>
+              <div style="flex:1;">
+                <label class="label" style="margin-top:0;">DPI</label>
+                <select id="cb-export-dpi" class="select">
+                  <option value="600">600 DPI</option>
+                  <option value="1200" selected>1200 DPI</option>
+                  <option value="2400">2400 DPI</option>
+                </select>
+              </div>
+            </div>
+            <button type="button" id="cb-export-ready-btn" class="btn btn-primary">📤 Export Ready Cards</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: DETAIL EDITOR -->
+    <section id="cb-detail-view" class="cb-detail-view" style="display:none;">
+      <aside class="cb-sidebar">
+        <div class="row-between" style="margin-bottom:10px;">
+          <button type="button" id="cb-back-btn" class="btn">← Back</button>
+          <label class="row" style="cursor:pointer; font-size:12px;">
+            <input type="checkbox" id="cb-detail-ready-check">
+            <span>Ready</span>
+          </label>
+        </div>
+
+        <details class="dg-accordion" open>
+          <summary>Art & Adjustments</summary>
+          <div class="accordion-body">
+            <div class="row" style="margin-bottom:8px;">
+              <button type="button" id="cb-change-art-btn" class="btn btn-primary" style="flex:1;">🎨 Change Art</button>
+              <button type="button" id="cb-crop-art-btn" class="btn" style="flex:1;">✂ Crop Art</button>
+            </div>
+            <label class="row" style="font-size:12px; cursor:pointer; margin-bottom:6px; background:var(--surface); padding:5px 8px; border:1px solid var(--border); border-radius:var(--radius-sm);">
+              <input type="checkbox" id="cb-art-over-top">
+              <span>✨ Art Over Title / Frame (Pop-Out)</span>
+            </label>
+            <label class="label">Brightness (<span id="cb-brightness-val">1.00</span>)</label>
+            <input type="range" id="cb-brightness" min="0.3" max="1.8" step="0.05" value="1.0" style="width:100%;">
+            <label class="label">Art Zoom (<span id="cb-art-scale-val">1.00</span>)</label>
+            <input type="range" id="cb-art-scale" min="0.5" max="2.5" step="0.05" value="1.0" style="width:100%;">
+            <div class="row" style="margin-top:6px;">
+              <div style="flex:1;">
+                <label class="label" style="margin-top:0;">Offset X</label>
+                <input type="number" id="cb-art-ox" class="input" value="0" step="5">
+              </div>
+              <div style="flex:1;">
+                <label class="label" style="margin-top:0;">Offset Y</label>
+                <input type="number" id="cb-art-oy" class="input" value="0" step="5">
+              </div>
+            </div>
+            <label class="label">Background Color (Base Template)</label>
+            <div class="row">
+              <input type="color" id="cb-bg-color-picker" value="#111111" style="width:38px; height:28px; border:none; background:none; cursor:pointer;">
+              <input type="text" id="cb-bg-color-text" class="input" value="#111111">
+            </div>
+          </div>
+        </details>
+
+        <details class="dg-accordion" open>
+          <summary>Card Text</summary>
+          <div class="accordion-body">
+            <label class="label" style="margin-top:0;">Card Title</label>
+            <input type="text" id="cb-field-name" class="input">
+            <label class="label">Original Name (in parentheses)</label>
+            <input type="text" id="cb-field-official-name" class="input" placeholder="Auto-filled when editing title...">
+            <label class="label">Mana Cost</label>
+            <input type="text" id="cb-field-mana" class="input" placeholder="{1}{R}">
+            <label class="label">Type Line</label>
+            <input type="text" id="cb-field-type" class="input">
+            <label class="label">Rules Text (Oracle)</label>
+            <textarea id="cb-field-oracle" class="textarea" rows="4"></textarea>
+            <div class="row">
+              <div style="flex:1;">
+                <label class="label">P/T</label>
+                <input type="text" id="cb-field-pt" class="input" placeholder="2/2">
+              </div>
+              <div style="flex:1;">
+                <label class="label">Artist</label>
+                <input type="text" id="cb-field-artist" class="input">
+              </div>
+            </div>
+            <label class="label">Independent Text Colors</label>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+              <label class="row" style="font-size:11px; justify-content:space-between; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:4px;">
+                <span>Title</span>
+                <input type="color" id="cb-color-title" value="#111111" style="width:28px; height:22px; border:none; background:none; cursor:pointer;">
+              </label>
+              <label class="row" style="font-size:11px; justify-content:space-between; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:4px;">
+                <span>Type</span>
+                <input type="color" id="cb-color-type" value="#111111" style="width:28px; height:22px; border:none; background:none; cursor:pointer;">
+              </label>
+              <label class="row" style="font-size:11px; justify-content:space-between; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:4px;">
+                <span>Oracle</span>
+                <input type="color" id="cb-color-oracle" value="#111111" style="width:28px; height:22px; border:none; background:none; cursor:pointer;">
+              </label>
+              <label class="row" style="font-size:11px; justify-content:space-between; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:4px;">
+                <span>P/T</span>
+                <input type="color" id="cb-color-pt" value="#111111" style="width:28px; height:22px; border:none; background:none; cursor:pointer;">
+              </label>
+              <label class="row" style="font-size:11px; justify-content:space-between; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:4px;">
+                <span>Original</span>
+                <input type="color" id="cb-color-official" value="#111111" style="width:28px; height:22px; border:none; background:none; cursor:pointer;">
+              </label>
+              <label class="row" style="font-size:11px; justify-content:space-between; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:4px;">
+                <span>Artist</span>
+                <input type="color" id="cb-color-artist" value="#ffffff" style="width:28px; height:22px; border:none; background:none; cursor:pointer;">
+              </label>
+            </div>
+          </div>
+        </details>
+      </aside>
+
+      <div class="cb-stage">
+        <div class="cb-canvas-wrap">
+          <canvas id="card-canvas" width="750" height="1050"></canvas>
+        </div>
+        <div class="row" style="flex-wrap:wrap; justify-content:center;">
+          <label class="row" style="font-size:12px; cursor:pointer; background:var(--surface); padding:5px 10px; border:1px solid var(--border); border-radius:var(--radius-sm);">
+            <input type="checkbox" id="cb-interactive-mode" checked>
+            <span>Interactive editing (click/drag/wheel)</span>
+          </label>
+          <button type="button" id="cb-undo-btn" class="btn btn-sm" title="Undo (Ctrl+Z)" disabled>↩ Undo</button>
+          <button type="button" id="cb-redo-btn" class="btn btn-sm" title="Redo (Ctrl+Y)" disabled>↪ Redo</button>
+          <button type="button" id="cb-reset-layout-btn" class="btn btn-sm" title="Reset default positions">↺ Reset Positions</button>
+          <button type="button" id="cb-save-single-btn" class="btn">💾 Save Card</button>
+          <button type="button" id="cb-export-single-pdf-btn" class="btn btn-primary">📤 Export Card (PDF)</button>
+        </div>
+      </div>
+
+      <aside class="cb-sidebar right">
+        <details class="dg-accordion" open>
+          <summary>Frame Style</summary>
+          <div class="accordion-body">
+            <label class="label" style="margin-top:0;">Template Style</label>
+            <select id="cb-detail-style-select" class="select"></select>
+          </div>
+        </details>
+
+        <details class="dg-accordion" open>
+          <summary>Layer Manager (Independent Layers)</summary>
+          <div class="accordion-body">
+            <p style="margin:0 0 8px; font-size:11px; color:var(--text-muted);">Drag any layer independently to reorder.</p>
+            <ul id="cb-layer-list" class="layer-list"></ul>
+          </div>
+        </details>
+
+        <details class="dg-accordion" open>
+          <summary>Background Boxes / Transparency</summary>
+          <div class="accordion-body">
+            <p style="margin:0 0 8px; font-size:11px; color:var(--text-muted);">Add or duplicate solid-color translucent boxes to make text pop over full art.</p>
+            <div class="row" style="margin-bottom:8px; flex-wrap:wrap;">
+              <button type="button" id="cb-add-rect-btn" class="btn btn-sm">+ Rectangle</button>
+              <button type="button" id="cb-add-round-btn" class="btn btn-sm">+ Rounded</button>
+              <button type="button" id="cb-add-circle-btn" class="btn btn-sm">+ Circle</button>
+            </div>
+            <div id="cb-shapes-list" style="display:flex; flex-direction:column; gap:6px;"></div>
+          </div>
+        </details>
+
+        <details class="dg-accordion">
+          <summary>Frame Components</summary>
+          <div class="accordion-body" id="cb-frame-selectors"></div>
+        </details>
+      </aside>
+    </section>
+  </main>
+
+  <!-- MODAL: Change Art (Tabbed: Upload / Scryfall / Local JSONs) -->
+  <div id="cb-change-art-modal" class="modal-overlay">
+    <div class="modal-content" style="width: 780px; max-width: 95vw;">
       <div class="modal-header">
-        <span>📁 Select Deck Folder</span>
-        <button type="button" class="modal-close" id="cb-dir-browser-close-btn" aria-label="Close">&times;</button>
+        <span>🎨 Change Art</span>
+        <button type="button" class="modal-close" id="cb-ca-close">&times;</button>
       </div>
-      <div class="modal-body" style="display: flex; flex-direction: column; gap: 10px;">
-        <div style="display: flex; gap: 6px; align-items: center;">
-          <button type="button" id="cb-dir-browser-up-btn" class="ps-btn" title="Parent folder">⬆ Up</button>
-          <input type="text" id="cb-dir-browser-current" class="ps-input" readonly style="flex: 1; font-family: monospace;">
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:12px;">
+        <div class="row" style="border-bottom:1px solid var(--border); padding-bottom:8px;">
+          <button type="button" class="btn btn-primary cb-ca-tab" data-tab="json">📚 Search HD JSONs</button>
+          <button type="button" class="btn cb-ca-tab" data-tab="scryfall">🔍 Search Scryfall</button>
+          <button type="button" class="btn cb-ca-tab" data-tab="upload">📁 Upload Image</button>
         </div>
-        <div style="display: flex; gap: 6px; align-items: center;">
-          <input type="text" id="cb-dir-browser-new-name" class="ps-input" placeholder="New folder name..." style="flex: 1;">
-          <button type="button" id="cb-dir-browser-mkdir-btn" class="ps-btn">+ Create Folder</button>
+
+        <div id="cb-ca-panel-json" class="cb-ca-panel">
+          <div class="row" style="margin-bottom:10px;">
+            <input type="text" id="cb-ca-json-q" class="input" placeholder="Search by name, set, or artist...">
+            <button type="button" id="cb-ca-json-btn" class="btn btn-primary">Search</button>
+          </div>
+          <div id="cb-ca-json-grid" class="art-results-grid"></div>
         </div>
-        <div id="cb-dir-browser-list" style="max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);"></div>
-        <div id="cb-dir-browser-error" style="color: var(--danger); font-size: 12px; display: none;"></div>
-        <div style="display: flex; justify-content: flex-end; gap: 8px;">
-          <button type="button" id="cb-dir-browser-cancel-btn" class="ps-btn">Cancel</button>
-          <button type="button" id="cb-dir-browser-select-btn" class="ps-btn ps-btn-primary">Select This Folder</button>
+
+        <div id="cb-ca-panel-scryfall" class="cb-ca-panel" style="display:none;">
+          <div class="row" style="margin-bottom:10px;">
+            <input type="text" id="cb-ca-sf-q" class="input" placeholder="Card name on Scryfall...">
+            <button type="button" id="cb-ca-sf-btn" class="btn btn-primary">Search Prints</button>
+          </div>
+          <div id="cb-ca-sf-grid" class="art-results-grid"></div>
+        </div>
+
+        <div id="cb-ca-panel-upload" class="cb-ca-panel" style="display:none; text-align:center; padding:24px;">
+          <input type="file" id="cb-ca-upload-input" accept=".png,.jpg,.jpeg,.webp" hidden>
+          <button type="button" id="cb-ca-upload-btn" class="btn btn-primary btn-lg">Choose image from your computer</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Art Crop Modal -->
+  <!-- MODAL: Template Crop Masks -->
   <div id="cb-crop-modal" class="modal-overlay">
-    <div class="modal-content" style="max-width: 780px; width: 92vw;">
+    <div class="modal-content" style="width: 780px; max-width: 95vw;">
       <div class="modal-header">
-        <span>✂ Crop Artwork to Art Box</span>
-        <button type="button" id="cb-crop-close-btn" class="modal-close" aria-label="Close">&times;</button>
+        <span>✂ Crop Artwork (Template Crop Masks)</span>
+        <button type="button" class="modal-close" id="cb-crop-close-btn">&times;</button>
       </div>
-      <div class="modal-body" style="display: flex; flex-direction: column; gap: 12px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-          <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; margin: 0;">
-            <input type="checkbox" id="cb-crop-lock-ratio" style="width: auto;">
-            <span>Aspect Lock (Art Box)</span>
-          </label>
-          <span id="cb-crop-info" style="font-size: 12px; opacity: 0.8;">Drag box to move, drag corners to resize</span>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:12px;">
+        <div class="row-between" style="flex-wrap:wrap;">
+          <div class="row">
+            <label class="label" style="margin:0;">Mask:</label>
+            <select id="cb-crop-mask-select" class="select" style="width:260px;">
+              <option value="classic_box">Classic Art Box (682×477)</option>
+              <option value="extended_angled">Extended Art / Borderless (Angled)</option>
+              <option value="circular">Circular / Oval Vignette</option>
+              <option value="full_art">Full Art / Saga (Vertical)</option>
+              <option value="free">Libre / Rectangular</option>
+            </select>
+          </div>
+          <div class="row">
+            <label class="label" style="margin:0;">Zoom:</label>
+            <input type="range" id="cb-crop-zoom" min="0.5" max="2.5" step="0.05" value="1">
+          </div>
         </div>
-        <div style="display: flex; justify-content: center; align-items: center; background: #111; border-radius: 6px; padding: 8px; overflow: hidden;">
-          <canvas id="cb-crop-canvas" style="max-width: 100%; max-height: 60vh; cursor: crosshair; touch-action: none;"></canvas>
+        <div style="display:flex; justify-content:center; background:#111; padding:10px; border-radius:6px;">
+          <canvas id="cb-crop-canvas" style="max-width:100%; max-height:58vh; cursor:move;"></canvas>
         </div>
-        <div style="display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;">
-          <button type="button" id="cb-crop-reset-btn" class="ps-btn">Reset</button>
-          <button type="button" id="cb-crop-cancel-btn" class="ps-btn">Cancel</button>
-          <button type="button" id="cb-crop-apply-btn" class="ps-btn ps-btn-primary">Apply Crop</button>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" id="cb-crop-reset-btn" class="btn">Reset</button>
+          <button type="button" id="cb-crop-cancel-btn" class="btn">Cancel</button>
+          <button type="button" id="cb-crop-apply-btn" class="btn btn-primary">Apply Crop</button>
         </div>
       </div>
     </div>
   </div>
-
-  <!-- Scryfall Alternate Arts Modal -->
-  <div id="cb-art-prints-modal" class="modal-overlay">
-    <div class="modal-content" style="max-width: 860px; width: 94vw;">
+  <!-- MODAL: Import Progress Bar -->
+  <div id="cb-import-progress-modal" class="modal-overlay">
+    <div class="modal-content" style="width: 440px; max-width: 92vw;">
       <div class="modal-header">
-        <span>🎨 Scryfall Alternate Arts</span>
-        <button type="button" id="cb-art-prints-close-btn" class="modal-close" aria-label="Close">&times;</button>
+        <span>⏳ Loading Cards</span>
       </div>
-      <div class="modal-body" style="display: flex; flex-direction: column; gap: 10px;">
-        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-          <input type="text" id="cb-art-prints-query" class="ps-input" placeholder="Card name on Scryfall..." style="flex: 1; min-width: 180px;">
-          <button type="button" id="cb-art-prints-search-btn" class="ps-btn ps-btn-primary">Search</button>
-          <label style="display: flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; margin: 0;">
-            <input type="checkbox" id="cb-art-prints-full-card" style="width: auto;">
-            <span>Use Full Card Image (for Borderless/Full Art)</span>
-          </label>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
+        <div id="cb-import-progress-text" style="font-size:12.5px; color:var(--text);">Preparing list...</div>
+        <div style="width:100%; height:12px; background:var(--surface-2); border:1px solid var(--border); border-radius:999px; overflow:hidden;">
+          <div id="cb-import-progress-bar" style="width:0%; height:100%; background:var(--accent); transition:width 0.15s ease;"></div>
         </div>
-        <div id="cb-art-prints-filters" style="display: flex; gap: 6px; flex-wrap: wrap;">
-          <button type="button" class="ps-mini-btn cb-art-filter-btn active" data-filter="all">All</button>
-          <button type="button" class="ps-mini-btn cb-art-filter-btn" data-filter="Extended Art">Extended Art</button>
-          <button type="button" class="ps-mini-btn cb-art-filter-btn" data-filter="Borderless">Borderless</button>
-          <button type="button" class="ps-mini-btn cb-art-filter-btn" data-filter="Showcase">Showcase</button>
-          <button type="button" class="ps-mini-btn cb-art-filter-btn" data-filter="Full Art">Full Art</button>
-        </div>
-        <div id="cb-art-prints-status" style="font-size: 12px; opacity: 0.8;"></div>
-        <div id="cb-art-prints-grid" class="cb-art-prints-grid"></div>
+        <div id="cb-import-progress-sub" style="font-size:11px; color:var(--text-muted); text-align:right;">0 / 0</div>
       </div>
     </div>
   </div>
-
-  <div class="app card-builder-app ps-ui">
-    <!-- Left Panel: Deck Source, Scryfall & Card List (Photoshop Normalized Style) -->
-    <div class="panel ps-panel" id="options-panel">
-      <div class="panel-head">
-        <h1>Card Builder</h1>
-        <div class="head-actions">
-          <button type="button" id="panel-toggle" class="icon-btn" title="Hide panel" aria-label="Hide panel" aria-expanded="true" aria-controls="options-panel">◀</button>
-        </div>
-      </div>
-
-      <div class="ps-section">
-        <div class="ps-group-title">Workspace Source</div>
-        <label class="ps-label" for="cb-target-dir">Deck Folder (.txt / .json)</label>
-        <div class="ps-row-between">
-          <input type="text" id="cb-target-dir" class="ps-input" placeholder="/home/choroy/projects/deckgen/decks_json/..." style="flex: 1;">
-          <button type="button" id="cb-target-dir-browse-btn" class="ps-btn" title="Browse or create folder">📁 Browse</button>
-        </div>
-      </div>
-
-      <div class="ps-section">
-        <div class="ps-group-title">Import &amp; Search</div>
-        <label class="ps-label" for="cb-scryfall-input">Scryfall Search</label>
-        <div class="cb-search-row">
-          <input type="text" id="cb-scryfall-input" class="ps-input" placeholder="e.g. Mr. House, President and CEO">
-          <button type="button" id="cb-search-btn" class="ps-btn ps-btn-primary">Search</button>
-        </div>
-
-        <label class="ps-label" for="cb-txt-input" style="margin-top: 8px;">Import MTGO List (.txt)</label>
-        <input type="file" id="cb-txt-input" class="ps-file-input" accept=".txt,text/plain">
-        <button type="button" id="cb-upload-txt-btn" class="ps-btn" style="width: 100%; margin-top: 6px;">
-          Parse .txt &amp; Save JSONs
-        </button>
-      </div>
-
-      <div id="cb-status-msg" class="cb-status-msg"></div>
-
-      <div class="ps-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
-        <div class="ps-row-between">
-          <span class="ps-group-title" style="margin:0;">Loaded Cards (<span id="cb-cards-count">0</span>)</span>
-          <button type="button" id="cb-remove-card-btn" class="ps-mini-btn" title="Remove the active card from the list">✕ Remove</button>
-        </div>
-        <input type="text" id="cb-filter-cards" class="ps-input" placeholder="Filter cards..." style="margin: 5px 0;">
-        <ul id="cb-card-list" class="cb-card-list">
-          <li class="cb-empty-item">Search a card or upload a .txt list to begin.</li>
-        </ul>
-      </div>
-    </div>
-
-    <div class="panel-rail">
-      <button type="button" id="panel-rail-toggle" class="icon-btn" title="Show panel" aria-label="Show panel" aria-expanded="false" aria-controls="options-panel">▶</button>
-    </div>
-
-    <!-- Center Workspace: 750x1050 Card Canvas -->
-    <div class="preview cb-canvas-workspace">
-      <div class="cb-canvas-wrapper">
-        <canvas id="card-canvas" width="750" height="1050"></canvas>
-      </div>
-      <div class="cb-canvas-toolbar">
-        <label class="cb-interactive-toggle" title="Drag &amp; resize text elements directly on the card">
-          <input type="checkbox" id="cb-interactive-mode" checked>
-          <span>Drag Text</span>
-        </label>
-        <div class="cb-history-btns">
-          <button type="button" id="cb-undo-btn" class="ps-btn" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
-          <button type="button" id="cb-redo-btn" class="ps-btn" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
-        </div>
-        <button type="button" id="cb-save-json-btn" class="ps-btn ps-btn-primary">Save JSON</button>
-        <button type="button" id="cb-download-png-btn" class="ps-btn">Export PNG</button>
-
-        <div class="cb-dpi-export-group" title="Export PDF resolution (500 to 2400 DPI max safe limit, default 1200 DPI)">
-          <label for="cb-export-dpi" class="cb-dpi-label">DPI</label>
-          <input type="number" id="cb-export-dpi" class="ps-input cb-dpi-input" min="500" max="2400" step="50" value="1200" list="cb-dpi-presets">
-          <datalist id="cb-dpi-presets">
-            <option value="500"></option>
-            <option value="600"></option>
-            <option value="900"></option>
-            <option value="1200"></option>
-            <option value="1500"></option>
-            <option value="1800"></option>
-            <option value="2100"></option>
-            <option value="2400"></option>
-          </datalist>
-          <button type="button" id="cb-export-pdf-btn" class="ps-btn ps-btn-ok">Export PDF</button>
-          <button type="button" id="cb-export-all-pdf-btn" class="ps-btn ps-btn-ok" title="Export all loaded cards to PDF">Export All PDF</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Right Rail for Collapsed Inspector -->
-    <div class="panel-rail panel-rail-right">
-      <button type="button" id="inspector-rail-toggle" class="icon-btn" title="Show inspector panel" aria-label="Show inspector panel" aria-expanded="true" aria-controls="cb-editor-panel">◀</button>
-    </div>
-
-    <!-- Right Panel: Photoshop-Style Inspector -->
-    <aside class="panel ps-panel cb-editor-panel" id="cb-editor-panel">
-      <div class="panel-head">
-        <h1 id="cb-editor-title" class="ps-card-title">Card Inspector</h1>
-        <div class="head-actions">
-          <button type="button" id="inspector-toggle" class="icon-btn" title="Hide inspector panel" aria-label="Hide inspector panel" aria-expanded="true" aria-controls="cb-editor-panel">▶</button>
-        </div>
-      </div>
-
-      <div class="ps-tabs" role="tablist">
-        <button type="button" class="ps-tab active" data-tab="frame-art" role="tab">Layers &amp; Art</button>
-        <button type="button" class="ps-tab" data-tab="text-data" role="tab">Data &amp; Color</button>
-        <button type="button" class="ps-tab" data-tab="positions" role="tab">Positions</button>
-      </div>
-
-      <!-- Tab 1: Layers & Art -->
-      <div class="ps-tab-panel active" data-panel="frame-art">
-        <div class="ps-section">
-          <div class="ps-row-between">
-            <label class="ps-label" for="cb-style-select" style="margin:0;">Template Style</label>
-            <button type="button" id="cb-autolayer-btn" class="ps-mini-btn" title="Auto-select layers by color &amp; type">✨ Auto</button>
-          </div>
-          <select id="cb-style-select" class="ps-select" style="margin-top: 4px;"></select>
-        </div>
-
-        <div class="ps-section">
-          <div class="ps-row-between" style="margin-bottom: 5px;">
-            <span class="ps-group-title" style="margin:0;">Frame Layers (Drag ⠿ / 👁 Hide)</span>
-          </div>
-          <label class="ps-checkbox-inline" style="margin-bottom: 6px; font-size: 11px;" title="Draws Artwork over Legendary Crown, Title Box &amp; top border while keeping Type Line and lower frame on top">
-            <input type="checkbox" id="cb-art-over-top">
-            <span>Art over Crown &amp; Title (keep Type)</span>
-          </label>
-          <div id="cb-layer-pickers-container"></div>
-          <div class="ps-slider-row" style="margin-top: 8px;">
-            <span>Global Op.</span>
-            <input type="range" id="cb-frame-opacity" min="0.1" max="1.0" step="0.05" value="1.0">
-            <span class="ps-val" id="val-frame-opacity">100%</span>
-          </div>
-        </div>
-
-        <div class="ps-section">
-          <div class="ps-group-title">Artwork</div>
-          <label class="ps-label" for="cb-art-url">Art URL</label>
-          <input type="text" id="cb-art-url" class="ps-input" placeholder="https://cards.scryfall.io/art_crop/...">
-          <button type="button" id="cb-browse-arts-btn" class="ps-btn" style="width: 100%; margin-top: 6px;">🎨 Browse Scryfall Arts (Extended / Borderless)</button>
-          <label class="ps-label" for="cb-art-file" style="margin-top: 6px;">Upload Local Art</label>
-          <input type="file" id="cb-art-file" class="ps-file-input" accept="image/png,image/jpeg,image/webp">
-          <button type="button" id="cb-crop-art-btn" class="ps-btn" style="width: 100%; margin-top: 6px;">✂ Crop Art to Box</button>
-          <div class="ps-slider-row">
-            <span>Zoom</span>
-            <input type="range" id="cb-art-scale" min="0.3" max="3.0" step="0.02" value="1.0">
-            <span class="ps-val" id="val-art-scale">1.00x</span>
-          </div>
-          <div class="ps-slider-row">
-            <span>Offset X</span>
-            <input type="range" id="cb-art-ox" min="-400" max="400" step="2" value="0">
-            <span class="ps-val" id="val-art-ox">0px</span>
-          </div>
-          <div class="ps-slider-row">
-            <span>Offset Y</span>
-            <input type="range" id="cb-art-oy" min="-400" max="400" step="2" value="0">
-            <span class="ps-val" id="val-art-oy">0px</span>
-          </div>
-        </div>
-
-        <div class="ps-section">
-          <div class="ps-row-between">
-            <div class="ps-group-title" style="margin:0;">Overlay Shapes</div>
-            <div style="display:flex; gap:4px;">
-              <button type="button" id="cb-add-rect-btn" class="ps-mini-btn" title="Add rectangle backdrop">+ Box</button>
-              <button type="button" id="cb-add-round-btn" class="ps-mini-btn" title="Add rounded box backdrop">+ Rounded</button>
-              <button type="button" id="cb-add-circle-btn" class="ps-mini-btn" title="Add circle/ellipse backdrop">+ Circle</button>
-            </div>
-          </div>
-          <div id="cb-shapes-list" class="cb-shapes-list" style="margin-top:6px;"></div>
-        </div>
-      </div>
-
-      <!-- Tab 2: Card Data & Independent Font Colors -->
-      <div class="ps-tab-panel" data-panel="text-data">
-        <div class="ps-section">
-          <div class="ps-row-between">
-            <span class="ps-group-title" style="margin:0;">Independent Font Colors</span>
-            <button type="button" id="cb-auto-contrast-btn" class="ps-mini-btn" title="Auto-detect dark/light frame background for each text zone independently">✨ Auto</button>
-          </div>
-          <div class="cb-color-grid">
-            <div class="cb-color-item">
-              <span class="ps-label">Card Title</span>
-              <div class="cb-color-row">
-                <input type="color" id="cb-color-title" value="#111111" title="Card Title text color">
-                <button type="button" class="ps-mini-btn cb-preset-color" data-target="title" data-color="#ffffff" title="White">W</button>
-                <button type="button" class="ps-mini-btn cb-preset-color" data-target="title" data-color="#111111" title="Black">B</button>
-              </div>
-            </div>
-            <div class="cb-color-item">
-              <span class="ps-label">Official Title</span>
-              <div class="cb-color-row">
-                <input type="color" id="cb-color-official" value="#111111" title="Official Name (optional) text color">
-                <button type="button" class="ps-mini-btn cb-preset-color" data-target="official_title" data-color="#ffffff" title="White">W</button>
-                <button type="button" class="ps-mini-btn cb-preset-color" data-target="official_title" data-color="#111111" title="Black">B</button>
-              </div>
-            </div>
-            <div class="cb-color-item">
-              <span class="ps-label">Type Line</span>
-              <div class="cb-color-row">
-                <input type="color" id="cb-color-type" value="#111111" title="Type Line text color">
-                <button type="button" class="ps-mini-btn cb-preset-color" data-target="type_line" data-color="#ffffff" title="White">W</button>
-                <button type="button" class="ps-mini-btn cb-preset-color" data-target="type_line" data-color="#111111" title="Black">B</button>
-              </div>
-            </div>
-            <div class="cb-color-item">
-              <span class="ps-label">Rules &amp; PT</span>
-              <div class="cb-color-row">
-                <input type="color" id="cb-color-oracle" value="#111111" title="Oracle &amp; P/T text color">
-                <button type="button" class="ps-mini-btn cb-preset-color" data-target="oracle" data-color="#ffffff" title="White">W</button>
-                <button type="button" class="ps-mini-btn cb-preset-color" data-target="oracle" data-color="#111111" title="Black">B</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="ps-section">
-          <label class="ps-label">Card Name
-            <input type="text" id="cb-field-name" class="ps-input">
-          </label>
-          <label class="ps-label">Official Title (optional)
-            <input type="text" id="cb-field-official-name" class="ps-input" placeholder="Original card name in parentheses">
-          </label>
-          <label class="ps-label">Mana Cost
-            <input type="text" id="cb-field-mana" class="ps-input" placeholder="{1}{R}{W}{B}">
-          </label>
-          <label class="ps-label">Type Line
-            <input type="text" id="cb-field-type" class="ps-input">
-          </label>
-          <div class="cb-two-cols">
-            <label class="ps-label">Set Code
-              <input type="text" id="cb-field-set" class="ps-input" placeholder="pip">
-            </label>
-            <label class="ps-label">Rarity
-              <select id="cb-field-rarity" class="ps-select">
-                <option value="common">Common</option>
-                <option value="uncommon">Uncommon</option>
-                <option value="rare">Rare</option>
-                <option value="mythic">Mythic</option>
-              </select>
-            </label>
-          </div>
-          <label class="ps-label">Oracle Text
-            <textarea id="cb-field-oracle" rows="4" class="ps-textarea"></textarea>
-          </label>
-          <label class="ps-label">Flavor Text
-            <textarea id="cb-field-flavor" rows="2" class="ps-textarea"></textarea>
-          </label>
-          <div class="cb-two-cols">
-            <label class="ps-label">Power
-              <input type="text" id="cb-field-power" class="ps-input">
-            </label>
-            <label class="ps-label">Toughness
-              <input type="text" id="cb-field-toughness" class="ps-input">
-            </label>
-          </div>
-          <label class="ps-label">Artist
-            <input type="text" id="cb-field-artist" class="ps-input">
-          </label>
-        </div>
-      </div>
-
-      <!-- Tab 3: Collapsible Coordinates & Transform -->
-      <div class="ps-tab-panel" data-panel="positions">
-        <div class="ps-section">
-          <div class="ps-row-between" style="margin-bottom: 6px;">
-            <span class="ps-group-title" style="margin: 0;">Element Coordinates</span>
-            <button type="button" id="cb-toggle-all-pos-btn" class="ps-mini-btn" title="Expand or collapse all coordinate sections">Expand All</button>
-          </div>
-
-          <details class="ps-collapsible" data-pos-group="art">
-            <summary class="ps-collapsible-summary">Art Box (X, Y, W, H)</summary>
-            <div class="ps-collapsible-body">
-              <div class="cb-four-cols">
-                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-art-x" class="ps-input" title="X"></label>
-                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-art-y" class="ps-input" title="Y"></label>
-                <label class="ps-mini-field"><span>W</span><input type="number" id="pos-art-w" class="ps-input" title="W"></label>
-                <label class="ps-mini-field"><span>H</span><input type="number" id="pos-art-h" class="ps-input" title="H"></label>
-              </div>
-            </div>
-          </details>
-
-          <details class="ps-collapsible" data-pos-group="title">
-            <summary class="ps-collapsible-summary">Title &amp; Official Name</summary>
-            <div class="ps-collapsible-body">
-              <div class="ps-sub-label">Card Title</div>
-              <div class="cb-three-cols">
-                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-title-x" class="ps-input" title="X"></label>
-                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-title-y" class="ps-input" title="Y"></label>
-                <label class="ps-mini-field"><span>Size</span><input type="number" id="pos-title-size" class="ps-input" title="Font Size"></label>
-              </div>
-              <div class="ps-sub-label" style="margin-top: 6px;">Official Title (optional)</div>
-              <div class="cb-three-cols">
-                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-official-x" class="ps-input" title="X"></label>
-                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-official-y" class="ps-input" title="Y"></label>
-                <label class="ps-mini-field"><span>Size</span><input type="number" id="pos-official-size" class="ps-input" title="Font Size"></label>
-              </div>
-            </div>
-          </details>
-
-          <details class="ps-collapsible" data-pos-group="mana_type">
-            <summary class="ps-collapsible-summary">Mana Cost &amp; Type Line</summary>
-            <div class="ps-collapsible-body">
-              <div class="ps-sub-label">Mana Cost</div>
-              <div class="cb-three-cols">
-                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-mana-x" class="ps-input" title="X"></label>
-                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-mana-y" class="ps-input" title="Y"></label>
-                <label class="ps-mini-field"><span>Size</span><input type="number" id="pos-mana-size" class="ps-input" title="Icon Size"></label>
-              </div>
-              <div class="ps-sub-label" style="margin-top: 6px;">Type Line</div>
-              <div class="cb-three-cols">
-                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-type-x" class="ps-input" title="X"></label>
-                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-type-y" class="ps-input" title="Y"></label>
-                <label class="ps-mini-field"><span>Size</span><input type="number" id="pos-type-size" class="ps-input" title="Font Size"></label>
-              </div>
-            </div>
-          </details>
-
-          <details class="ps-collapsible" data-pos-group="oracle_pt">
-            <summary class="ps-collapsible-summary">Oracle Box &amp; P/T</summary>
-            <div class="ps-collapsible-body">
-              <div class="ps-sub-label">Oracle Box</div>
-              <div class="cb-four-cols">
-                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-oracle-x" class="ps-input" title="X"></label>
-                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-oracle-y" class="ps-input" title="Y"></label>
-                <label class="ps-mini-field"><span>W</span><input type="number" id="pos-oracle-w" class="ps-input" title="W"></label>
-                <label class="ps-mini-field"><span>H</span><input type="number" id="pos-oracle-h" class="ps-input" title="H"></label>
-              </div>
-              <div class="ps-slider-row" style="margin-top: 4px;">
-                <span>Font Size</span>
-                <input type="number" id="pos-oracle-size" class="ps-input" style="width: 64px;" value="21">
-              </div>
-              <div class="ps-sub-label" style="margin-top: 6px;">Power / Toughness</div>
-              <div class="cb-three-cols">
-                <label class="ps-mini-field"><span>X</span><input type="number" id="pos-pt-x" class="ps-input" title="X"></label>
-                <label class="ps-mini-field"><span>Y</span><input type="number" id="pos-pt-y" class="ps-input" title="Y"></label>
-                <label class="ps-mini-field"><span>Size</span><input type="number" id="pos-pt-size" class="ps-input" title="Font Size"></label>
-              </div>
-            </div>
-          </details>
-
-          <button type="button" id="cb-reset-layout-btn" class="ps-btn" style="width: 100%; margin-top: 10px;">
-            Reset Default Positions
-          </button>
-        </div>
-      </div>
-    </aside>
+  <div id="cb-layer-hover-preview" style="display:none; position:fixed; z-index:300; width:160px; background:var(--surface); border:1px solid var(--border); border-radius:8px; box-shadow:var(--shadow); padding:6px; pointer-events:none;">
+    <img id="cb-layer-hover-img" src="" alt="" style="width:100%; border-radius:4px; display:block; background:#111;">
+    <div id="cb-layer-hover-caption" style="font-size:11px; margin-top:4px; text-align:center; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>
   </div>
 </body>
 </html>

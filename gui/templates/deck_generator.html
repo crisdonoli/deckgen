@@ -1,346 +1,192 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>DeckGen Sheet Generator</title>
-  <link rel="stylesheet" href="/static/css/main.css?v=4">
-  <script src="/static/js/common.js?v=5" defer></script>
-  <script src="/static/js/deck_generator.js?v=4" defer></script>
+  <title>Deck Generator - DeckGen Studio</title>
+  <link rel="stylesheet" href="/static/css/main.css?v=22">
+  <script type="module" src="/static/js/deck_generator.js?v=22"></script>
 </head>
 <body>
   $navbar
-  <div id="loading-overlay" class="overlay">
-    <div class="progress-box">
-      <div class="progress-bar-bg"><div id="progress-bar" class="progress-bar-fill"></div></div>
-      <div id="progress-status">Processing...</div>
-    </div>
-  </div>
-  <div class="app ps-ui">
-    <div class="panel ps-panel" id="options-panel">
-      <div class="panel-head">
-        <h1>DeckGen Sheet Generator</h1>
-        <div class="head-actions">
-          <button type="button" id="panel-toggle" class="icon-btn" title="Hide options panel" aria-label="Hide options panel" aria-expanded="true" aria-controls="options-panel">◀</button>
+
+  <main class="dg-ribbon-shell">
+    <!-- Office Ribbon Top Toolbar -->
+    <section class="ribbon-bar">
+      <div class="ribbon-group">
+        <div class="ribbon-controls">
+          <button type="button" id="dg-pick-source-btn" class="btn">📁 Fronts Folder</button>
+          <span id="dg-source-label" style="font-size:11px; color:var(--text-muted); max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">cards/fronts</span>
+          <button type="button" id="dg-pick-back-btn" class="btn">🃏 Set Back (PDF/PNG)</button>
+          <input type="file" id="dg-back-file-input" accept=".pdf,.png,.jpg,.jpeg,.webp" hidden>
+          <span id="dg-back-label" style="font-size:11px; color:var(--text-muted); max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">None</span>
         </div>
+        <div class="ribbon-group-title">Fronts &amp; Single Back</div>
       </div>
-      <form id="deckform" method="post" action="/generate" enctype="multipart/form-data" class="ps-form-flex">
-        <div class="deck-tabs ps-tabs" role="tablist">
-          <button type="button" class="deck-tab ps-tab active" data-tab="fronts" role="tab" aria-selected="true">Fronts</button>
-          <button type="button" class="deck-tab ps-tab" data-tab="backs" role="tab" aria-selected="false">Backs</button>
-          <button type="button" class="deck-tab ps-tab" data-tab="export" role="tab" aria-selected="false">Export</button>
-        </div>
 
-        <div class="deck-tab-panel ps-tab-panel active" data-panel="fronts" role="tabpanel">
-          <div class="ps-section">
-            <div class="ps-group-title">Source</div>
-            <div class="ps-row-between">
-              <button type="button" id="source-upload-btn" class="ps-btn" style="flex: 1;">📁 Load PDF Folder</button>
-              <button type="button" id="check-deck-btn" class="ps-btn" title="Verify deck" aria-label="Verify deck">📋 Verify</button>
-            </div>
-            <input type="file" id="source-files" webkitdirectory directory multiple name="source_files" hidden>
-          </div>
-
-          <div class="ps-section">
-            <div class="ps-group-title">Sheet Layout</div>
-            <label class="ps-label" for="paper-select">Paper</label>
-            <select name="paper" id="paper-select" class="ps-select">
-              <option value="a3" $paper_a3_selected>a3</option>
-              <option value="a4" $paper_a4_selected>a4</option>
-              <option value="a4-3" $paper_a4_3_selected>a4-3</option>
-            </select>
-
-            <label class="ps-checkbox-inline" style="margin-top: 8px;">
-              <input type="checkbox" name="landscape" id="landscape-check" value="true" $landscape_checked>
-              <span>Landscape</span>
-            </label>
-          </div>
-
-          <div class="ps-section">
-            <div class="ps-group-title">Cut Marks</div>
-            <label class="ps-label" for="cut-select">Cut lines</label>
-            <select name="cut" id="cut-select" class="ps-select">
-              <option value="none" $cut_none_selected>none</option>
-              <option value="full" $cut_full_selected>full</option>
-              <option value="corners" $cut_corners_selected>corners</option>
-            </select>
-
-            <div id="card-spacing-group">
-              <label class="ps-label" for="card-spacing">Card spacing (mm)</label>
-              <div class="ps-slider-row">
-                <input type="range" name="card_spacing" id="card-spacing" value="$card_spacing" min="0" max="5" step="0.5">
-                <span class="ps-val" id="card-spacing-value">$card_spacing</span>
-              </div>
-            </div>
-
-            <label class="ps-label" for="color-text">Cut color (hex)</label>
-            <div class="ps-row-between">
-              <input type="text" name="color" id="color-text" class="ps-input" value="$color" required style="flex: 1;">
-              <input type="color" id="color-picker" value="$color" style="width: 34px; height: 25px; padding: 0; border: 1px solid var(--border); border-radius: 3px; background: transparent; cursor: pointer;">
-            </div>
-
-            <div class="ps-row-between" style="margin-top: 6px;">
-              <div style="flex: 1;">
-                <label class="ps-label" for="thickness-input" style="margin-top: 0;">Thickness (pt)</label>
-                <input type="number" name="thickness" id="thickness-input" class="ps-input" value="$thickness" step="0.1" min="0.1" required>
-              </div>
-              <div style="flex: 1;">
-                <label class="ps-label" for="mark-len-input" style="margin-top: 0;">Mark len (mm)</label>
-                <input type="number" name="mark_len" id="mark-len-input" class="ps-input" value="$mark_len" step="0.1" min="1" required>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="deck-tab-panel ps-tab-panel" data-panel="backs" role="tabpanel">
-          <input type="hidden" name="duplex_flip" id="duplex-flip" value="true">
-          <div class="ps-section">
-            <div class="ps-group-title">Generic Card Back</div>
-            <label class="ps-label" for="back-file">Card back (PDF / image)</label>
-            <input type="file" name="back_file" id="back-file" class="ps-file-input" accept=".pdf,.png,.jpg,.jpeg">
-          </div>
-
-          <div class="ps-section">
-            <div class="ps-group-title">Double-Faced Cards</div>
-            <button type="button" id="open-custom-backs-btn" class="ps-btn" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;">
-              <span>🔄</span> Custom backs / MDFC (PDF)
-              <span id="custom-backs-badge" style="display: none; background: var(--accent); color: #fff; border-radius: 10px; padding: 1px 7px; font-size: 10px; font-weight: bold;">0 MDFC</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="deck-tab-panel ps-tab-panel" data-panel="export" role="tabpanel">
-          <div class="ps-section">
-            <div class="ps-group-title">Destination</div>
-            <label class="ps-label" for="export-dir">Export directory</label>
-            <div class="ps-row-between">
-              <input type="text" name="export_dir" id="export-dir" class="ps-input" value="$export_dir" placeholder="Select or enter folder..." style="flex: 1;">
-              <button type="button" id="export-dir-browse-btn" class="ps-btn" title="Browse or create folder">📁 Browse</button>
-            </div>
-          </div>
-
-          <div class="ps-section">
-            <div class="ps-group-title">Output</div>
-            <label class="ps-label" for="face-select">Face</label>
-            <select name="face" id="face-select" class="ps-select">
-              <option value="fronts" $face_fronts_selected>fronts</option>
-              <option value="backs" $face_backs_selected>backs</option>
-            </select>
-
-            <div class="ps-row-between" style="margin-top: 10px;">
-              <button type="submit" class="ps-btn ps-btn-primary" style="flex: 1;">Generate PDF</button>
-              <button type="button" id="preview-btn" class="ps-btn">Preview</button>
-            </div>
-            <button type="button" id="clear-cache-btn" class="ps-btn" style="width: 100%; margin-top: 6px;" title="Delete cached previews">Clear cache</button>
-          </div>
-        </div>
-      </form>
-      <div id="error-message" class="error">$error</div>
-      <div id="save-result"></div>
-    </div>
-    <div class="panel-rail">
-      <button type="button" id="panel-rail-toggle" class="icon-btn" title="Show options panel" aria-label="Show options panel" aria-expanded="false" aria-controls="options-panel">▶</button>
-    </div>
-    <div class="preview">
-      <div id="preview-pager" class="preview-pager">
-        <button type="button" id="preview-prev-btn" class="icon-btn" title="Previous page" aria-label="Previous page" disabled>◀</button>
-        <span id="preview-page-label">Page 1 / 1</span>
-        <button type="button" id="preview-next-btn" class="icon-btn" title="Next page" aria-label="Next page" disabled>▶</button>
-      </div>
-      <div class="preview-stage">
-        <img id="preview" alt="Preview">
-      </div>
-    </div>
-  </div>
-
-  <button type="button" id="floating-preview-btn" class="floating-preview-btn" title="Preview fronts and backs" aria-label="Preview fronts and backs">🖼</button>
-
-  <div id="dir-browser-modal" class="modal-overlay">
-    <div class="modal-content" style="max-width: 560px; width: 92vw;">
-      <div class="modal-header">
-        <h2><span>📁</span> Select Export Folder</h2>
-        <button type="button" class="modal-close" id="dir-browser-close-btn">&times;</button>
-      </div>
-      <div class="modal-body" style="display: flex; flex-direction: column; gap: 10px;">
-        <div style="display: flex; gap: 6px; align-items: center;">
-          <button type="button" id="dir-browser-up-btn" class="ps-btn" title="Parent folder">⬆ Up</button>
-          <input type="text" id="dir-browser-current" class="ps-input" readonly style="flex: 1; font-family: monospace;">
-        </div>
-        <div style="display: flex; gap: 6px; align-items: center;">
-          <input type="text" id="dir-browser-new-name" class="ps-input" placeholder="New folder name..." style="flex: 1;">
-          <button type="button" id="dir-browser-mkdir-btn" class="ps-btn">+ Create Folder</button>
-        </div>
-        <div id="dir-browser-list" style="max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);"></div>
-        <div id="dir-browser-error" style="color: var(--danger); font-size: 12px; display: none;"></div>
-        <div style="display: flex; justify-content: flex-end; gap: 8px;">
-          <button type="button" id="dir-browser-cancel-btn" class="ps-btn">Cancel</button>
-          <button type="button" id="dir-browser-select-btn" class="ps-btn ps-btn-primary">Select This Folder</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div id="preview-modal" class="modal-overlay preview-modal">
-    <div class="modal-content preview-modal-content">
-      <div class="modal-header">
-        <h2><span>🖼</span> Sheet Preview</h2>
-        <button type="button" class="modal-close" id="preview-modal-close-btn">&times;</button>
-      </div>
-      <div class="modal-body preview-modal-body">
-        <figure class="preview-pane">
-          <figcaption>Fronts</figcaption>
-          <img id="preview-front" alt="Fronts preview">
-        </figure>
-        <figure class="preview-pane">
-          <figcaption>Backs</figcaption>
-          <img id="preview-back" alt="Backs preview">
-        </figure>
-      </div>
-    </div>
-  </div>
-
-  <div id="deck-modal" class="modal-overlay">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2><span>📋</span> Deck Verification and Inspection (XML / MTGO .txt)</h2>
-        <button type="button" class="modal-close" id="modal-close-btn">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div style="display: flex; gap: 0.8em; align-items: center; margin-bottom: 1em; flex-wrap: wrap;">
-          <label style="font-weight: 600; font-size: 0.9em; margin: 0;">Deck list (.txt / .xml):</label>
-          <select id="xml-select" style="flex: 1; min-width: 200px; padding: 0.4em; border-radius: 4px; border: 1px solid var(--border);"></select>
-          <label class="ps-btn" style="margin: 0; cursor: pointer;">
-            <span>📁</span> Upload TXT / XML
-            <input type="file" id="xml-file-input" accept=".xml,.txt,text/plain" style="display: none;">
-          </label>
-          <button type="button" id="xml-refresh-btn" class="ps-btn">↻ Reload</button>
-        </div>
-
-        <div id="deck-stats" class="stats-grid">
-          <div class="stat-card"><div class="val" id="stat-target">100</div><div class="lbl">Target</div></div>
-          <div class="stat-card"><div class="val" id="stat-disk" style="color: var(--info);">-</div><div class="lbl">On disk</div></div>
-          <div class="stat-card"><div class="val" id="stat-xml" style="color: var(--muted);">-</div><div class="lbl">Cards in list</div></div>
-          <div class="stat-card"><div class="val" id="stat-needs" style="color: var(--warn);">-</div><div class="lbl">Need duplicates</div></div>
-          <div class="stat-card"><div class="val" id="stat-missing" style="color: var(--danger);">-</div><div class="lbl">Missing</div></div>
-        </div>
-
-        <div id="deck-feedback" style="display: none; padding: 0.6em 0.8em; border-radius: 4px; margin-bottom: 0.8em; font-size: 0.85em;"></div>
-
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8em; gap: 1em; flex-wrap: wrap;">
-          <button type="button" id="auto-duplicate-btn" class="ps-btn ps-btn-ok" style="height: 28px; padding: 0 12px;">
-            <span>⚡</span> Duplicate repeated cards per list
-          </button>
-          <input type="text" id="deck-search-input" class="ps-input" placeholder="Filter by name..." style="width: 220px;">
-        </div>
-
-        <div class="modal-tabs">
-          <button type="button" class="tab-btn active" data-tab="all">All (<span id="count-all">0</span>)</button>
-          <button type="button" class="tab-btn" data-tab="needs_copies" style="color: var(--warn);">⚠️ Need duplicates (<span id="count-needs">0</span>)</button>
-          <button type="button" class="tab-btn" data-tab="missing" style="color: var(--danger);">❌ Missing (<span id="count-missing">0</span>)</button>
-          <button type="button" class="tab-btn" data-tab="ok" style="color: var(--ok);">✅ Complete (<span id="count-ok">0</span>)</button>
-          <button type="button" class="tab-btn" data-tab="extra">Tokens / Extras (<span id="count-extra">0</span>)</button>
-        </div>
-
-        <div class="modal-table-container">
-          <table class="deck-table" id="deck-table">
-            <thead>
-              <tr>
-                <th style="width: 14%;">Slots</th>
-                <th style="width: 36%;">Card / Query</th>
-                <th style="width: 8%;">Req.</th>
-                <th style="width: 8%;">Disk</th>
-                <th style="width: 14%;">Status</th>
-                <th style="width: 20%;">Action</th>
-              </tr>
-            </thead>
-            <tbody id="deck-table-body">
-              <tr><td colspan="6" style="text-align: center; color: var(--muted); padding: 2em;">Loading deck data...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <div style="display: flex; justify-content: flex-end; padding: 0.8em 1.2em; border-top: 1px solid var(--table-border); background: var(--modal-footer-bg);">
-        <button type="button" class="ps-btn" id="modal-close-footer-btn">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Modal Custom Card Backs (MDFC) -->
-  <div id="custom-backs-modal" class="modal-overlay">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2><span>🔄</span> Custom Card Backs / Double-Faced Cards (MDFC)</h2>
-        <button type="button" class="modal-close" id="cb-modal-close-btn">&times;</button>
-      </div>
-      <div class="modal-body">
-        <p style="margin-top: 0; color: var(--muted); font-size: 0.88em;">
-          Assign an individual back PDF file to cards that flip (MDFC / Transform). Cards without a custom back will use the generic back.
-        </p>
-
-        <div id="cb-stats" class="stats-grid">
-          <div class="stat-card">
-            <div class="val" id="cb-stat-total">0</div>
-            <div class="lbl">Total Cards</div>
-          </div>
-          <div class="stat-card">
-            <div class="val" id="cb-stat-generic" style="color: var(--muted);">0</div>
-            <div class="lbl">Generic Back</div>
-          </div>
-          <div class="stat-card">
-            <div class="val" id="cb-stat-custom" style="color: var(--accent);">0</div>
-            <div class="lbl">Custom Back (PDF)</div>
-          </div>
-          <div class="stat-card">
-            <div class="val" id="cb-stat-available" style="color: var(--ok);">0</div>
-            <div class="lbl">PDFs en backs/</div>
-          </div>
-        </div>
-
-        <div id="cb-feedback" style="display: none; padding: 0.6em 0.8em; border-radius: 4px; margin-bottom: 0.8em; font-size: 0.85em;"></div>
-
-        <div style="display: flex; gap: 0.6em; align-items: center; margin-bottom: 0.8em; flex-wrap: wrap;">
-          <input type="text" id="cb-search-input" class="ps-input" placeholder="Search card by name or file..." style="flex: 1; min-width: 180px;">
-          <select id="cb-filter-select" class="ps-select" style="width: auto; min-width: 160px;">
-            <option value="all">All cards</option>
-            <option value="custom">Only with custom back</option>
-            <option value="generic">Only generic back</option>
+      <div class="ribbon-group">
+        <div class="ribbon-controls">
+          <select id="dg-paper" class="select" style="width:76px;">
+            <option value="a4" selected>A4</option>
+            <option value="a3">A3</option>
+            <option value="a4-3">A4-3</option>
           </select>
-          <button type="button" id="cb-autodetect-btn" class="ps-btn" style="background: var(--info); color: #fff; border-color: var(--info);">
-            <span>⚡</span> Auto-detect
-          </button>
-          <button type="button" id="cb-bulk-assign-btn" class="ps-btn ps-btn-primary">
-            <span>📤</span> Assign PDF to selected (<span id="cb-selected-count">0</span>)
-          </button>
-          <button type="button" id="cb-bulk-remove-btn" class="ps-btn" style="background: var(--danger); color: #fff; border-color: var(--danger);">
-            <span>✕</span> Remove custom
-          </button>
+          <label class="row" style="font-size:12px; cursor:pointer;">
+            <input type="checkbox" id="dg-landscape">
+            <span>Landscape</span>
+          </label>
+          <label class="row" style="font-size:12px;">
+            <span>Gap (mm):</span>
+            <input type="number" id="dg-spacing" class="input" value="0" min="0" max="5" step="0.5" style="width:56px;">
+          </label>
         </div>
+        <div class="ribbon-group-title">Paper</div>
+      </div>
 
-        <input type="file" id="cb-single-upload" accept=".pdf" style="display: none;">
-        <input type="file" id="cb-bulk-upload" accept=".pdf" style="display: none;">
+      <div class="ribbon-group">
+        <div class="ribbon-controls">
+          <select id="dg-cut" class="select" style="width:92px;">
+            <option value="corners" selected>Corners</option>
+            <option value="full">Full</option>
+            <option value="none">None</option>
+          </select>
+          <input type="color" id="dg-cut-color" value="#ff0000" title="Cut mark color" style="width:30px; height:26px; border:1px solid var(--border); border-radius:4px; padding:0; cursor:pointer;">
+          <input type="number" id="dg-thickness" class="input" value="0.5" min="0.1" step="0.1" style="width:54px;" title="Thickness (pt)">
+          <input type="number" id="dg-mark-len" class="input" value="3.0" min="1" step="0.5" style="width:54px;" title="Mark length (mm)">
+        </div>
+        <div class="ribbon-group-title">Cut Marks</div>
+      </div>
 
-        <div class="modal-table-container">
-          <table class="deck-table" id="cb-table">
-            <thead>
-              <tr>
-                <th style="width: 34px; text-align: center;"><input type="checkbox" id="cb-select-all"></th>
-                <th style="width: 38px;">#</th>
-                <th>Front Card</th>
-                <th>Front File</th>
-                <th>Assigned Back</th>
-                <th style="width: 240px; text-align: right;">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="cb-table-body">
-              <tr><td colspan="6" style="text-align: center; color: var(--muted); padding: 2em;">Loading cards...</td></tr>
-            </tbody>
-          </table>
+      <div class="ribbon-group">
+        <div class="ribbon-controls">
+          <select id="dg-view-mode" class="select" style="width:155px;">
+            <option value="both" selected>Both (Front &amp; Back)</option>
+            <option value="fronts">Only Fronts</option>
+            <option value="backs">Only Backs</option>
+          </select>
+          <label class="row" style="font-size:12px; cursor:pointer;">
+            <input type="checkbox" id="dg-duplex-flip" checked>
+            <span>Duplex Mirror</span>
+          </label>
+        </div>
+        <div class="ribbon-group-title">View</div>
+      </div>
+
+      <div class="ribbon-group">
+        <div class="ribbon-controls">
+          <span id="dg-selected-slot-label" style="font-size:11.5px; color:var(--text-muted);">Click a card</span>
+          <input type="range" id="dg-slot-scale" min="0.75" max="1.25" step="0.01" value="1.0" style="width:95px;" disabled>
+          <span id="dg-slot-scale-val" style="font-size:11.5px; width:36px;">1.00×</span>
+          <button type="button" id="dg-slot-scale-reset" class="btn btn-sm" disabled>Reset</button>
+        </div>
+        <div class="ribbon-group-title">Individual Scale</div>
+      </div>
+
+      <div class="ribbon-group">
+        <div class="ribbon-controls">
+          <button type="button" id="dg-export-sheet-btn" class="btn btn-primary">📤 Export Sheet</button>
+        </div>
+        <div class="ribbon-group-title">Export</div>
+      </div>
+    </section>
+
+    <!-- Dual Preview Area -->
+    <section id="dg-dual-preview" class="dg-dual-preview">
+      <!-- Fronts Pane -->
+      <div id="dg-pane-fronts" class="dg-pane">
+        <div class="row-between">
+          <strong>Fronts</strong>
+          <div class="row" style="gap:6px;">
+            <button type="button" id="dg-front-prev" class="btn btn-sm">◀</button>
+            <input type="range" id="dg-front-slider" min="0" max="0" value="0" style="width:110px;">
+            <span id="dg-front-page-label" style="font-size:12px;">1 / 1</span>
+            <button type="button" id="dg-front-next" class="btn btn-sm">▶</button>
+          </div>
+        </div>
+        <div class="dg-sheet-stage" id="dg-front-stage">
+          <img id="dg-front-img" alt="Fronts Preview">
+          <div id="dg-front-hitboxes"></div>
         </div>
       </div>
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.8em 1.2em; border-top: 1px solid var(--table-border); background: var(--modal-footer-bg);">
-        <div style="font-size: 0.82em; color: var(--muted);">
-          Directory: <strong id="cb-footer-dir" style="color: var(--fg);">-</strong>
+
+      <!-- Backs Pane -->
+      <div id="dg-pane-backs" class="dg-pane">
+        <div class="row-between">
+          <strong>Backs</strong>
+          <div class="row" style="gap:6px;">
+            <button type="button" id="dg-back-prev" class="btn btn-sm">◀</button>
+            <input type="range" id="dg-back-slider" min="0" max="0" value="0" style="width:110px;">
+            <span id="dg-back-page-label" style="font-size:12px;">1 / 1</span>
+            <button type="button" id="dg-back-next" class="btn btn-sm">▶</button>
+          </div>
         </div>
-        <button type="button" id="cb-modal-footer-close-btn" class="ps-btn">Close</button>
+        <div class="dg-sheet-stage" id="dg-back-stage">
+          <img id="dg-back-img" alt="Backs Preview">
+          <div id="dg-back-hitboxes"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Export DPI Popup (No folder picker!) -->
+  <div id="dg-export-modal" class="modal-overlay">
+    <div class="modal-content" style="width: 400px; max-width: 94vw;">
+      <div class="modal-header">
+        <span>📤 Export Sheets to PDF</span>
+        <button type="button" class="modal-close" id="dg-export-close">&times;</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:12px;">
+        <p style="margin:0; font-size:12px; color:var(--text-muted);">
+          Sheets will be exported automatically into your active project's <code>sheets/</code> folder.
+        </p>
+        <div>
+          <label class="label" style="margin-top:0;">Face to export</label>
+          <select id="dg-export-face" class="select">
+            <option value="fronts">Fronts</option>
+            <option value="backs">Backs</option>
+          </select>
+        </div>
+        <div>
+          <label class="label" style="margin-top:0;">Resolution (DPI)</label>
+          <select id="dg-export-dpi" class="select">
+            <option value="300" selected>300 DPI (Fast standard)</option>
+            <option value="600">600 DPI (High quality)</option>
+            <option value="1200">1200 DPI (Maximum sharpness)</option>
+          </select>
+        </div>
+        <div id="dg-export-progress" style="display:none; font-size:12px; color:var(--accent);">Processing and converting in background...</div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" id="dg-export-cancel" class="btn">Cancel</button>
+          <button type="button" id="dg-export-confirm" class="btn btn-primary">Generate PDF</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Front Card Custom Back Pop-Up (Flip / DFC Cards) -->
+  <div id="dg-front-card-modal" class="modal-overlay">
+    <div class="modal-content" style="width: 720px; max-width: 95vw;">
+      <div class="modal-header">
+        <span id="dg-fc-title">Card Options</span>
+        <button type="button" class="modal-close" id="dg-fc-close">&times;</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
+        <div class="row-between" style="flex-wrap:wrap; gap:8px;">
+          <div style="padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface-2); font-size:12px;">
+            Current Back: <strong id="dg-fc-back-status">Generic Back</strong>
+          </div>
+          <div class="row" style="gap:6px; flex-wrap:wrap;">
+            <input type="file" id="dg-fc-back-input" accept=".pdf,.png,.jpg,.jpeg,.webp" hidden>
+            <button type="button" id="dg-fc-reset-back-btn" class="btn btn-sm">Use Generic Back</button>
+            <button type="button" id="dg-fc-upload-back-btn" class="btn btn-primary btn-sm">📤 Upload from Computer (PDF/PNG)</button>
+          </div>
+        </div>
+        <div>
+          <div class="row-between" style="margin-bottom:6px;">
+            <span style="font-size:12px; font-weight:600;">Project Cards (click a card to set as Custom Back)</span>
+            <input type="text" id="dg-fc-filter" class="input" placeholder="Filter project cards..." style="width:210px;">
+          </div>
+          <div id="dg-fc-project-grid" class="art-results-grid" style="grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); max-height:48vh;"></div>
+        </div>
       </div>
     </div>
   </div>
