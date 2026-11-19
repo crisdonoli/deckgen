@@ -2,6 +2,14 @@
 
 Hybrid local web application (**Python FastAPI** backend + **HTML/CSS/Vanilla ES Modules** frontend, zero build step) for designing high-resolution Magic: The Gathering proxy cards and laying out print-ready PDF sheets.
 
+## Visual Preview
+
+![DeckGen Studio Landing](gui/static/images/landing.png)
+
+| Card Builder | Deck Generator |
+| :---: | :---: |
+| ![Card Builder](gui/static/images/cardbuilder.png) | ![Deck Generator](gui/static/images/deckgenerator.png) |
+
 ## Quick Start
 
 ```bash

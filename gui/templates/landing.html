@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <title>DeckGen Studio</title>
-  <link rel="stylesheet" href="/static/css/main.css?v=24">
-  <script type="module" src="/static/js/landing.js?v=23"></script>
+  <link rel="stylesheet" href="/static/css/main.css?v=29">
+  <script type="module" src="/static/js/landing.js?v=24"></script>
 </head>
 <body>
   $navbar
@@ -34,6 +34,35 @@
         <a href="/tutorial" style="color: var(--accent); text-decoration: none;">📖 User Guide (Tutorial)</a> &nbsp;·&nbsp; <a href="https://buymeacoffee.com/cridonoso" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: none;">☕ Buy Me a Coffee</a>
       </div>
     </div>
+
+    <section class="landing-carousel-wrap" id="landing-carousel" aria-label="App Preview Carousel">
+      <div class="landing-carousel-stage">
+        <button type="button" class="landing-carousel-nav prev" id="landing-carousel-prev" aria-label="Previous preview">◀</button>
+        <div class="landing-carousel-viewport">
+          <div class="landing-carousel-track" id="landing-carousel-track">
+            <a class="landing-carousel-slide" href="/card-builder">
+              <img src="/static/images/cardbuilder.png" alt="Card Builder preview">
+              <div class="landing-shot-meta">
+                <strong>Card Builder</strong>
+                <span>Design cards with independent layers, custom arts, pop-out frames &amp; 1200 DPI export.</span>
+              </div>
+            </a>
+            <a class="landing-carousel-slide" href="/deck-generator">
+              <img src="/static/images/deckgenerator.png" alt="Deck Generator preview">
+              <div class="landing-shot-meta">
+                <strong>Deck Generator</strong>
+                <span>Lay out print-ready A4/A3 sheets with cut marks, custom backs &amp; dual preview.</span>
+              </div>
+            </a>
+          </div>
+        </div>
+        <button type="button" class="landing-carousel-nav next" id="landing-carousel-next" aria-label="Next preview">▶</button>
+      </div>
+      <div class="landing-carousel-dots" id="landing-carousel-dots">
+        <button type="button" class="landing-carousel-dot active" data-slide="0" aria-label="Card Builder"></button>
+        <button type="button" class="landing-carousel-dot" data-slide="1" aria-label="Deck Generator"></button>
+      </div>
+    </section>
   </main>
 
   <!-- Load Project Choice Modal -->
