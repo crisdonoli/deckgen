@@ -1,11 +1,15 @@
 import asyncio
 import base64
+import hashlib
+import io
 import json
 import logging
 import os
+import tempfile
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, Query, Response, UploadFile
+from PIL import Image, ImageDraw
 
 from config import DEFAULT_EXPORT_DPI
 from core.art_index import art_index
@@ -15,7 +19,9 @@ from core.card_renderer import (
     compose_card_export,
     create_blank_card_from_image,
     extract_scryfall_card_payload,
+    jpg_rel_path_to_pdf_abs_path,
     parse_mtgo_txt,
+    render_pdf_layer_rgba,
     scan_template_catalog,
 )
 from core.workspace import check_dir_collision, ensure_workspace_subdirs, resolve_collision_target
@@ -297,3 +303,96 @@ async def api_cb_auto_frame(payload: Dict[str, Any] = Body(...)):
     catalog = scan_template_catalog()
     fc = auto_select_frame_components(card, style_key=style_key, catalog=catalog)
     return {"frame_components": fc}
+
+
+_TPL_PREVIEW_CACHE_DIR = os.path.join(tempfile.gettempdir(), "deckgen_tpl_previews_v1")
+
+
+def _render_template_preview_bytes(style_key: str) -> bytes:
+    os.makedirs(_TPL_PREVIEW_CACHE_DIR, exist_ok=True)
+    digest = hashlib.md5(style_key.encode("utf-8")).hexdigest()[:12]
+    cache_path = os.path.join(_TPL_PREVIEW_CACHE_DIR, f"{digest}.jpg")
+    if os.path.isfile(cache_path):
+        with open(cache_path, "rb") as f:
+            return f.read()
+
+    w, h = 225, 315
+    catalog = scan_template_catalog()
+    sample_card = {
+        "name": "Example Card",
+        "type_line": "Legendary Creature — Wizard",
+        "colors": ["U"],
+        "color_identity": ["U"],
+        "power": "3",
+        "toughness": "3",
+    }
+    fc = auto_select_frame_components(sample_card, style_key=style_key, catalog=catalog)
+
+    canvas = Image.new("RGBA", (w, h), (17, 17, 17, 255))
+
+    def _draw_layer(layer_key: str):
+        rel = fc.get(layer_key)
+        if not rel:
+            return
+        pdf_p = jpg_rel_path_to_pdf_abs_path(rel)
+        if not pdf_p:
+            return
+        try:
+            rgba = render_pdf_layer_rgba(pdf_p, w, h)
+            canvas.alpha_composite(rgba)
+        except Exception:
+            pass
+
+    _draw_layer("background")
+
+    # Subtle sample artwork gradient inside the art box so the template layout is immediately clear
+    art_layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ad = ImageDraw.Draw(art_layer)
+    ax0, ay0, ax1, ay1 = 10, 33, 215, 176
+    for yy in range(ay0, ay1):
+        t = (yy - ay0) / max(1, (ay1 - ay0))
+        r = int(28 + 38 * t)
+        g = int(52 + 72 * (1 - abs(t - 0.5) * 2))
+        b = int(95 + 80 * (1 - t))
+        ad.line([(ax0, yy), (ax1, yy)], fill=(r, g, b, 255))
+    # Decorative moon/silhouette accent in sample art
+    ad.ellipse([142, 48, 184, 90], fill=(230, 240, 255, 190))
+    ad.polygon([(10, 176), (72, 112), (138, 176)], fill=(18, 28, 48, 220))
+    ad.polygon([(95, 176), (160, 102), (215, 176)], fill=(14, 22, 38, 235))
+    canvas.alpha_composite(art_layer)
+
+    for lk in ("pinlines", "name_box", "crown", "pt_box"):
+        _draw_layer(lk)
+
+    # Sample placeholder text strokes so the user sees text areas clearly
+    td = ImageDraw.Draw(canvas)
+    td.text((18, 20), "Example Card", fill=(20, 20, 20, 235))
+    td.text((18, 182), "Creature — Wizard", fill=(20, 20, 20, 235))
+    td.text((18, 212), "Flying, vigilance", fill=(30, 30, 30, 215))
+    td.text((18, 228), "Whenever this attacks,", fill=(30, 30, 30, 205))
+    td.text((18, 242), "draw a card.", fill=(30, 30, 30, 205))
+    td.text((184, 284), "3/3", fill=(20, 20, 20, 235))
+
+    buf = io.BytesIO()
+    canvas.convert("RGB").save(buf, format="JPEG", quality=86)
+    data = buf.getvalue()
+    try:
+        with open(cache_path, "wb") as f:
+            f.write(data)
+    except Exception:
+        pass
+    return data
+
+
+@router.get("/template-preview")
+async def api_cb_template_preview(style: str = Query(...)):
+    style_key = style.strip()
+    if not style_key:
+        raise HTTPException(status_code=400, detail="Missing style parameter")
+    loop = asyncio.get_running_loop()
+    img_bytes = await loop.run_in_executor(None, lambda: _render_template_preview_bytes(style_key))
+    return Response(
+        content=img_bytes,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )

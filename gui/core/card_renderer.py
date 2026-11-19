@@ -169,8 +169,8 @@ def _pick_layer(items, preferred_tokens, folder_hint=None):
         for it in candidates:
             if it["label"].lower() == tk:
                 return it["rel_path"]
-        # 2. Numeric prefix exact match (e.g. "04_R", "01_W")
-        prefix_pat = re.compile(rf"^\d+_{re.escape(tk)}$", re.IGNORECASE)
+        # 2. Numeric prefix exact match (e.g. "04_R", "01_W", "109_Normal Border", "108_Legendary Border_[oculta]")
+        prefix_pat = re.compile(rf"^\d+_{re.escape(tk)}(_\[oculta\])?$", re.IGNORECASE)
         for it in candidates:
             if prefix_pat.match(it["label"]):
                 return it["rel_path"]
@@ -200,23 +200,33 @@ def auto_select_frame_components(card_data: dict, style_key: str = "Automated Te
     tl_lower = type_line.lower()
     is_land = "land" in tl_lower
     is_legendary = "legendary" in tl_lower
+    is_nyx = "enchantment" in tl_lower and "creature" in tl_lower
+    is_vehicle = "vehicle" in tl_lower
     is_creature = bool(card_data.get("power") is not None or card_data.get("toughness") is not None or "creature" in tl_lower)
 
     pin_code, bg_code = get_color_code_for_templates(colors, color_id, type_line)
-    bg_tokens = [bg_code] + (["Land"] if is_land else []) + ["Colourless"]
+    bg_tokens = (["Vehicle"] if is_vehicle else []) + [bg_code] + (["Land"] if is_land else []) + ["Colourless"]
     pin_tokens = [pin_code, bg_code, "Gold", "Colourless"]
 
-    border_pref = ["Black", "Border", "Borderless"]
     if "extended" in style_key.lower() or "full art" in style_key.lower():
-        border_pref = ["Borderless", "Black", "Border"]
+        border_pref = ["Full Art Border", "Borderless", "Normal Border", "Planeswalker Border", "Border"]
+    elif is_legendary:
+        border_pref = ["Legendary Border", "Normal Border", "Planeswalker Border", "Border"]
+    else:
+        border_pref = ["Normal Border", "Planeswalker Border", "Border"]
+
+    black_borders = [
+        it for it in style_cat["border"]
+        if not any(tok in it["label"].lower() for tok in ("(white)", "(silver)", "(gold)", "crop"))
+    ] or style_cat["border"]
 
     return {
         "style": style_key,
-        "background": _pick_layer(style_cat["background"], bg_tokens),
+        "background": _pick_layer(style_cat["background"], bg_tokens, folder_hint=("Nyx" if is_nyx else "Background")),
         "pinlines": _pick_layer(style_cat["pinlines"], pin_tokens, folder_hint=("Land" if is_land else "Nonland")),
         "name_box": _pick_layer(style_cat["name_box"], bg_tokens),
         "crown": _pick_layer(style_cat["crown"], pin_tokens) if is_legendary else "",
-        "border": _pick_layer(style_cat["border"], border_pref),
+        "border": _pick_layer(black_borders, border_pref),
         "pt_box": _pick_layer(style_cat["pt_box"], [bg_code, "Colourless"]) if is_creature else "",
     }
 
@@ -464,9 +474,15 @@ def compose_card_export(
 
     fc = card.get("frame_components") or {}
     frame_keys = ("background", "pinlines", "name_box", "crown", "border", "pt_box")
+    shapes_list = card.get("shapes") if isinstance(card.get("shapes"), list) else []
+    shape_map = {f"shape:{s.get('id')}": s for s in shapes_list if isinstance(s, dict) and s.get("id")}
     default_order = ["background", "art", "pinlines", "name_box", "crown", "border", "pt_box"]
+    valid_keys = set(default_order) | set(shape_map.keys())
     raw_order = card.get("layer_order") if isinstance(card.get("layer_order"), list) else []
-    layer_order = [k for k in raw_order if k in default_order]
+    layer_order = []
+    for k in raw_order:
+        if k in valid_keys and k not in layer_order:
+            layer_order.append(k)
     for k in default_order:
         if k not in layer_order:
             layer_order.append(k)
@@ -519,15 +535,33 @@ def compose_card_export(
                     art_img = raw_custom.convert("RGBA")
             elif card.get("art_crop_url"):
                 try:
-                    resp = httpx.get(
-                        card["art_crop_url"],
-                        headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/126.0.0.0", "Accept": "image/*", "Referer": card["art_crop_url"]},
-                        timeout=20.0,
-                        follow_redirects=True,
-                    )
-                    if resp.status_code == 200:
-                        with Image.open(io.BytesIO(resp.content)) as raw_fetched:
-                            art_img = raw_fetched.convert("RGBA")
+                    raw_url = str(card["art_crop_url"])
+                    should_crop_art = False
+                    if raw_url.startswith("/api/art/proxy"):
+                        qs = urllib.parse.parse_qs(urllib.parse.urlparse(raw_url).query)
+                        raw_url = (qs.get("url") or [""])[0]
+                        should_crop_art = (qs.get("crop_art") or ["0"])[0] in ("1", "true", "True")
+                    if raw_url:
+                        resp = httpx.get(
+                            raw_url,
+                            headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) Chrome/126.0.0.0", "Accept": "image/*", "Referer": raw_url},
+                            timeout=20.0,
+                            follow_redirects=True,
+                        )
+                        if resp.status_code == 200:
+                            with Image.open(io.BytesIO(resp.content)) as raw_fetched:
+                                art_img = raw_fetched.convert("RGBA")
+                            if should_crop_art:
+                                iw, ih = art_img.size
+                                iratio = iw / ih if ih else 0.0
+                                if iw < ih and 0.720 <= iratio <= 0.746:
+                                    bx = int(round(iw * (144.0 / 3288.0)))
+                                    by = int(round(ih * (144.0 / 4488.0)))
+                                    art_img = art_img.crop((bx, by, iw - bx, ih - by))
+                                    iw, ih = art_img.size
+                                x0, y0 = int(round(iw * 0.078)), int(round(ih * 0.112))
+                                x1, y1 = int(round(iw * 0.922)), int(round(ih * 0.554))
+                                art_img = art_img.crop((x0, y0, max(x0 + 10, x1), max(y0 + 10, y1)))
                 except Exception:
                     pass
 
@@ -545,22 +579,11 @@ def compose_card_export(
                 resized_art = art_img.resize((dw, dh), Image.LANCZOS)
                 del art_img
                 art_box_canvas = Image.new("RGBA", (export_w, export_h), (0, 0, 0, 0))
-                pop_out = bool(card.get("art_over_top")) or (
-                    "art" in layer_order and "name_box" in layer_order
-                    and layer_order.index("art") > layer_order.index("name_box")
-                )
-                if pop_out:
-                    art_box_canvas.paste(resized_art, (ax + (aw - dw) // 2 + ox, ay + (ah - dh) // 2 + oy))
-                    del resized_art
-                    max_h = max(int(round(587 * export_scale)), ay + ah)
-                    if max_h < export_h:
-                        art_box_canvas.paste((0, 0, 0, 0), (0, max_h, export_w, export_h))
-                else:
-                    crop_box = Image.new("RGBA", (aw, ah), (0, 0, 0, 0))
-                    crop_box.paste(resized_art, ((aw - dw) // 2 + ox, (ah - dh) // 2 + oy))
-                    del resized_art
-                    art_box_canvas.paste(crop_box, (ax, ay))
-                    del crop_box
+                crop_box = Image.new("RGBA", (aw, ah), (0, 0, 0, 0))
+                crop_box.paste(resized_art, ((aw - dw) // 2 + ox, (ah - dh) // 2 + oy))
+                del resized_art
+                art_box_canvas.paste(crop_box, (ax, ay))
+                del crop_box
                 canvas_img.alpha_composite(_apply_layer_opacity(art_box_canvas, art_op))
                 del art_box_canvas
 
@@ -581,14 +604,55 @@ def compose_card_export(
         canvas_img.alpha_composite(_apply_layer_opacity(comp_rgba, comp_op))
         del comp_rgba
 
+    def _composite_shape(shape_key):
+        if _is_layer_hidden(shape_key):
+            return
+        s = shape_map.get(shape_key)
+        if not s:
+            return
+        try:
+            op = max(0.0, min(1.0, float(layer_opacities.get(shape_key, s.get("opacity", 0.55)))))
+        except (TypeError, ValueError):
+            op = 0.55
+        if op <= 0.001:
+            return
+        from PIL import ImageDraw
+        color_hex = str(s.get("color") or "#000000").lstrip("#")
+        if len(color_hex) == 6:
+            r, g, b = int(color_hex[0:2], 16), int(color_hex[2:4], 16), int(color_hex[4:6], 16)
+        else:
+            r, g, b = 0, 0, 0
+        alpha_byte = int(round(op * 255))
+        x0 = int(round(float(s.get("x", 0)) * export_scale))
+        y0 = int(round(float(s.get("y", 0)) * export_scale))
+        x1 = int(round((float(s.get("x", 0)) + float(s.get("w", 100))) * export_scale))
+        y1 = int(round((float(s.get("y", 0)) + float(s.get("h", 100))) * export_scale))
+        layer = Image.new("RGBA", (export_w, export_h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        stype = s.get("type", "rect")
+        if stype == "circle":
+            draw.ellipse([x0, y0, x1, y1], fill=(r, g, b, alpha_byte))
+        elif stype == "rounded":
+            rad = int(round(float(s.get("radius", 14)) * export_scale))
+            draw.rounded_rectangle([x0, y0, x1, y1], radius=max(0, rad), fill=(r, g, b, alpha_byte))
+        else:
+            draw.rectangle([x0, y0, x1, y1], fill=(r, g, b, alpha_byte))
+        canvas_img.alpha_composite(layer)
+        del layer
+
     if card.get("art_over_top"):
         split_y = int(round(587 * export_scale))
-        for comp_key in layer_order:
+        art_pos = layer_order.index("art") if "art" in layer_order else -1
+        for i, comp_key in enumerate(layer_order):
             if comp_key in ("art", "pt_box"):
                 continue
-            _composite_comp(comp_key)
+            if comp_key.startswith("shape:"):
+                if art_pos != -1 and i < art_pos:
+                    _composite_shape(comp_key)
+            else:
+                _composite_comp(comp_key)
         _composite_art()
-        for comp_key in layer_order:
+        for i, comp_key in enumerate(layer_order):
             if comp_key in ("pinlines", "border"):
                 comp_op = _layer_op(comp_key)
                 rel_p = fc.get(comp_key)
@@ -601,10 +665,14 @@ def compose_card_export(
                         del comp_img, bottom_crop
             elif comp_key == "pt_box":
                 _composite_comp(comp_key)
+            elif comp_key.startswith("shape:") and (art_pos == -1 or i > art_pos):
+                _composite_shape(comp_key)
     else:
         for comp_key in layer_order:
             if comp_key == "art":
                 _composite_art()
+            elif comp_key.startswith("shape:"):
+                _composite_shape(comp_key)
             else:
                 _composite_comp(comp_key)
 

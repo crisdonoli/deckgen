@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Card Builder - DeckGen Studio</title>
-  <link rel="stylesheet" href="/static/css/main.css?v=21">
+  <link rel="stylesheet" href="/static/css/main.css?v=27">
   <link rel="stylesheet" href="/assets/mana-master/css/mana.min.css">
   <link rel="stylesheet" href="/assets/keyrune-master/css/keyrune.min.css">
   <style>
@@ -22,7 +22,7 @@
       font-style: normal;
     }
   </style>
-  <script type="module" src="/static/js/card_builder.js?v=21"></script>
+  <script type="module" src="/static/js/card_builder.js?v=40"></script>
 </head>
 <body>
   $navbar
@@ -50,16 +50,10 @@
             <div class="row">
               <button type="button" id="cb-import-txt-btn" class="btn">📄 MTGO .txt</button>
               <input type="file" id="cb-import-txt-input" accept=".txt,text/plain" hidden>
+              <button type="button" id="cb-check-txt-btn" class="btn" title="Check detected vs missing cards from your .txt list">📋 Check .txt</button>
               <button type="button" id="cb-import-png-btn" class="btn">🖼 Single .png</button>
               <input type="file" id="cb-import-png-input" accept=".png,.jpg,.jpeg,.webp" multiple hidden>
               <button type="button" id="cb-import-dir-btn" class="btn">📁 .png Folder</button>
-            </div>
-          </div>
-          <div>
-            <label class="label" style="margin-top:0;">Global Variant (Library)</label>
-            <div class="row">
-              <select id="cb-global-style-select" class="select" style="width:200px;"></select>
-              <button type="button" id="cb-apply-global-style-btn" class="btn">Apply to entire library</button>
             </div>
           </div>
         </div>
@@ -68,9 +62,17 @@
       <div class="cb-lists-columns">
         <!-- Lista 1: Loaded Cards -->
         <div class="cb-list-panel">
-          <div class="row-between">
+          <div class="row-between" style="flex-wrap:wrap; gap:6px;">
             <h2 style="margin:0; font-size:15px;">Loaded Cards (<span id="cb-loaded-count">0</span>)</h2>
-            <div class="row" style="gap:6px;"><button type="button" id="cb-select-all-btn" class="btn btn-sm">☑ Select All</button><input type="text" id="cb-filter-input" class="input" placeholder="Filter cards..." style="width:185px;"></div>
+            <div class="row" style="gap:6px; flex-wrap:wrap;">
+              <div class="cb-view-switcher" id="cb-view-switcher" role="group" aria-label="Board view mode">
+                <button type="button" class="btn btn-sm cb-view-btn" data-view="list" title="List view">☰</button>
+                <button type="button" class="btn btn-sm btn-primary cb-view-btn" data-view="grid" title="Thumbnail grid view">⊞</button>
+                <button type="button" class="btn btn-sm cb-view-btn" data-view="large" title="Large single-card view (Prev/Next)">▭</button>
+              </div>
+              <button type="button" id="cb-select-all-btn" class="btn btn-sm">☑ Select All</button>
+              <input type="text" id="cb-filter-input" class="input" placeholder="Filter cards..." style="width:170px;">
+            </div>
           </div>
           <div id="cb-loaded-grid" class="cb-card-grid"></div>
         </div>
@@ -114,156 +116,287 @@
 
     <!-- VIEW 2: DETAIL EDITOR -->
     <section id="cb-detail-view" class="cb-detail-view" style="display:none;">
-      <aside class="cb-sidebar">
-        <div class="row-between" style="margin-bottom:10px;">
-          <button type="button" id="cb-back-btn" class="btn">← Back</button>
-          <label class="row" style="cursor:pointer; font-size:12px;">
-            <input type="checkbox" id="cb-detail-ready-check">
-            <span>Ready</span>
-          </label>
+      <aside id="cb-sidebar" class="cb-sidebar">
+        <!-- Icon-only rail shown when collapsed -->
+        <div class="cb-collapsed-rail">
+          <button type="button" id="cb-sidebar-expand-btn" class="cb-rail-btn" title="Expand panel">▶</button>
+          <button type="button" class="cb-rail-btn" data-rail-act="back" title="Back to board">←</button>
+          <div class="cb-rail-sep"></div>
+          <button type="button" class="cb-rail-btn" data-rail-sec="art" title="Art & Adjustments">🖼</button>
+          <button type="button" class="cb-rail-btn" data-rail-sec="layers" title="Layer Manager">📚</button>
+          <button type="button" class="cb-rail-btn" data-rail-sec="frame" title="Frame Template & Components">🧱</button>
         </div>
 
-        <details class="dg-accordion" open>
-          <summary>Art & Adjustments</summary>
-          <div class="accordion-body">
-            <div class="row" style="margin-bottom:8px;">
-              <button type="button" id="cb-change-art-btn" class="btn btn-primary" style="flex:1;">🎨 Change Art</button>
-              <button type="button" id="cb-crop-art-btn" class="btn" style="flex:1;">✂ Crop Art</button>
-            </div>
-            <label class="row" style="font-size:12px; cursor:pointer; margin-bottom:6px; background:var(--surface); padding:5px 8px; border:1px solid var(--border); border-radius:var(--radius-sm);">
-              <input type="checkbox" id="cb-art-over-top">
-              <span>✨ Art Over Title / Frame (Pop-Out)</span>
-            </label>
-            <label class="label">Brightness (<span id="cb-brightness-val">1.00</span>)</label>
-            <input type="range" id="cb-brightness" min="0.3" max="1.8" step="0.05" value="1.0" style="width:100%;">
-            <label class="label">Art Zoom (<span id="cb-art-scale-val">1.00</span>)</label>
-            <input type="range" id="cb-art-scale" min="0.5" max="2.5" step="0.05" value="1.0" style="width:100%;">
-            <div class="row" style="margin-top:6px;">
-              <div style="flex:1;">
-                <label class="label" style="margin-top:0;">Offset X</label>
-                <input type="number" id="cb-art-ox" class="input" value="0" step="5">
-              </div>
-              <div style="flex:1;">
-                <label class="label" style="margin-top:0;">Offset Y</label>
-                <input type="number" id="cb-art-oy" class="input" value="0" step="5">
-              </div>
-            </div>
-            <label class="label">Background Color (Base Template)</label>
-            <div class="row">
-              <input type="color" id="cb-bg-color-picker" value="#111111" style="width:38px; height:28px; border:none; background:none; cursor:pointer;">
-              <input type="text" id="cb-bg-color-text" class="input" value="#111111">
+        <!-- Expanded sidebar content -->
+        <div class="cb-sidebar-content">
+          <div class="row-between" style="margin-bottom:8px; gap:4px;">
+            <button type="button" id="cb-back-btn" class="btn btn-sm">← Back</button>
+            <div class="row" style="gap:6px; align-items:center;">
+              <label class="row" style="cursor:pointer; font-size:11px;">
+                <input type="checkbox" id="cb-detail-ready-check">
+                <span>Ready</span>
+              </label>
+              <button type="button" id="cb-delete-card-btn" class="btn btn-sm" title="Remove this card from the board">🗑</button>
+              <button type="button" id="cb-sidebar-collapse-btn" class="btn btn-sm" title="Collapse panel">◀</button>
             </div>
           </div>
-        </details>
 
-        <details class="dg-accordion" open>
-          <summary>Card Text</summary>
-          <div class="accordion-body">
-            <label class="label" style="margin-top:0;">Card Title</label>
-            <input type="text" id="cb-field-name" class="input">
-            <label class="label">Original Name (in parentheses)</label>
-            <input type="text" id="cb-field-official-name" class="input" placeholder="Auto-filled when editing title...">
-            <label class="label">Mana Cost</label>
-            <input type="text" id="cb-field-mana" class="input" placeholder="{1}{R}">
-            <label class="label">Type Line</label>
-            <input type="text" id="cb-field-type" class="input">
-            <label class="label">Rules Text (Oracle)</label>
-            <textarea id="cb-field-oracle" class="textarea" rows="4"></textarea>
-            <div class="row">
-              <div style="flex:1;">
-                <label class="label">P/T</label>
-                <input type="text" id="cb-field-pt" class="input" placeholder="2/2">
+          <details class="dg-accordion" data-section="art" open>
+            <summary>🖼 Art & Adjustments</summary>
+            <div class="accordion-body">
+              <div class="row" style="margin-bottom:6px;">
+                <button type="button" id="cb-change-art-btn" class="btn btn-sm btn-primary" style="flex:1;">🎨 Change Art</button>
+                <button type="button" id="cb-crop-art-btn" class="btn btn-sm" style="flex:1;">✂ Crop Art</button>
               </div>
-              <div style="flex:1;">
-                <label class="label">Artist</label>
-                <input type="text" id="cb-field-artist" class="input">
+              <label class="row" style="font-size:11px; cursor:pointer; margin-bottom:6px; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:var(--radius-sm);">
+                <input type="checkbox" id="cb-art-over-top">
+                <span>✨ Art Over Title / Frame (Pop-Out)</span>
+              </label>
+              <label class="label">Brightness (<span id="cb-brightness-val">1.00</span>)</label>
+              <input type="range" id="cb-brightness" min="0.3" max="1.8" step="0.05" value="1.0" style="width:100%;">
+              <label class="label">Art Scale (<span id="cb-art-scale-val">1.00</span>)</label>
+              <input type="range" id="cb-art-scale" min="0.5" max="2.5" step="0.05" value="1.0" style="width:100%;">
+              <label class="label">Background Color (Base Template)</label>
+              <div class="row">
+                <input type="color" id="cb-bg-color-picker" value="#111111" style="width:30px; height:24px; border:none; background:none; cursor:pointer;">
+                <input type="text" id="cb-bg-color-text" class="input" value="#111111">
               </div>
             </div>
-            <label class="label">Independent Text Colors</label>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-              <label class="row" style="font-size:11px; justify-content:space-between; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:4px;">
-                <span>Title</span>
-                <input type="color" id="cb-color-title" value="#111111" style="width:28px; height:22px; border:none; background:none; cursor:pointer;">
-              </label>
-              <label class="row" style="font-size:11px; justify-content:space-between; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:4px;">
-                <span>Type</span>
-                <input type="color" id="cb-color-type" value="#111111" style="width:28px; height:22px; border:none; background:none; cursor:pointer;">
-              </label>
-              <label class="row" style="font-size:11px; justify-content:space-between; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:4px;">
-                <span>Oracle</span>
-                <input type="color" id="cb-color-oracle" value="#111111" style="width:28px; height:22px; border:none; background:none; cursor:pointer;">
-              </label>
-              <label class="row" style="font-size:11px; justify-content:space-between; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:4px;">
-                <span>P/T</span>
-                <input type="color" id="cb-color-pt" value="#111111" style="width:28px; height:22px; border:none; background:none; cursor:pointer;">
-              </label>
-              <label class="row" style="font-size:11px; justify-content:space-between; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:4px;">
-                <span>Original</span>
-                <input type="color" id="cb-color-official" value="#111111" style="width:28px; height:22px; border:none; background:none; cursor:pointer;">
-              </label>
-              <label class="row" style="font-size:11px; justify-content:space-between; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:4px;">
-                <span>Artist</span>
-                <input type="color" id="cb-color-artist" value="#ffffff" style="width:28px; height:22px; border:none; background:none; cursor:pointer;">
-              </label>
+          </details>
+
+          <details class="dg-accordion" data-section="layers" open>
+            <summary>📚 Layer Manager</summary>
+            <div class="accordion-body">
+              <p style="margin:0 0 6px; font-size:10.5px; color:var(--text-muted);">Drag to reorder. Click canvas to select; Shift+Click to cycle layers behind.</p>
+              <ul id="cb-layer-list" class="layer-list"></ul>
             </div>
-          </div>
-        </details>
+          </details>
+
+          <details class="dg-accordion" data-section="frame">
+            <summary>🧱 Frame Template & Components</summary>
+            <div class="accordion-body">
+              <label class="label" style="margin-top:0;">Template Style</label>
+              <div class="row" style="gap:6px; margin-bottom:8px;">
+                <select id="cb-detail-style-select" class="select" style="flex:1; min-width:0;"></select>
+                <button type="button" id="cb-browse-templates-btn" class="btn btn-sm btn-primary" title="Browse visual template previews">🖼 Preview</button>
+              </div>
+              <div id="cb-frame-selectors"></div>
+            </div>
+          </details>
+        </div>
       </aside>
 
       <div class="cb-stage">
-        <div class="cb-canvas-wrap">
-          <canvas id="card-canvas" width="750" height="1050"></canvas>
+        <div class="cb-stage-row">
+          <!-- Photoshop-style movable floating Toolbox -->
+          <div class="cb-ps-toolbox" id="cb-ps-toolbox" title="Drawing, Text & Selection Tools">
+            <div id="cb-toolbox-drag-handle" class="cb-toolbox-drag-handle" title="Drag to move toolbar">⋮⋮</div>
+            <button type="button" class="cb-tool-btn active" data-tool="select" title="Select / Move — Shift+Click cycles layers behind">↖</button>
+            <button type="button" class="cb-tool-btn" id="cb-tool-text-btn" title="Edit Text Properties">T</button>
+            <button type="button" class="cb-tool-btn" id="cb-tool-official-btn" title="Set Official / Original Name (in parentheses)">®</button>
+            <div class="cb-rail-sep"></div>
+            <button type="button" class="cb-tool-btn" data-tool="rect" title="Rectangle Tool — Drag on canvas to draw box">▭</button>
+            <button type="button" class="cb-tool-btn" data-tool="rounded" title="Rounded Box Tool — Drag on canvas to draw rounded box">▢</button>
+            <button type="button" class="cb-tool-btn" data-tool="circle" title="Ellipse / Circle Tool — Drag on canvas to draw circle">◯</button>
+
+            <!-- Contextual Text Inspector Popover -->
+            <div id="cb-text-popover" class="cb-text-popover" style="display:none;">
+              <div class="row-between" style="margin-bottom:6px; border-bottom:1px solid var(--border); padding-bottom:4px;">
+                <strong id="cb-text-popover-title" style="font-size:11px;">Text Settings</strong>
+                <button type="button" id="cb-text-popover-close" class="btn btn-sm" style="padding:1px 5px; font-size:10px;">✕</button>
+              </div>
+              <div class="cb-text-tabs" id="cb-text-tabs">
+                <button type="button" class="cb-text-tab" data-text-tab="title">Title</button>
+                <button type="button" class="cb-text-tab" data-text-tab="official_title">Original</button>
+                <button type="button" class="cb-text-tab" data-text-tab="mana_cost">Mana</button>
+                <button type="button" class="cb-text-tab" data-text-tab="type_line">Type</button>
+                <button type="button" class="cb-text-tab" data-text-tab="set_symbol">Set</button>
+                <button type="button" class="cb-text-tab" data-text-tab="oracle_box">Oracle</button>
+                <button type="button" class="cb-text-tab" data-text-tab="pt_text">P/T</button>
+                <button type="button" class="cb-text-tab" data-text-tab="artist">Artist</button>
+              </div>
+
+              <div class="cb-text-group" data-text-key="title">
+                <label class="label">Card Title</label>
+                <input type="text" id="cb-field-name" class="input">
+                <div class="row-between" style="margin-top:6px; gap:6px;">
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Size</span>
+                    <input type="number" class="input cb-text-size-input" data-size-key="title" min="12" max="72" style="width:54px;">
+                  </label>
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Color</span>
+                    <input type="color" id="cb-color-title" value="#111111" style="width:26px; height:20px; border:none; background:none; cursor:pointer;">
+                  </label>
+                </div>
+              </div>
+
+              <div class="cb-text-group" data-text-key="official_title">
+                <label class="label">Official / Original Name (in parentheses)</label>
+                <input type="text" id="cb-field-official-name" class="input" placeholder="e.g. Arcane Signet">
+                <div class="row-between" style="margin-top:6px; gap:6px;">
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Size</span>
+                    <input type="number" class="input cb-text-size-input" data-size-key="official_title" min="10" max="64" style="width:54px;">
+                  </label>
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Color</span>
+                    <input type="color" id="cb-color-official" value="#111111" style="width:26px; height:20px; border:none; background:none; cursor:pointer;">
+                  </label>
+                </div>
+              </div>
+
+              <div class="cb-text-group" data-text-key="mana_cost">
+                <label class="label">Mana Cost</label>
+                <input type="text" id="cb-field-mana" class="input" placeholder="{1}{R}">
+                <div class="row" style="margin-top:6px; gap:6px;">
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Icon Size</span>
+                    <input type="number" class="input cb-text-size-input" data-size-key="mana_cost" min="14" max="64" style="width:54px;">
+                  </label>
+                </div>
+              </div>
+
+              <div class="cb-text-group" data-text-key="type_line">
+                <label class="label">Type Line</label>
+                <input type="text" id="cb-field-type" class="input">
+                <div class="row-between" style="margin-top:6px; gap:6px;">
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Size</span>
+                    <input type="number" class="input cb-text-size-input" data-size-key="type_line" min="12" max="54" style="width:54px;">
+                  </label>
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Color</span>
+                    <input type="color" id="cb-color-type" value="#111111" style="width:26px; height:20px; border:none; background:none; cursor:pointer;">
+                  </label>
+                </div>
+              </div>
+
+              <div class="cb-text-group" data-text-key="set_symbol">
+                <label class="label">Set Code (Keyrune, e.g. cmr, cmm, mh3, lea)</label>
+                <div class="row" style="gap:6px; align-items:center;">
+                  <input type="text" id="cb-field-set" class="input" placeholder="mtg" style="flex:1; text-transform:lowercase;">
+                  <i id="cb-set-preview-icon" class="ss ss-mtg ss-2x" style="min-width:28px; text-align:center;"></i>
+                </div>
+                <div class="row-between" style="margin-top:6px; gap:6px;">
+                  <label class="row" style="font-size:10.5px; gap:4px; flex:1;">
+                    <span>Rarity</span>
+                    <select id="cb-field-rarity" class="select" style="flex:1;">
+                      <option value="common">Common</option>
+                      <option value="uncommon">Uncommon</option>
+                      <option value="rare">Rare</option>
+                      <option value="mythic">Mythic</option>
+                    </select>
+                  </label>
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Size</span>
+                    <input type="number" class="input cb-text-size-input" data-size-key="set_symbol" min="14" max="72" style="width:50px;">
+                  </label>
+                </div>
+              </div>
+
+              <div class="cb-text-group" data-text-key="oracle_box">
+                <label class="label">Rules Text (Oracle)</label>
+                <textarea id="cb-field-oracle" class="textarea" rows="4"></textarea>
+                <div class="row-between" style="margin-top:6px; gap:6px;">
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Size</span>
+                    <input type="number" class="input cb-text-size-input" data-size-key="oracle_box" min="12" max="48" style="width:54px;">
+                  </label>
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Color</span>
+                    <input type="color" id="cb-color-oracle" value="#111111" style="width:26px; height:20px; border:none; background:none; cursor:pointer;">
+                  </label>
+                </div>
+              </div>
+
+              <div class="cb-text-group" data-text-key="pt_text">
+                <label class="label">Power / Toughness</label>
+                <input type="text" id="cb-field-pt" class="input" placeholder="2/2">
+                <div class="row-between" style="margin-top:6px; gap:6px;">
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Size</span>
+                    <input type="number" class="input cb-text-size-input" data-size-key="pt_text" min="14" max="64" style="width:54px;">
+                  </label>
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Color</span>
+                    <input type="color" id="cb-color-pt" value="#111111" style="width:26px; height:20px; border:none; background:none; cursor:pointer;">
+                  </label>
+                </div>
+              </div>
+
+              <div class="cb-text-group" data-text-key="artist">
+                <label class="label">Artist</label>
+                <input type="text" id="cb-field-artist" class="input">
+                <div class="row-between" style="margin-top:6px; gap:6px;">
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Size</span>
+                    <input type="number" class="input cb-text-size-input" data-size-key="artist" min="10" max="36" style="width:54px;">
+                  </label>
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Color</span>
+                    <input type="color" id="cb-color-artist" value="#ffffff" style="width:26px; height:20px; border:none; background:none; cursor:pointer;">
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="cb-canvas-wrap">
+            <canvas id="card-canvas" width="750" height="1050"></canvas>
+          </div>
         </div>
         <div class="row" style="flex-wrap:wrap; justify-content:center;">
-          <label class="row" style="font-size:12px; cursor:pointer; background:var(--surface); padding:5px 10px; border:1px solid var(--border); border-radius:var(--radius-sm);">
+          <label class="row" style="font-size:11.5px; cursor:pointer; background:var(--surface); padding:4px 9px; border:1px solid var(--border); border-radius:var(--radius-sm);">
             <input type="checkbox" id="cb-interactive-mode" checked>
-            <span>Interactive editing (click/drag/wheel)</span>
+            <span>Interactive editing (Shift+Click: layer behind)</span>
           </label>
           <button type="button" id="cb-undo-btn" class="btn btn-sm" title="Undo (Ctrl+Z)" disabled>↩ Undo</button>
           <button type="button" id="cb-redo-btn" class="btn btn-sm" title="Redo (Ctrl+Y)" disabled>↪ Redo</button>
           <button type="button" id="cb-reset-layout-btn" class="btn btn-sm" title="Reset default positions">↺ Reset Positions</button>
-          <button type="button" id="cb-save-single-btn" class="btn">💾 Save Card</button>
-          <button type="button" id="cb-export-single-pdf-btn" class="btn btn-primary">📤 Export Card (PDF)</button>
+          <button type="button" id="cb-reset-all-btn" class="btn btn-sm" title="Reset all card edits">⟳ Reset All</button>
+          <button type="button" id="cb-save-single-btn" class="btn btn-sm">💾 Save Card</button>
+          <button type="button" id="cb-export-single-pdf-btn" class="btn btn-sm btn-primary">📤 Export Card (PDF)</button>
         </div>
       </div>
-
-      <aside class="cb-sidebar right">
-        <details class="dg-accordion" open>
-          <summary>Frame Style</summary>
-          <div class="accordion-body">
-            <label class="label" style="margin-top:0;">Template Style</label>
-            <select id="cb-detail-style-select" class="select"></select>
-          </div>
-        </details>
-
-        <details class="dg-accordion" open>
-          <summary>Layer Manager (Independent Layers)</summary>
-          <div class="accordion-body">
-            <p style="margin:0 0 8px; font-size:11px; color:var(--text-muted);">Drag any layer independently to reorder.</p>
-            <ul id="cb-layer-list" class="layer-list"></ul>
-          </div>
-        </details>
-
-        <details class="dg-accordion" open>
-          <summary>Background Boxes / Transparency</summary>
-          <div class="accordion-body">
-            <p style="margin:0 0 8px; font-size:11px; color:var(--text-muted);">Add or duplicate solid-color translucent boxes to make text pop over full art.</p>
-            <div class="row" style="margin-bottom:8px; flex-wrap:wrap;">
-              <button type="button" id="cb-add-rect-btn" class="btn btn-sm">+ Rectangle</button>
-              <button type="button" id="cb-add-round-btn" class="btn btn-sm">+ Rounded</button>
-              <button type="button" id="cb-add-circle-btn" class="btn btn-sm">+ Circle</button>
-            </div>
-            <div id="cb-shapes-list" style="display:flex; flex-direction:column; gap:6px;"></div>
-          </div>
-        </details>
-
-        <details class="dg-accordion">
-          <summary>Frame Components</summary>
-          <div class="accordion-body" id="cb-frame-selectors"></div>
-        </details>
-      </aside>
     </section>
   </main>
+
+  <!-- MODAL: .txt Deck Checklist (Detected vs Missing) -->
+  <div id="cb-txt-check-modal" class="modal-overlay">
+    <div class="modal-content" style="width: 680px; max-width: 95vw;">
+      <div class="modal-header">
+        <span>📋 .txt Deck Checklist</span>
+        <button type="button" class="modal-close" id="cb-txt-check-close">&times;</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
+        <div id="cb-txt-check-summary" style="font-size:12.5px;"></div>
+        <div id="cb-txt-check-actions" class="row" style="gap:8px; flex-wrap:wrap;"></div>
+        <div id="cb-txt-check-missing-wrap" style="display:none;">
+          <div style="font-weight:600; font-size:12px; color:var(--danger); margin-bottom:4px;">Missing Cards (<span id="cb-txt-missing-count">0</span>)</div>
+          <div id="cb-txt-missing-list" style="max-height:180px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; padding:6px; display:flex; flex-direction:column; gap:4px;"></div>
+        </div>
+        <div id="cb-txt-check-found-wrap" style="display:none;">
+          <div style="font-weight:600; font-size:12px; color:var(--ok, #22c55e); margin-bottom:4px;">Detected Cards (<span id="cb-txt-found-count">0</span>)</div>
+          <div id="cb-txt-found-list" style="max-height:180px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; padding:6px; display:flex; flex-direction:column; gap:3px; font-size:11.5px;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Visual Template Style Picker -->
+  <div id="cb-template-modal" class="modal-overlay">
+    <div class="modal-content" style="width: 920px; max-width: 95vw;">
+      <div class="modal-header">
+        <span>🧱 Choose Frame Template</span>
+        <button type="button" class="modal-close" id="cb-tpl-close">&times;</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
+        <input type="text" id="cb-tpl-filter" class="input" placeholder="Filter templates (e.g. normal, extended, classic, saga, universesbeyond)...">
+        <div id="cb-tpl-grid" class="cb-tpl-grid"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- MODAL: Change Art (Tabbed: Upload / Scryfall / Local JSONs) -->
   <div id="cb-change-art-modal" class="modal-overlay">
@@ -273,10 +406,13 @@
         <button type="button" class="modal-close" id="cb-ca-close">&times;</button>
       </div>
       <div class="modal-body" style="display:flex; flex-direction:column; gap:12px;">
-        <div class="row" style="border-bottom:1px solid var(--border); padding-bottom:8px;">
-          <button type="button" class="btn btn-primary cb-ca-tab" data-tab="json">📚 Search HD JSONs</button>
-          <button type="button" class="btn cb-ca-tab" data-tab="scryfall">🔍 Search Scryfall</button>
-          <button type="button" class="btn cb-ca-tab" data-tab="upload">📁 Upload Image</button>
+        <div class="row" style="border-bottom:1px solid var(--border); padding-bottom:8px; flex-wrap:wrap;">
+          <button type="button" class="btn btn-primary cb-ca-tab" data-tab="json">📚 HD JSONs</button>
+          <button type="button" class="btn cb-ca-tab" data-tab="scryfall">🔍 Scryfall</button>
+          <button type="button" class="btn cb-ca-tab" data-tab="mpcfill">⚡ MPCFill</button>
+          <button type="button" class="btn cb-ca-tab" data-tab="wikimedia">🏛 Wikimedia</button>
+          <button type="button" class="btn cb-ca-tab" data-tab="upload">📁 Upload</button>
+          <a id="cb-ca-pinterest-link" class="btn" href="https://www.pinterest.com/search/pins/?q=mtg+art" target="_blank" rel="noopener noreferrer" style="margin-left:auto; text-decoration:none;" title="Open Pinterest search for this card in a new tab">📌 Pinterest ↗</a>
         </div>
 
         <div id="cb-ca-panel-json" class="cb-ca-panel">
@@ -293,6 +429,26 @@
             <button type="button" id="cb-ca-sf-btn" class="btn btn-primary">Search Prints</button>
           </div>
           <div id="cb-ca-sf-grid" class="art-results-grid"></div>
+        </div>
+
+        <div id="cb-ca-panel-mpcfill" class="cb-ca-panel" style="display:none;">
+          <div class="row" style="margin-bottom:6px; flex-wrap:wrap;">
+            <input type="text" id="cb-ca-mpc-q" class="input" placeholder="Card name on MPCFill (extended / alt arts)..." style="flex:1;">
+            <button type="button" id="cb-ca-mpc-btn" class="btn btn-primary">Search MPCFill</button>
+          </div>
+          <label class="row" style="font-size:11.5px; cursor:pointer; margin-bottom:8px;">
+            <input type="checkbox" id="cb-ca-mpc-crop" checked>
+            <span>✂ Auto-crop Art Box only (removes MPCFill card frame &amp; text)</span>
+          </label>
+          <div id="cb-ca-mpc-grid" class="art-results-grid"></div>
+        </div>
+
+        <div id="cb-ca-panel-wikimedia" class="cb-ca-panel" style="display:none;">
+          <div class="row" style="margin-bottom:10px;">
+            <input type="text" id="cb-ca-wm-q" class="input" placeholder="Search paintings, fantasy, knights, dragons...">
+            <button type="button" id="cb-ca-wm-btn" class="btn btn-primary">Search Wikimedia</button>
+          </div>
+          <div id="cb-ca-wm-grid" class="art-results-grid"></div>
         </div>
 
         <div id="cb-ca-panel-upload" class="cb-ca-panel" style="display:none; text-align:center; padding:24px;">
@@ -338,18 +494,21 @@
       </div>
     </div>
   </div>
-  <!-- MODAL: Import Progress Bar -->
+  <!-- MODAL: Import / Export Progress Bar -->
   <div id="cb-import-progress-modal" class="modal-overlay">
     <div class="modal-content" style="width: 440px; max-width: 92vw;">
       <div class="modal-header">
-        <span>⏳ Loading Cards</span>
+        <span id="cb-import-progress-title">⏳ Loading Cards</span>
       </div>
       <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
         <div id="cb-import-progress-text" style="font-size:12.5px; color:var(--text);">Preparing list...</div>
         <div style="width:100%; height:12px; background:var(--surface-2); border:1px solid var(--border); border-radius:999px; overflow:hidden;">
           <div id="cb-import-progress-bar" style="width:0%; height:100%; background:var(--accent); transition:width 0.15s ease;"></div>
         </div>
-        <div id="cb-import-progress-sub" style="font-size:11px; color:var(--text-muted); text-align:right;">0 / 0</div>
+        <div class="row-between" style="align-items:center;">
+          <button type="button" id="cb-import-progress-cancel" class="btn btn-sm" style="display:none;">✕ Cancel</button>
+          <div id="cb-import-progress-sub" style="font-size:11px; color:var(--text-muted); margin-left:auto;">0 / 0</div>
+        </div>
       </div>
     </div>
   </div>
