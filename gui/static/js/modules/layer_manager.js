@@ -1,5 +1,7 @@
+import { iconSvg } from './icons.js?v=1';
+
 const LAYER_LABELS = {
-  background: 'Background',
+  background: 'Frame',
   art: 'Artwork',
   pinlines: 'Pinlines / Textbox',
   name_box: 'Name Box',
@@ -9,10 +11,12 @@ const LAYER_LABELS = {
 };
 
 const SHAPE_ICONS = {
-  rect: '▭',
-  rounded: '▢',
-  circle: '◯',
+  rect: 'rect',
+  rounded: 'rounded-rect',
+  circle: 'circle',
 };
+
+const COLORABLE_FRAME_KEYS = new Set(['background', 'pinlines', 'name_box', 'crown', 'border', 'pt_box']);
 
 export const DEFAULT_LAYER_ORDER = [
   'background',
@@ -91,34 +95,44 @@ export class LayerManager {
 
       if (isShape && shape) {
         const shapeIdx = shapes.findIndex((s) => s.id === shape.id) + 1;
-        const icon = SHAPE_ICONS[shape.type] || '▭';
+        const iconName = SHAPE_ICONS[shape.type] || 'rect';
         const label = shape.type === 'circle' ? 'Circle' : (shape.type === 'rounded' ? 'Rounded' : 'Box');
         li.innerHTML = `
-          <span title="Drag to reorder" style="cursor:grab; opacity:0.65;">⠿</span>
-          <button type="button" class="btn btn-sm" data-act="toggle" title="${isHidden ? 'Show layer' : 'Hide layer'}">${isHidden ? '🚫' : '👁'}</button>
-          <span class="layer-name">${icon} ${label} #${shapeIdx}</span>
+          <span title="Drag to reorder" style="cursor:grab; opacity:0.6; display:inline-flex;">${iconSvg('grip', 12)}</span>
+          <button type="button" class="btn btn-sm" data-act="toggle" title="${isHidden ? 'Show layer' : 'Hide layer'}">${iconSvg(isHidden ? 'eye-off' : 'eye', 13)}</button>
+          <span class="layer-name">${iconSvg(iconName, 12)} ${label} #${shapeIdx}</span>
           <input type="color" data-act="color" value="${shape.color || '#000000'}" title="Shape color" style="width:20px; height:18px; padding:0; border:none; background:none; cursor:pointer; flex-shrink:0;">
-          <input type="range" min="0" max="1" step="0.05" value="${opacity}" data-act="opacity" style="width:46px;" title="Opacity">
-          <button type="button" class="btn btn-sm" data-act="dup" title="Duplicate shape" style="padding:1px 4px;">⧉</button>
-          <button type="button" class="btn btn-sm" data-act="del" title="Delete shape" style="padding:1px 4px;">✕</button>
+          <input type="range" min="0" max="1" step="0.05" value="${opacity}" data-act="opacity" style="width:44px;" title="Opacity">
+          <button type="button" class="btn btn-sm" data-act="dup" title="Duplicate shape" style="padding:2px 4px;">${iconSvg('copy', 12)}</button>
+          <button type="button" class="btn btn-sm" data-act="del" title="Delete shape" style="padding:2px 4px;">${iconSvg('x', 12)}</button>
         `;
       } else {
+        const canColor = COLORABLE_FRAME_KEYS.has(key);
+        const curColor = canColor ? ((card.layer_colors && card.layer_colors[key]) || '') : '';
+        const hasColor = Boolean(curColor && curColor !== 'no-color');
+        const colorCtrlHtml = canColor
+          ? `<input type="color" data-act="layer-color" value="${hasColor ? curColor : '#1e293b'}" title="${hasColor ? `Color overlay: ${curColor}` : 'Set solid color overlay (no-color)'}" style="width:18px; height:18px; padding:0; border:1px solid ${hasColor ? 'var(--accent)' : 'var(--border)'}; border-radius:3px; background:none; cursor:pointer; opacity:${hasColor ? '1' : '0.45'}; flex-shrink:0;">`
+            + (hasColor ? `<button type="button" class="btn btn-sm" data-act="layer-color-clear" title="Clear color (restore texture)" style="padding:1px 3px;">${iconSvg('x', 11)}</button>` : '')
+          : '';
         li.innerHTML = `
-          <span title="Drag to reorder" style="cursor:grab; opacity:0.65;">⠿</span>
-          <button type="button" class="btn btn-sm" data-act="toggle" title="${isHidden ? 'Show layer' : 'Hide layer'}" aria-pressed="${isHidden ? 'true' : 'false'}">${isHidden ? '🚫' : '👁'}</button>
+          <span title="Drag to reorder" style="cursor:grab; opacity:0.6; display:inline-flex;">${iconSvg('grip', 12)}</span>
+          <button type="button" class="btn btn-sm" data-act="toggle" title="${isHidden ? 'Show layer' : 'Hide layer'}" aria-pressed="${isHidden ? 'true' : 'false'}">${iconSvg(isHidden ? 'eye-off' : 'eye', 13)}</button>
           <span class="layer-name">${LAYER_LABELS[key] || key}${isEmptyFrame ? ' <small style="opacity:0.6;">(empty)</small>' : ''}</span>
-          <input type="range" min="0" max="1" step="0.05" value="${opacity}" data-act="opacity" style="width:52px;" title="Opacity">
+          ${colorCtrlHtml}
+          <input type="range" min="0" max="1" step="0.05" value="${opacity}" data-act="opacity" style="width:46px;" title="Opacity">
         `;
       }
 
       const toggleBtn = li.querySelector('[data-act="toggle"]');
       const opacityInput = li.querySelector('[data-act="opacity"]');
       const colorInput = li.querySelector('[data-act="color"]');
+      const layerColorInput = li.querySelector('[data-act="layer-color"]');
+      const layerColorClearBtn = li.querySelector('[data-act="layer-color-clear"]');
       const dupBtn = li.querySelector('[data-act="dup"]');
       const delBtn = li.querySelector('[data-act="del"]');
 
       // Prevent draggable <li> from hijacking clicks/drags on interactive controls
-      [toggleBtn, opacityInput, colorInput, dupBtn, delBtn].filter(Boolean).forEach((ctrl) => {
+      [toggleBtn, opacityInput, colorInput, layerColorInput, layerColorClearBtn, dupBtn, delBtn].filter(Boolean).forEach((ctrl) => {
         ctrl.addEventListener('pointerdown', (e) => {
           e.stopPropagation();
           li.draggable = false;
@@ -126,6 +140,26 @@ export class LayerManager {
         ctrl.addEventListener('pointerup', () => { li.draggable = true; });
         ctrl.addEventListener('pointercancel', () => { li.draggable = true; });
       });
+
+      if (layerColorInput) {
+        layerColorInput.addEventListener('input', (e) => {
+          card.layer_colors = card.layer_colors || {};
+          card.layer_colors[key] = e.target.value;
+          layerColorInput.style.opacity = '1';
+          layerColorInput.style.borderColor = 'var(--accent)';
+          this.onChange?.(card);
+        });
+        layerColorInput.addEventListener('change', () => this.render(card));
+      }
+
+      if (layerColorClearBtn) {
+        layerColorClearBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (card.layer_colors) delete card.layer_colors[key];
+          this.render(card);
+          this.onChange?.(card);
+        });
+      }
 
       li.addEventListener('click', (e) => {
         if (e.target && e.target.closest('button, input')) return;

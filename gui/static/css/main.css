@@ -726,6 +726,19 @@ details.dg-accordion:not([open]) > summary::after { transform: rotate(-90deg); }
   background: var(--accent);
   transform: scale(1.2);
 }
+
+/* Uniform Flaticon/Lucide-style SVG icons */
+.dg-ico {
+  display: inline-block;
+  vertical-align: -2px;
+  flex-shrink: 0;
+}
+.btn .dg-ico,
+.cb-rail-btn .dg-ico,
+.cb-tool-btn .dg-ico,
+.dg-accordion summary .dg-ico {
+  vertical-align: middle;
+}
 .cb-canvas-wrap {
   background: #0d1017;
   padding: 12px;

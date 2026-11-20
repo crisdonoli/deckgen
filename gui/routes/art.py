@@ -163,6 +163,21 @@ async def api_art_wikimedia(q: str = Query(...), limit: int = Query(default=30, 
         raise HTTPException(status_code=502, detail=f"Error consultando Wikimedia: {exc}")
 
 
+def _trim_mpc_bleed_bytes(raw_bytes: bytes) -> bytes:
+    """Recorta solo el bleed MPC (144px en 3288x4488) dejando la carta completa en proporción exacta 5:7."""
+    with Image.open(io.BytesIO(raw_bytes)) as im:
+        rgb = im.convert("RGB")
+        w, h = rgb.size
+        ratio = w / h if h else 0.0
+        if w < h and 0.720 <= ratio <= 0.746:
+            bx = int(round(w * (144.0 / 3288.0)))
+            by = int(round(h * (144.0 / 4488.0)))
+            rgb = rgb.crop((bx, by, w - bx, h - by))
+        buf = io.BytesIO()
+        rgb.save(buf, format="JPEG", quality=95)
+        return buf.getvalue()
+
+
 def _crop_art_box_bytes(raw_bytes: bytes) -> bytes:
     """Recorta solo la ventana del arte de una carta completa (ej. MPCFill con o sin bleed)."""
     with Image.open(io.BytesIO(raw_bytes)) as im:
@@ -187,12 +202,16 @@ def _crop_art_box_bytes(raw_bytes: bytes) -> bytes:
 
 
 @router.get("/proxy")
-async def api_art_proxy(url: str = Query(...), crop_art: bool = Query(default=False)):
+async def api_art_proxy(
+    url: str = Query(...),
+    crop_art: bool = Query(default=False),
+    trim_bleed: bool = Query(default=False),
+):
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise HTTPException(status_code=400, detail="URL inválida.")
 
-    cache_key_src = f"{url}|crop_art={int(crop_art)}"
+    cache_key_src = f"{url}|crop_art={int(crop_art)}|trim_bleed={int(trim_bleed)}"
     key = hashlib.sha256(cache_key_src.encode("utf-8")).hexdigest()
     cache_path = os.path.join(_IMG_CACHE_DIR, key)
     meta_path = cache_path + ".mime"
@@ -223,6 +242,9 @@ async def api_art_proxy(url: str = Query(...), crop_art: bool = Query(default=Fa
         ctype = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
         if crop_art:
             content = _crop_art_box_bytes(content)
+            ctype = "image/jpeg"
+        elif trim_bleed:
+            content = _trim_mpc_bleed_bytes(content)
             ctype = "image/jpeg"
         os.makedirs(_IMG_CACHE_DIR, exist_ok=True)
         with open(cache_path, "wb") as cf:

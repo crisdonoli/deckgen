@@ -8,8 +8,8 @@ import {
   setGlobalLoading,
   showToast,
 } from './modules/workspace_client.js?v=21';
-import { CropMaskModal } from './modules/crop_masks.js?v=21';
-import { LayerManager } from './modules/layer_manager.js?v=25';
+import { CropMaskModal } from './modules/crop_masks.js?v=2';
+import { LayerManager } from './modules/layer_manager.js?v=27';
 
 initThemeAndNavbar('card-builder');
 
@@ -93,10 +93,12 @@ function cloneCardSnapshot(card) {
     art_crop_url: card.art_crop_url,
     custom_art_data: card.custom_art_data || null,
     art_over_top: Boolean(card.art_over_top),
+    hide_card_text: Boolean(card.hide_card_text),
     crop_mask: card.crop_mask || 'classic_box',
     layer_order: card.layer_order || null,
     hidden_layers: card.hidden_layers || {},
     layer_opacities: card.layer_opacities || {},
+    layer_colors: card.layer_colors || {},
     frame_components: card.frame_components || {},
     layout: card.layout || {},
     shapes: card.shapes || [],
@@ -405,6 +407,7 @@ function getInteractiveRegions(card) {
   const L = ensureCardLayout(card);
   const regions = [];
 
+  if (!card.hide_card_text) {
   const manaTokens = (card.mana_cost || '').match(/\{[^}]+\}/g) || [];
   const manaCount = Math.max(1, manaTokens.length);
   const manaStep = (L.mana_cost.size || 28) + 5;
@@ -499,6 +502,7 @@ function getInteractiveRegions(card) {
     h: (L.artist.font_size || 16) * 1.25,
     resizable: true,
   });
+  }
 
   if (Array.isArray(card.shapes)) {
     card.shapes.forEach((s, i) => {
@@ -1052,6 +1056,7 @@ function computeBaseLayerKey(card) {
     card.layer_order || null,
     card.hidden_layers || null,
     card.layer_opacities || null,
+    card.layer_colors || null,
     card.frame_components || null,
     card.shapes || null,
   ]);
@@ -1059,6 +1064,7 @@ function computeBaseLayerKey(card) {
 
 function drawCardForeground(octx, card) {
   drawOverlayShapes(octx, card);
+  if (card.hide_card_text) return;
 
   // Dynamic title width so title never overlaps mana cost symbols
   const manaTokens = (card.mana_cost || '').match(/\{[^}]+\}/g) || [];
@@ -1175,12 +1181,9 @@ async function renderCardCanvas(card) {
       ? Object.fromEntries(card.hidden_layers.map((k) => [k, true]))
       : (card.hidden_layers || {});
 
-    if (!hidden.background) {
-      _baseCtx.fillStyle = card.bg_color || '#111111';
-      _baseCtx.fillRect(0, 0, W, H);
-    } else {
-      _baseCtx.clearRect(0, 0, W, H);
-    }
+    // True card background (outer border + bottom collector/artist strip)
+    _baseCtx.fillStyle = (/^#[0-9a-fA-F]{6}$/.test((card.bg_color || '').trim()) ? card.bg_color.trim() : '#111111');
+    _baseCtx.fillRect(0, 0, W, H);
 
     const order = Array.isArray(card.layer_order) && card.layer_order.length
       ? card.layer_order
@@ -1188,10 +1191,85 @@ async function renderCardCanvas(card) {
     const opacities = card.layer_opacities || {};
     const fc = card.frame_components || {};
 
+    const _tintCanvas = document.createElement('canvas');
+    _tintCanvas.width = W;
+    _tintCanvas.height = H;
+    const _tintCtx = _tintCanvas.getContext('2d');
+
+    const getLayerColorOverride = (key) => {
+      const explicit = card.layer_colors && card.layer_colors[key];
+      if (explicit && /^#[0-9a-fA-F]{6}$/.test(explicit.trim())) return explicit.trim();
+      return '';
+    };
+
     const drawFrameComp = async (key, clipYRange = null) => {
       if (seq !== renderSeq || hidden[key]) return;
       const op = opacities[key] ?? 1.0;
       if (op <= 0.01 || !fc[key]) return;
+      const overrideColor = getLayerColorOverride(key);
+
+      let drawSrc = null;
+      if (overrideColor) {
+        if (key === 'background') {
+          // Fill the exact rounded Frame silhouette (preserving the black card border & bottom collector band)
+          _baseCtx.save();
+          if (clipYRange) {
+            _baseCtx.beginPath();
+            _baseCtx.rect(0, clipYRange[0], W, clipYRange[1] - clipYRange[0]);
+            _baseCtx.clip();
+          }
+          _baseCtx.globalAlpha = op;
+          _baseCtx.fillStyle = overrideColor;
+          _baseCtx.beginPath();
+          _baseCtx.roundRect(27, 28, 696, 946, 26);
+          _baseCtx.fill();
+          _baseCtx.restore();
+          return;
+        }
+        // Tint solid color onto the exact alpha silhouette of the frame component
+        const maskCanvas = await loadTransparentLayer(fc[key], key);
+        if (seq !== renderSeq || !maskCanvas) return;
+        _tintCtx.clearRect(0, 0, W, H);
+        _tintCtx.globalCompositeOperation = 'source-over';
+        _tintCtx.drawImage(maskCanvas, 0, 0, W, H);
+        _tintCtx.globalCompositeOperation = 'source-atop';
+        _tintCtx.fillStyle = overrideColor;
+        _tintCtx.fillRect(0, 0, W, H);
+        _tintCtx.globalCompositeOperation = 'source-over';
+        drawSrc = _tintCanvas;
+      } else if (key === 'background') {
+        const bgImg = await loadCachedImage(encodeAssetPath(fc[key]));
+        if (seq !== renderSeq || !bgImg) return;
+        _baseCtx.save();
+        if (clipYRange) {
+          _baseCtx.beginPath();
+          _baseCtx.rect(0, clipYRange[0], W, clipYRange[1] - clipYRange[0]);
+          _baseCtx.clip();
+        }
+        // Clip textured Frame JPG to the exact rounded Frame silhouette so the true Background color remains visible
+        _baseCtx.beginPath();
+        _baseCtx.roundRect(27, 28, 696, 946, 26);
+        _baseCtx.clip();
+        _baseCtx.globalAlpha = op;
+        const w = bgImg.naturalWidth || bgImg.width;
+        const h = bgImg.naturalHeight || bgImg.height;
+        const ratio = h ? w / h : 0;
+        if (w < h && ratio >= 0.724 && ratio <= 0.742) {
+          const bx = Math.round(w * (144.0 / 3288.0));
+          const by = Math.round(h * (144.0 / 4488.0));
+          _baseCtx.drawImage(bgImg, bx, by, w - bx * 2, h - by * 2, 0, 0, W, H);
+        } else {
+          _baseCtx.drawImage(bgImg, 0, 0, W, H);
+        }
+        _baseCtx.restore();
+        return;
+      } else {
+        const layerCanvas = await loadTransparentLayer(fc[key], key);
+        if (seq !== renderSeq || !layerCanvas) return;
+        drawSrc = layerCanvas;
+      }
+
+      if (!drawSrc) return;
       _baseCtx.save();
       if (clipYRange) {
         _baseCtx.beginPath();
@@ -1199,26 +1277,7 @@ async function renderCardCanvas(card) {
         _baseCtx.clip();
       }
       _baseCtx.globalAlpha = op;
-      if (key === 'background') {
-        const bgImg = await loadCachedImage(encodeAssetPath(fc[key]));
-        if (seq !== renderSeq) { _baseCtx.restore(); return; }
-        if (bgImg) {
-          const w = bgImg.naturalWidth || bgImg.width;
-          const h = bgImg.naturalHeight || bgImg.height;
-          const ratio = h ? w / h : 0;
-          if (w < h && ratio >= 0.724 && ratio <= 0.742) {
-            const bx = Math.round(w * (144.0 / 3288.0));
-            const by = Math.round(h * (144.0 / 4488.0));
-            _baseCtx.drawImage(bgImg, bx, by, w - bx * 2, h - by * 2, 0, 0, W, H);
-          } else {
-            _baseCtx.drawImage(bgImg, 0, 0, W, H);
-          }
-        }
-      } else {
-        const layerCanvas = await loadTransparentLayer(fc[key], key);
-        if (seq !== renderSeq) { _baseCtx.restore(); return; }
-        if (layerCanvas) _baseCtx.drawImage(layerCanvas, 0, 0, W, H);
-      }
+      _baseCtx.drawImage(drawSrc, 0, 0, W, H);
       _baseCtx.restore();
     };
 
@@ -1579,7 +1638,7 @@ function renderFrameSelectors(card) {
   const styleKey = card.frame_components?.style || 'Automated Templates/normal';
   const styleCat = catalog[styleKey] || {};
   const keys = [
-    ['background', 'Background'],
+    ['background', 'Frame'],
     ['pinlines', 'Pinlines / Textbox'],
     ['name_box', 'Name Box'],
     ['crown', 'Crown'],
@@ -1730,6 +1789,8 @@ function populateDetailControls(card) {
 
   const popEl = document.getElementById('cb-art-over-top');
   if (popEl) popEl.checked = Boolean(card.art_over_top);
+  const hideTxtEl = document.getElementById('cb-hide-card-text');
+  if (hideTxtEl) hideTxtEl.checked = Boolean(card.hide_card_text);
   const br = card.brightness ?? 1.0;
   document.getElementById('cb-brightness').value = br;
   document.getElementById('cb-brightness-val').textContent = Number(br).toFixed(2);
@@ -1740,9 +1801,9 @@ function populateDetailControls(card) {
   if (scEl) scEl.value = lay.scale ?? 1.0;
   if (scValEl) scValEl.textContent = Number(lay.scale ?? 1.0).toFixed(2);
 
-  const bg = card.bg_color || '#111111';
-  document.getElementById('cb-bg-color-picker').value = bg;
-  document.getElementById('cb-bg-color-text').value = bg;
+  const bgVal = /^#[0-9a-fA-F]{6}$/.test((card.bg_color || '').trim()) ? card.bg_color.trim() : '#111111';
+  document.getElementById('cb-bg-color-picker').value = bgVal;
+  document.getElementById('cb-bg-color-text').value = bgVal;
 
   const styleSel = document.getElementById('cb-detail-style-select');
   if (card.frame_components?.style) styleSel.value = card.frame_components.style;
@@ -1789,6 +1850,15 @@ function bindDetailEvents() {
     if (!card) return;
     pushUndoState(card);
     card.art_over_top = e.target.checked;
+    renderCardCanvas(card);
+    persistState(true);
+  });
+
+  document.getElementById('cb-hide-card-text')?.addEventListener('change', (e) => {
+    const card = getActiveCard();
+    if (!card) return;
+    pushUndoState(card);
+    card.hide_card_text = e.target.checked;
     renderCardCanvas(card);
     persistState(true);
   });
@@ -1956,6 +2026,7 @@ function bindDetailEvents() {
 
   const bgPicker = document.getElementById('cb-bg-color-picker');
   const bgText = document.getElementById('cb-bg-color-text');
+  const bgClearBtn = document.getElementById('cb-bg-color-clear');
   bgPicker.addEventListener('input', (e) => {
     const card = getActiveCard();
     if (!card) return;
@@ -1967,8 +2038,25 @@ function bindDetailEvents() {
   bgText.addEventListener('change', (e) => {
     const card = getActiveCard();
     if (!card) return;
-    card.bg_color = e.target.value;
-    bgPicker.value = e.target.value;
+    const val = (e.target.value || '').trim();
+    if (!val) {
+      card.bg_color = '#111111';
+      bgText.value = '#111111';
+      bgPicker.value = '#111111';
+    } else if (/^#[0-9a-fA-F]{6}$/.test(val)) {
+      card.bg_color = val;
+      bgPicker.value = val;
+    }
+    renderCardCanvas(card);
+    persistState(true);
+  });
+  bgClearBtn?.addEventListener('click', () => {
+    const card = getActiveCard();
+    if (!card) return;
+    pushUndoState(card);
+    card.bg_color = '#111111';
+    bgText.value = '#111111';
+    bgPicker.value = '#111111';
     renderCardCanvas(card);
     persistState(true);
   });
@@ -2030,8 +2118,10 @@ function bindDetailEvents() {
     pushUndoState(card);
     card.layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
     card.brightness = 1.0;
-    card.bg_color = '#111111';
+    card.bg_color = '';
+    card.layer_colors = {};
     card.art_over_top = false;
+    card.hide_card_text = false;
     card.crop_mask = 'free';
     card.frame_opacity = 1.0;
     card.layer_order = ['background', 'art', 'pinlines', 'name_box', 'crown', 'border', 'pt_box'];
@@ -2898,11 +2988,50 @@ function bindChangeArtModal() {
         const dpiBadge = it.dpi ? `${it.dpi} DPI · ` : '';
         el.innerHTML = `<img src="${toSameOriginUrl(it.thumb_url)}" loading="lazy"><div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${it.name}</div><div style="font-size:10px; color:var(--text-muted);">${dpiBadge}${it.source || 'MPCFill'}</div>`;
         el.addEventListener('click', () => {
-          const cropArt = Boolean(document.getElementById('cb-ca-mpc-crop')?.checked);
-          const chosenUrl = cropArt
-            ? `/api/art/proxy?url=${encodeURIComponent(it.image_url)}&crop_art=1`
-            : it.image_url;
-          selectArt(chosenUrl, it.source);
+          const mode = document.querySelector('input[name="cb-ca-mpc-mode"]:checked')?.value || 'crop';
+          if (mode === 'full_card') {
+            const card = getActiveCard();
+            if (!card) return;
+            pushUndoState(card);
+            card.custom_art_data = '';
+            card.art_crop_url = `/api/art/proxy?url=${encodeURIComponent(it.image_url)}&trim_bleed=1`;
+            const L = ensureCardLayout(card);
+            L.art = { x: 0, y: 0, w: 750, h: 1050, scale: 1.0, offset_x: 0, offset_y: 0 };
+            card.art_over_top = false;
+            card.hide_card_text = true;
+            card.hidden_layers = {
+              ...(card.hidden_layers || {}),
+              background: true,
+              pinlines: true,
+              name_box: true,
+              crown: true,
+              border: true,
+              pt_box: true,
+            };
+            delete card.hidden_layers.art;
+            modal.classList.remove('open');
+            populateDetailControls(card);
+            renderCardCanvas(card);
+            persistState(true);
+            showToast('Full MPCFill card applied — toggle vector layers in Layer Manager anytime');
+          } else {
+            const card = getActiveCard();
+            if (card && card.hide_card_text) {
+              pushUndoState(card);
+              card.hide_card_text = false;
+              const L = ensureCardLayout(card);
+              L.art = { ...DEFAULT_LAYOUT.art };
+              card.hidden_layers = card.hidden_layers || {};
+              ['background', 'pinlines', 'name_box', 'crown', 'pt_box'].forEach((k) => {
+                if (card.frame_components?.[k]) delete card.hidden_layers[k];
+                else card.hidden_layers[k] = true;
+              });
+              card.hidden_layers.border = true;
+              populateDetailControls(card);
+            }
+            const chosenUrl = `/api/art/proxy?url=${encodeURIComponent(it.image_url)}&crop_art=1`;
+            selectArt(chosenUrl, it.source);
+          }
         });
         grid.appendChild(el);
       });
@@ -3002,8 +3131,17 @@ function bindChangeArtModal() {
   cropModal = new CropMaskModal(document.getElementById('cb-crop-modal'), (dataUrl, maskType) => {
     const card = getActiveCard();
     if (!card) return;
+    pushUndoState(card);
     card.custom_art_data = dataUrl;
     card.crop_mask = maskType;
+    if (maskType === 'borderless_bottom_curve') {
+      const L = ensureCardLayout(card);
+      L.art = { x: 0, y: 0, w: 750, h: 970, scale: 1.0, offset_x: 0, offset_y: 0 };
+      const scEl = document.getElementById('cb-art-scale');
+      const scValEl = document.getElementById('cb-art-scale-val');
+      if (scEl) scEl.value = 1.0;
+      if (scValEl) scValEl.textContent = '1.00';
+    }
     renderCardCanvas(card);
     persistState(true);
     showToast('Crop mask applied');

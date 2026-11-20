@@ -265,7 +265,8 @@ def extract_scryfall_card_payload(raw_card: dict, count: int = 1, catalog: Optio
         "full_image_url": image_uris.get("png") or image_uris.get("large") or "",
         "count": count,
         "brightness": 1.0,
-        "bg_color": "#111111",
+        "bg_color": "",
+        "layer_colors": {},
         "crop_mask": "free",
         "frame_opacity": 1.0,
         "layer_order": ["background", "art", "pinlines", "name_box", "crown", "border", "pt_box"],
@@ -303,7 +304,8 @@ def create_blank_card_from_image(name: str, data_url: str, style_key: str = "Aut
         "custom_art_data": data_url,
         "count": 1,
         "brightness": 1.0,
-        "bg_color": "#111111",
+        "bg_color": "",
+        "layer_colors": {},
         "crop_mask": "free",
         "frame_opacity": 1.0,
         "layer_order": ["background", "art", "pinlines", "name_box", "crown", "border", "pt_box"],
@@ -499,6 +501,20 @@ def compose_card_export(
     has_any_fc = any(bool(fc.get(k)) for k in frame_keys)
     default_opacity = max(0.0, min(1.0, float(card.get("frame_opacity", 1.0))))
     layer_opacities = card.get("layer_opacities") or {}
+    layer_colors = card.get("layer_colors") or {}
+
+    def _tint_layer_solid(rgba_img: Image.Image, hex_color: str) -> Image.Image:
+        ch = str(hex_color or "").strip().lstrip("#")
+        if len(ch) != 6:
+            return rgba_img
+        try:
+            r, g, b = int(ch[0:2], 16), int(ch[2:4], 16), int(ch[4:6], 16)
+        except ValueError:
+            return rgba_img
+        _, _, _, a = rgba_img.split()
+        solid = Image.new("RGB", rgba_img.size, (r, g, b))
+        sr, sg, sb = solid.split()
+        return Image.merge("RGBA", (sr, sg, sb, a))
 
     def _layer_op(key):
         if _is_layer_hidden(key):
@@ -508,7 +524,8 @@ def compose_card_export(
         except (TypeError, ValueError):
             return default_opacity
 
-    bg_rgb = parse_hex(card.get("bg_color", "#111111"), fallback=(17, 17, 17))
+    # True card background (outer border + bottom artist strip); Frame color overrides tint only the Frame silhouette.
+    bg_rgb = parse_hex(card.get("bg_color") or "#111111", fallback=(17, 17, 17))
     canvas_img = Image.new("RGBA", (export_w, export_h), (*bg_rgb, 255))
     used_pdf_components: List[str] = []
     brightness = card.get("brightness", 1.0)
@@ -537,10 +554,12 @@ def compose_card_export(
                 try:
                     raw_url = str(card["art_crop_url"])
                     should_crop_art = False
+                    should_trim_bleed = False
                     if raw_url.startswith("/api/art/proxy"):
                         qs = urllib.parse.parse_qs(urllib.parse.urlparse(raw_url).query)
                         raw_url = (qs.get("url") or [""])[0]
                         should_crop_art = (qs.get("crop_art") or ["0"])[0] in ("1", "true", "True")
+                        should_trim_bleed = (qs.get("trim_bleed") or ["0"])[0] in ("1", "true", "True")
                     if raw_url:
                         resp = httpx.get(
                             raw_url,
@@ -551,7 +570,7 @@ def compose_card_export(
                         if resp.status_code == 200:
                             with Image.open(io.BytesIO(resp.content)) as raw_fetched:
                                 art_img = raw_fetched.convert("RGBA")
-                            if should_crop_art:
+                            if should_crop_art or should_trim_bleed:
                                 iw, ih = art_img.size
                                 iratio = iw / ih if ih else 0.0
                                 if iw < ih and 0.720 <= iratio <= 0.746:
@@ -559,9 +578,10 @@ def compose_card_export(
                                     by = int(round(ih * (144.0 / 4488.0)))
                                     art_img = art_img.crop((bx, by, iw - bx, ih - by))
                                     iw, ih = art_img.size
-                                x0, y0 = int(round(iw * 0.078)), int(round(ih * 0.112))
-                                x1, y1 = int(round(iw * 0.922)), int(round(ih * 0.554))
-                                art_img = art_img.crop((x0, y0, max(x0 + 10, x1), max(y0 + 10, y1)))
+                                if should_crop_art:
+                                    x0, y0 = int(round(iw * 0.078)), int(round(ih * 0.112))
+                                    x1, y1 = int(round(iw * 0.922)), int(round(ih * 0.554))
+                                    art_img = art_img.crop((x0, y0, max(x0 + 10, x1), max(y0 + 10, y1)))
                 except Exception:
                     pass
 
@@ -601,6 +621,9 @@ def compose_card_export(
         if rel_used not in used_pdf_components:
             used_pdf_components.append(rel_used)
         comp_rgba = render_pdf_layer_rgba(pdf_p, export_w, export_h)
+        override_col = str(layer_colors.get(comp_key) or "").strip()
+        if override_col and re.match(r"^#[0-9a-fA-F]{6}$", override_col):
+            comp_rgba = _tint_layer_solid(comp_rgba, override_col)
         canvas_img.alpha_composite(_apply_layer_opacity(comp_rgba, comp_op))
         del comp_rgba
 

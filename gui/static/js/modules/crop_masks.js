@@ -1,6 +1,7 @@
 export const CROP_MASKS = {
   free: { label: 'Free / Rectangular', aspect: null },
   classic_box: { label: 'Classic Art Box (682×477)', aspect: 682 / 477 },
+  borderless_bottom_curve: { label: 'Borderless Full-Art (Bottom Curve)', aspect: 750 / 970 },
   extended_angled: { label: 'Extended Art / Borderless (Angled)', aspect: 700 / 560 },
   circular: { label: 'Circular / Oval Vignette', aspect: 1.0 },
   full_art: { label: 'Full Art / Saga (Vertical)', aspect: 700 / 940 },
@@ -10,6 +11,16 @@ export function drawMaskPath(ctx, maskType, x, y, w, h) {
   ctx.beginPath();
   if (maskType === 'circular') {
     ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+  } else if (maskType === 'borderless_bottom_curve') {
+    const rx = w * 0.22;
+    const ry = h * 0.21;
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w, y);
+    ctx.lineTo(x + w, y + h - ry);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - rx, y + h);
+    ctx.lineTo(x + rx, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - ry);
+    ctx.closePath();
   } else if (maskType === 'extended_angled') {
     const bevel = Math.min(w, h) * 0.14;
     ctx.moveTo(x, y);

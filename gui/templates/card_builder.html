@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Card Builder - DeckGen Studio</title>
-  <link rel="stylesheet" href="/static/css/main.css?v=27">
+  <link rel="stylesheet" href="/static/css/main.css?v=30">
   <link rel="stylesheet" href="/assets/mana-master/css/mana.min.css">
   <link rel="stylesheet" href="/assets/keyrune-master/css/keyrune.min.css">
   <style>
@@ -22,7 +22,7 @@
       font-style: normal;
     }
   </style>
-  <script type="module" src="/static/js/card_builder.js?v=40"></script>
+  <script type="module" src="/static/js/card_builder.js?v=45"></script>
 </head>
 <body>
   $navbar
@@ -48,12 +48,12 @@
           <div>
             <label class="label" style="margin-top:0;">Import Deck / Images</label>
             <div class="row">
-              <button type="button" id="cb-import-txt-btn" class="btn">📄 MTGO .txt</button>
+              <button type="button" id="cb-import-txt-btn" class="btn"><i data-ico="file-text"></i> MTGO .txt</button>
               <input type="file" id="cb-import-txt-input" accept=".txt,text/plain" hidden>
-              <button type="button" id="cb-check-txt-btn" class="btn" title="Check detected vs missing cards from your .txt list">📋 Check .txt</button>
-              <button type="button" id="cb-import-png-btn" class="btn">🖼 Single .png</button>
+              <button type="button" id="cb-check-txt-btn" class="btn" title="Check detected vs missing cards from your .txt list"><i data-ico="clipboard"></i> Check .txt</button>
+              <button type="button" id="cb-import-png-btn" class="btn"><i data-ico="image"></i> Single .png</button>
               <input type="file" id="cb-import-png-input" accept=".png,.jpg,.jpeg,.webp" multiple hidden>
-              <button type="button" id="cb-import-dir-btn" class="btn">📁 .png Folder</button>
+              <button type="button" id="cb-import-dir-btn" class="btn"><i data-ico="folder"></i> .png Folder</button>
             </div>
           </div>
         </div>
@@ -66,11 +66,11 @@
             <h2 style="margin:0; font-size:15px;">Loaded Cards (<span id="cb-loaded-count">0</span>)</h2>
             <div class="row" style="gap:6px; flex-wrap:wrap;">
               <div class="cb-view-switcher" id="cb-view-switcher" role="group" aria-label="Board view mode">
-                <button type="button" class="btn btn-sm cb-view-btn" data-view="list" title="List view">☰</button>
-                <button type="button" class="btn btn-sm btn-primary cb-view-btn" data-view="grid" title="Thumbnail grid view">⊞</button>
-                <button type="button" class="btn btn-sm cb-view-btn" data-view="large" title="Large single-card view (Prev/Next)">▭</button>
+                <button type="button" class="btn btn-sm cb-view-btn" data-view="list" title="List view"><i data-ico="list"></i></button>
+                <button type="button" class="btn btn-sm btn-primary cb-view-btn" data-view="grid" title="Thumbnail grid view"><i data-ico="grid"></i></button>
+                <button type="button" class="btn btn-sm cb-view-btn" data-view="large" title="Large single-card view (Prev/Next)"><i data-ico="card"></i></button>
               </div>
-              <button type="button" id="cb-select-all-btn" class="btn btn-sm">☑ Select All</button>
+              <button type="button" id="cb-select-all-btn" class="btn btn-sm"><i data-ico="check-square"></i> Select All</button>
               <input type="text" id="cb-filter-input" class="input" placeholder="Filter cards..." style="width:170px;">
             </div>
           </div>
@@ -108,7 +108,7 @@
                 </select>
               </div>
             </div>
-            <button type="button" id="cb-export-ready-btn" class="btn btn-primary">📤 Export Ready Cards</button>
+            <button type="button" id="cb-export-ready-btn" class="btn btn-primary"><i data-ico="upload"></i> Export Ready Cards</button>
           </div>
         </div>
       </div>
@@ -119,66 +119,71 @@
       <aside id="cb-sidebar" class="cb-sidebar">
         <!-- Icon-only rail shown when collapsed -->
         <div class="cb-collapsed-rail">
-          <button type="button" id="cb-sidebar-expand-btn" class="cb-rail-btn" title="Expand panel">▶</button>
-          <button type="button" class="cb-rail-btn" data-rail-act="back" title="Back to board">←</button>
+          <button type="button" id="cb-sidebar-expand-btn" class="cb-rail-btn" title="Expand panel"><i data-ico="chevron-right" data-ico-size="16"></i></button>
+          <button type="button" class="cb-rail-btn" data-rail-act="back" title="Back to board"><i data-ico="arrow-left" data-ico-size="15"></i></button>
           <div class="cb-rail-sep"></div>
-          <button type="button" class="cb-rail-btn" data-rail-sec="art" title="Art & Adjustments">🖼</button>
-          <button type="button" class="cb-rail-btn" data-rail-sec="layers" title="Layer Manager">📚</button>
-          <button type="button" class="cb-rail-btn" data-rail-sec="frame" title="Frame Template & Components">🧱</button>
+          <button type="button" class="cb-rail-btn" data-rail-sec="art" title="Art & Adjustments"><i data-ico="image" data-ico-size="15"></i></button>
+          <button type="button" class="cb-rail-btn" data-rail-sec="layers" title="Layer Manager"><i data-ico="layers" data-ico-size="15"></i></button>
+          <button type="button" class="cb-rail-btn" data-rail-sec="frame" title="Frame Template & Components"><i data-ico="frame" data-ico-size="15"></i></button>
         </div>
 
         <!-- Expanded sidebar content -->
         <div class="cb-sidebar-content">
           <div class="row-between" style="margin-bottom:8px; gap:4px;">
-            <button type="button" id="cb-back-btn" class="btn btn-sm">← Back</button>
+            <button type="button" id="cb-back-btn" class="btn btn-sm"><i data-ico="arrow-left" data-ico-size="13"></i> Back</button>
             <div class="row" style="gap:6px; align-items:center;">
               <label class="row" style="cursor:pointer; font-size:11px;">
                 <input type="checkbox" id="cb-detail-ready-check">
                 <span>Ready</span>
               </label>
-              <button type="button" id="cb-delete-card-btn" class="btn btn-sm" title="Remove this card from the board">🗑</button>
-              <button type="button" id="cb-sidebar-collapse-btn" class="btn btn-sm" title="Collapse panel">◀</button>
+              <button type="button" id="cb-delete-card-btn" class="btn btn-sm" title="Remove this card from the board"><i data-ico="trash" data-ico-size="13"></i></button>
+              <button type="button" id="cb-sidebar-collapse-btn" class="btn btn-sm" title="Collapse panel"><i data-ico="chevron-left" data-ico-size="13"></i></button>
             </div>
           </div>
 
           <details class="dg-accordion" data-section="art" open>
-            <summary>🖼 Art & Adjustments</summary>
+            <summary><i data-ico="image" data-ico-size="13"></i> Art & Adjustments</summary>
             <div class="accordion-body">
               <div class="row" style="margin-bottom:6px;">
-                <button type="button" id="cb-change-art-btn" class="btn btn-sm btn-primary" style="flex:1;">🎨 Change Art</button>
-                <button type="button" id="cb-crop-art-btn" class="btn btn-sm" style="flex:1;">✂ Crop Art</button>
+                <button type="button" id="cb-change-art-btn" class="btn btn-sm btn-primary" style="flex:1;"><i data-ico="palette" data-ico-size="13"></i> Change Art</button>
+                <button type="button" id="cb-crop-art-btn" class="btn btn-sm" style="flex:1;"><i data-ico="crop" data-ico-size="13"></i> Crop Art</button>
               </div>
               <label class="row" style="font-size:11px; cursor:pointer; margin-bottom:6px; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:var(--radius-sm);">
                 <input type="checkbox" id="cb-art-over-top">
-                <span>✨ Art Over Title / Frame (Pop-Out)</span>
+                <span><i data-ico="sparkles" data-ico-size="12"></i> Art Over Title / Frame (Pop-Out)</span>
+              </label>
+              <label class="row" style="font-size:11px; cursor:pointer; margin-bottom:6px; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:var(--radius-sm);" title="Hide Scryfall text overlays (useful when importing a complete MPCFill card; you can still enable vector frame layers in Layer Manager)">
+                <input type="checkbox" id="cb-hide-card-text">
+                <span><i data-ico="eye-off" data-ico-size="12"></i> Hide Card Text (Full Card Mode)</span>
               </label>
               <label class="label">Brightness (<span id="cb-brightness-val">1.00</span>)</label>
               <input type="range" id="cb-brightness" min="0.3" max="1.8" step="0.05" value="1.0" style="width:100%;">
               <label class="label">Art Scale (<span id="cb-art-scale-val">1.00</span>)</label>
               <input type="range" id="cb-art-scale" min="0.5" max="2.5" step="0.05" value="1.0" style="width:100%;">
-              <label class="label">Background Color (Base Template)</label>
-              <div class="row">
-                <input type="color" id="cb-bg-color-picker" value="#111111" style="width:30px; height:24px; border:none; background:none; cursor:pointer;">
-                <input type="text" id="cb-bg-color-text" class="input" value="#111111">
+              <label class="label">Background</label>
+              <div class="row" style="gap:4px;">
+                <input type="color" id="cb-bg-color-picker" value="#111111" title="Pick card background color (border &amp; bottom area)" style="width:28px; height:24px; border:1px solid var(--border); border-radius:4px; background:none; cursor:pointer; padding:0;">
+                <input type="text" id="cb-bg-color-text" class="input" value="#111111" placeholder="#111111" style="flex:1;">
+                <button type="button" id="cb-bg-color-clear" class="btn btn-sm" title="Reset background to black (#111111)"><i data-ico="x" data-ico-size="12"></i></button>
               </div>
             </div>
           </details>
 
           <details class="dg-accordion" data-section="layers" open>
-            <summary>📚 Layer Manager</summary>
+            <summary><i data-ico="layers" data-ico-size="13"></i> Layer Manager</summary>
             <div class="accordion-body">
-              <p style="margin:0 0 6px; font-size:10.5px; color:var(--text-muted);">Drag to reorder. Click canvas to select; Shift+Click to cycle layers behind.</p>
+              <p style="margin:0 0 6px; font-size:10.5px; color:var(--text-muted);">Drag to reorder. Click canvas to select; Shift+Click cycles layers behind. Color swatches tint frame layers.</p>
               <ul id="cb-layer-list" class="layer-list"></ul>
             </div>
           </details>
 
           <details class="dg-accordion" data-section="frame">
-            <summary>🧱 Frame Template & Components</summary>
+            <summary><i data-ico="frame" data-ico-size="13"></i> Frame Template & Components</summary>
             <div class="accordion-body">
               <label class="label" style="margin-top:0;">Template Style</label>
               <div class="row" style="gap:6px; margin-bottom:8px;">
                 <select id="cb-detail-style-select" class="select" style="flex:1; min-width:0;"></select>
-                <button type="button" id="cb-browse-templates-btn" class="btn btn-sm btn-primary" title="Browse visual template previews">🖼 Preview</button>
+                <button type="button" id="cb-browse-templates-btn" class="btn btn-sm btn-primary" title="Browse visual template previews"><i data-ico="grid" data-ico-size="13"></i> Preview</button>
               </div>
               <div id="cb-frame-selectors"></div>
             </div>
@@ -190,14 +195,14 @@
         <div class="cb-stage-row">
           <!-- Photoshop-style movable floating Toolbox -->
           <div class="cb-ps-toolbox" id="cb-ps-toolbox" title="Drawing, Text & Selection Tools">
-            <div id="cb-toolbox-drag-handle" class="cb-toolbox-drag-handle" title="Drag to move toolbar">⋮⋮</div>
-            <button type="button" class="cb-tool-btn active" data-tool="select" title="Select / Move — Shift+Click cycles layers behind">↖</button>
-            <button type="button" class="cb-tool-btn" id="cb-tool-text-btn" title="Edit Text Properties">T</button>
-            <button type="button" class="cb-tool-btn" id="cb-tool-official-btn" title="Set Official / Original Name (in parentheses)">®</button>
+            <div id="cb-toolbox-drag-handle" class="cb-toolbox-drag-handle" title="Drag to move toolbar"><i data-ico="grip" data-ico-size="13"></i></div>
+            <button type="button" class="cb-tool-btn active" data-tool="select" title="Select / Move — Shift+Click cycles layers behind"><i data-ico="cursor" data-ico-size="15"></i></button>
+            <button type="button" class="cb-tool-btn" id="cb-tool-text-btn" title="Edit Text Properties"><i data-ico="type" data-ico-size="15"></i></button>
+            <button type="button" class="cb-tool-btn" id="cb-tool-official-btn" title="Set Official / Original Name (in parentheses)"><i data-ico="tag" data-ico-size="15"></i></button>
             <div class="cb-rail-sep"></div>
-            <button type="button" class="cb-tool-btn" data-tool="rect" title="Rectangle Tool — Drag on canvas to draw box">▭</button>
-            <button type="button" class="cb-tool-btn" data-tool="rounded" title="Rounded Box Tool — Drag on canvas to draw rounded box">▢</button>
-            <button type="button" class="cb-tool-btn" data-tool="circle" title="Ellipse / Circle Tool — Drag on canvas to draw circle">◯</button>
+            <button type="button" class="cb-tool-btn" data-tool="rect" title="Rectangle Tool — Drag on canvas to draw box"><i data-ico="rect" data-ico-size="15"></i></button>
+            <button type="button" class="cb-tool-btn" data-tool="rounded" title="Rounded Box Tool — Drag on canvas to draw rounded box"><i data-ico="rounded-rect" data-ico-size="15"></i></button>
+            <button type="button" class="cb-tool-btn" data-tool="circle" title="Ellipse / Circle Tool — Drag on canvas to draw circle"><i data-ico="circle" data-ico-size="15"></i></button>
 
             <!-- Contextual Text Inspector Popover -->
             <div id="cb-text-popover" class="cb-text-popover" style="display:none;">
@@ -351,12 +356,12 @@
             <input type="checkbox" id="cb-interactive-mode" checked>
             <span>Interactive editing (Shift+Click: layer behind)</span>
           </label>
-          <button type="button" id="cb-undo-btn" class="btn btn-sm" title="Undo (Ctrl+Z)" disabled>↩ Undo</button>
-          <button type="button" id="cb-redo-btn" class="btn btn-sm" title="Redo (Ctrl+Y)" disabled>↪ Redo</button>
-          <button type="button" id="cb-reset-layout-btn" class="btn btn-sm" title="Reset default positions">↺ Reset Positions</button>
-          <button type="button" id="cb-reset-all-btn" class="btn btn-sm" title="Reset all card edits">⟳ Reset All</button>
-          <button type="button" id="cb-save-single-btn" class="btn btn-sm">💾 Save Card</button>
-          <button type="button" id="cb-export-single-pdf-btn" class="btn btn-sm btn-primary">📤 Export Card (PDF)</button>
+          <button type="button" id="cb-undo-btn" class="btn btn-sm" title="Undo (Ctrl+Z)" disabled><i data-ico="undo" data-ico-size="13"></i> Undo</button>
+          <button type="button" id="cb-redo-btn" class="btn btn-sm" title="Redo (Ctrl+Y)" disabled><i data-ico="redo" data-ico-size="13"></i> Redo</button>
+          <button type="button" id="cb-reset-layout-btn" class="btn btn-sm" title="Reset default positions"><i data-ico="rotate-ccw" data-ico-size="13"></i> Reset Positions</button>
+          <button type="button" id="cb-reset-all-btn" class="btn btn-sm" title="Reset all card edits"><i data-ico="refresh-cw" data-ico-size="13"></i> Reset All</button>
+          <button type="button" id="cb-save-single-btn" class="btn btn-sm"><i data-ico="save" data-ico-size="13"></i> Save Card</button>
+          <button type="button" id="cb-export-single-pdf-btn" class="btn btn-sm btn-primary"><i data-ico="upload" data-ico-size="13"></i> Export Card (PDF)</button>
         </div>
       </div>
     </section>
@@ -366,7 +371,7 @@
   <div id="cb-txt-check-modal" class="modal-overlay">
     <div class="modal-content" style="width: 680px; max-width: 95vw;">
       <div class="modal-header">
-        <span>📋 .txt Deck Checklist</span>
+        <span><i data-ico="clipboard"></i> .txt Deck Checklist</span>
         <button type="button" class="modal-close" id="cb-txt-check-close">&times;</button>
       </div>
       <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
@@ -388,7 +393,7 @@
   <div id="cb-template-modal" class="modal-overlay">
     <div class="modal-content" style="width: 920px; max-width: 95vw;">
       <div class="modal-header">
-        <span>🧱 Choose Frame Template</span>
+        <span><i data-ico="frame"></i> Choose Frame Template</span>
         <button type="button" class="modal-close" id="cb-tpl-close">&times;</button>
       </div>
       <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
@@ -402,17 +407,17 @@
   <div id="cb-change-art-modal" class="modal-overlay">
     <div class="modal-content" style="width: 780px; max-width: 95vw;">
       <div class="modal-header">
-        <span>🎨 Change Art</span>
+        <span><i data-ico="palette"></i> Change Art</span>
         <button type="button" class="modal-close" id="cb-ca-close">&times;</button>
       </div>
       <div class="modal-body" style="display:flex; flex-direction:column; gap:12px;">
         <div class="row" style="border-bottom:1px solid var(--border); padding-bottom:8px; flex-wrap:wrap;">
-          <button type="button" class="btn btn-primary cb-ca-tab" data-tab="json">📚 HD JSONs</button>
-          <button type="button" class="btn cb-ca-tab" data-tab="scryfall">🔍 Scryfall</button>
-          <button type="button" class="btn cb-ca-tab" data-tab="mpcfill">⚡ MPCFill</button>
-          <button type="button" class="btn cb-ca-tab" data-tab="wikimedia">🏛 Wikimedia</button>
-          <button type="button" class="btn cb-ca-tab" data-tab="upload">📁 Upload</button>
-          <a id="cb-ca-pinterest-link" class="btn" href="https://www.pinterest.com/search/pins/?q=mtg+art" target="_blank" rel="noopener noreferrer" style="margin-left:auto; text-decoration:none;" title="Open Pinterest search for this card in a new tab">📌 Pinterest ↗</a>
+          <button type="button" class="btn btn-primary cb-ca-tab" data-tab="json"><i data-ico="book" data-ico-size="13"></i> HD JSONs</button>
+          <button type="button" class="btn cb-ca-tab" data-tab="scryfall"><i data-ico="search" data-ico-size="13"></i> Scryfall</button>
+          <button type="button" class="btn cb-ca-tab" data-tab="mpcfill"><i data-ico="zap" data-ico-size="13"></i> MPCFill</button>
+          <button type="button" class="btn cb-ca-tab" data-tab="wikimedia"><i data-ico="globe" data-ico-size="13"></i> Wikimedia</button>
+          <button type="button" class="btn cb-ca-tab" data-tab="upload"><i data-ico="upload" data-ico-size="13"></i> Upload</button>
+          <a id="cb-ca-pinterest-link" class="btn" href="https://www.pinterest.com/search/pins/?q=mtg+art" target="_blank" rel="noopener noreferrer" style="margin-left:auto; text-decoration:none;" title="Open Pinterest search for this card in a new tab"><i data-ico="external-link" data-ico-size="13"></i> Pinterest</a>
         </div>
 
         <div id="cb-ca-panel-json" class="cb-ca-panel">
@@ -436,10 +441,16 @@
             <input type="text" id="cb-ca-mpc-q" class="input" placeholder="Card name on MPCFill (extended / alt arts)..." style="flex:1;">
             <button type="button" id="cb-ca-mpc-btn" class="btn btn-primary">Search MPCFill</button>
           </div>
-          <label class="row" style="font-size:11.5px; cursor:pointer; margin-bottom:8px;">
-            <input type="checkbox" id="cb-ca-mpc-crop" checked>
-            <span>✂ Auto-crop Art Box only (removes MPCFill card frame &amp; text)</span>
-          </label>
+          <div style="display:flex; flex-direction:column; gap:5px; margin-bottom:10px; padding:7px 9px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm);">
+            <label class="row" style="font-size:11.5px; cursor:pointer; gap:6px;">
+              <input type="radio" name="cb-ca-mpc-mode" value="crop" checked>
+              <span><i data-ico="crop" data-ico-size="12"></i> <strong>Auto-crop Art Box only</strong> — extracts art &amp; keeps Card Builder frame and Scryfall text</span>
+            </label>
+            <label class="row" style="font-size:11.5px; cursor:pointer; gap:6px;">
+              <input type="radio" name="cb-ca-mpc-mode" value="full_card">
+              <span><i data-ico="image" data-ico-size="12"></i> <strong>Full Card Overlay</strong> — keeps complete MPCFill card &amp; hides Scryfall text/frame (you can still overlay vector components from Layer Manager)</span>
+            </label>
+          </div>
           <div id="cb-ca-mpc-grid" class="art-results-grid"></div>
         </div>
 
@@ -472,6 +483,7 @@
             <label class="label" style="margin:0;">Mask:</label>
             <select id="cb-crop-mask-select" class="select" style="width:260px;">
               <option value="classic_box">Classic Art Box (682×477)</option>
+              <option value="borderless_bottom_curve">Borderless Full-Art (Bottom Curve)</option>
               <option value="extended_angled">Extended Art / Borderless (Angled)</option>
               <option value="circular">Circular / Oval Vignette</option>
               <option value="full_art">Full Art / Saga (Vertical)</option>

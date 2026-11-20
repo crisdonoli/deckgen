@@ -1,3 +1,5 @@
+import { iconSvg, hydrateIcons } from './icons.js?v=1';
+
 const ACTIVE_ROOT_KEY = 'deckgen-active-root';
 const PROJECTS_HISTORY_KEY = 'deckgen-projects-history';
 
@@ -40,12 +42,12 @@ export function initThemeAndNavbar(activeNav) {
 
   const themeBtn = document.getElementById('theme-toggle');
   if (themeBtn) {
-    themeBtn.textContent = dark ? '☀️' : '🌙';
+    themeBtn.innerHTML = iconSvg(dark ? 'sun' : 'moon', 15);
     themeBtn.addEventListener('click', () => {
       const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
       document.documentElement.setAttribute('data-theme', next);
       localStorage.setItem('deckgen-theme', next);
-      themeBtn.textContent = next === 'dark' ? '☀️' : '🌙';
+      themeBtn.innerHTML = iconSvg(next === 'dark' ? 'sun' : 'moon', 15);
     });
   }
 
@@ -54,6 +56,7 @@ export function initThemeAndNavbar(activeNav) {
       el.classList.add('active');
     }
   });
+  hydrateIcons(document);
 }
 
 export function showToast(msg, duration = 3500) {

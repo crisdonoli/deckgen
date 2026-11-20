@@ -14,7 +14,7 @@
     <section class="ribbon-bar">
       <div class="ribbon-group">
         <div class="ribbon-controls">
-          <button type="button" id="dg-pick-source-btn" class="btn">📁 Fronts Folder</button>
+          <button type="button" id="dg-pick-source-btn" class="btn"><i data-ico="folder"></i> Fronts Folder</button>
           <span id="dg-source-label" style="font-size:11px; color:var(--text-muted); max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">cards/fronts</span>
           <button type="button" id="dg-pick-back-btn" class="btn">🃏 Set Back (PDF/PNG)</button>
           <input type="file" id="dg-back-file-input" accept=".pdf,.png,.jpg,.jpeg,.webp" hidden>
@@ -83,7 +83,7 @@
 
       <div class="ribbon-group">
         <div class="ribbon-controls">
-          <button type="button" id="dg-export-sheet-btn" class="btn btn-primary">📤 Export Sheet</button>
+          <button type="button" id="dg-export-sheet-btn" class="btn btn-primary"><i data-ico="printer"></i> Export Sheet</button>
         </div>
         <div class="ribbon-group-title">Export</div>
       </div>
@@ -131,7 +131,7 @@
   <div id="dg-export-modal" class="modal-overlay">
     <div class="modal-content" style="width: 400px; max-width: 94vw;">
       <div class="modal-header">
-        <span>📤 Export Sheets to PDF</span>
+        <span><i data-ico="printer"></i> Export Sheets to PDF</span>
         <button type="button" class="modal-close" id="dg-export-close">&times;</button>
       </div>
       <div class="modal-body" style="display:flex; flex-direction:column; gap:12px;">
@@ -177,7 +177,7 @@
           <div class="row" style="gap:6px; flex-wrap:wrap;">
             <input type="file" id="dg-fc-back-input" accept=".pdf,.png,.jpg,.jpeg,.webp" hidden>
             <button type="button" id="dg-fc-reset-back-btn" class="btn btn-sm">Use Generic Back</button>
-            <button type="button" id="dg-fc-upload-back-btn" class="btn btn-primary btn-sm">📤 Upload from Computer (PDF/PNG)</button>
+            <button type="button" id="dg-fc-upload-back-btn" class="btn btn-primary btn-sm"><i data-ico="upload"></i> Upload from Computer (PDF/PNG)</button>
           </div>
         </div>
         <div>

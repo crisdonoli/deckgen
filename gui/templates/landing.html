@@ -14,8 +14,8 @@
       <h1>DeckGen Studio</h1>
       <p class="landing-subtitle">Design high-resolution proxy cards and lay out print-ready sheets.</p>
       <div class="landing-cta-row">
-        <button type="button" id="btn-create-project" class="btn btn-primary btn-lg">✨ Create Project</button>
-        <button type="button" id="btn-load-project" class="btn btn-lg">📂 Load Project</button>
+        <button type="button" id="btn-create-project" class="btn btn-primary btn-lg"><i data-ico="sparkles" data-ico-size="15"></i> Create Project</button>
+        <button type="button" id="btn-load-project" class="btn btn-lg"><i data-ico="folder" data-ico-size="15"></i> Load Project</button>
       </div>
       <div id="landing-active-info" class="landing-recent" style="display:none;">
         <div>Active project: <strong id="landing-project-name"></strong></div>
@@ -23,21 +23,21 @@
         <div class="row" style="justify-content:center; flex-wrap:wrap;">
           <a href="/card-builder" class="btn btn-primary btn-sm">Open Card Builder</a>
           <a href="/deck-generator" class="btn btn-sm">Open Deck Generator</a>
-          <button type="button" id="btn-clear-active-project" class="btn btn-sm" title="Clear active project without deleting files">🧹 Clear Project</button>
+          <button type="button" id="btn-clear-active-project" class="btn btn-sm" title="Clear active project without deleting files"><i data-ico="eraser"></i> Clear Project</button>
         </div>
       </div>
       <div id="landing-projects-section" class="landing-recent" style="display:none; text-align:left;">
-        <div style="font-weight:600; margin-bottom:8px; color:var(--text);">📋 Saved Projects (only the selected one is loaded)</div>
+        <div style="font-weight:600; margin-bottom:8px; color:var(--text);"><i data-ico="clipboard"></i> Saved Projects (only the selected one is loaded)</div>
         <div id="landing-projects-list" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto;"></div>
       </div>
       <div style="margin-top: 16px; font-size: 12px;">
-        <a href="/tutorial" style="color: var(--accent); text-decoration: none;">📖 User Guide (Tutorial)</a> &nbsp;·&nbsp; <a href="https://buymeacoffee.com/cridonoso" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: none;">☕ Buy Me a Coffee</a>
+        <a href="/tutorial" style="color: var(--accent); text-decoration: none;"><i data-ico="book"></i> User Guide (Tutorial)</a> &nbsp;·&nbsp; <a href="https://buymeacoffee.com/cridonoso" target="_blank" rel="noopener noreferrer" style="color: var(--accent); text-decoration: none;"><i data-ico="coffee"></i> Buy Me a Coffee</a>
       </div>
     </div>
 
     <section class="landing-carousel-wrap" id="landing-carousel" aria-label="App Preview Carousel">
       <div class="landing-carousel-stage">
-        <button type="button" class="landing-carousel-nav prev" id="landing-carousel-prev" aria-label="Previous preview">◀</button>
+        <button type="button" class="landing-carousel-nav prev" id="landing-carousel-prev" aria-label="Previous preview"><i data-ico="chevron-left" data-ico-size="16"></i></button>
         <div class="landing-carousel-viewport">
           <div class="landing-carousel-track" id="landing-carousel-track">
             <a class="landing-carousel-slide" href="/card-builder">
@@ -56,7 +56,7 @@
             </a>
           </div>
         </div>
-        <button type="button" class="landing-carousel-nav next" id="landing-carousel-next" aria-label="Next preview">▶</button>
+        <button type="button" class="landing-carousel-nav next" id="landing-carousel-next" aria-label="Next preview"><i data-ico="chevron-right" data-ico-size="16"></i></button>
       </div>
       <div class="landing-carousel-dots" id="landing-carousel-dots">
         <button type="button" class="landing-carousel-dot active" data-slide="0" aria-label="Card Builder"></button>
@@ -69,13 +69,13 @@
   <div id="load-choice-modal" class="modal-overlay">
     <div class="modal-content" style="width: 440px; max-width: 94vw;">
       <div class="modal-header">
-        <span>📂 Load Project</span>
+        <span><i data-ico="folder"></i> Load Project</span>
         <button type="button" class="modal-close" id="load-choice-close">&times;</button>
       </div>
       <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
         <p style="margin:0; color:var(--text-muted);">Choose how to restore your project:</p>
-        <button type="button" id="btn-load-by-folder" class="btn btn-primary">📁 Select Root Directory</button>
-        <button type="button" id="btn-load-by-file" class="btn">📄 Load state.json file</button>
+        <button type="button" id="btn-load-by-folder" class="btn btn-primary"><i data-ico="folder"></i> Select Root Directory</button>
+        <button type="button" id="btn-load-by-file" class="btn"><i data-ico="file-text"></i> Load state.json file</button>
         <input type="file" id="load-state-file-input" accept=".json,application/json" hidden>
       </div>
     </div>
