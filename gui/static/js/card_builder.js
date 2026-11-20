@@ -9,7 +9,7 @@ import {
   showToast,
 } from './modules/workspace_client.js?v=21';
 import { CropMaskModal } from './modules/crop_masks.js?v=2';
-import { LayerManager } from './modules/layer_manager.js?v=27';
+import { LayerManager } from './modules/layer_manager.js?v=28';
 
 initThemeAndNavbar('card-builder');
 
@@ -87,6 +87,7 @@ function cloneCardSnapshot(card) {
     flavor_text: card.flavor_text,
     power: card.power,
     toughness: card.toughness,
+    loyalty: card.loyalty ?? null,
     artist: card.artist,
     bg_color: card.bg_color || '#111111',
     brightness: card.brightness ?? 1.0,
@@ -99,6 +100,7 @@ function cloneCardSnapshot(card) {
     hidden_layers: card.hidden_layers || {},
     layer_opacities: card.layer_opacities || {},
     layer_colors: card.layer_colors || {},
+    layer_transforms: card.layer_transforms || {},
     frame_components: card.frame_components || {},
     layout: card.layout || {},
     shapes: card.shapes || [],
@@ -403,6 +405,47 @@ function addOverlayShape(type) {
   persistState(true);
 }
 
+const FRAME_COMP_KEYS = new Set(['background', 'pinlines', 'name_box', 'crown', 'border', 'pt_box']);
+const FRAME_COMP_LABELS = {
+  background: 'Frame',
+  pinlines: 'Pinlines / Textbox',
+  name_box: 'Name Box',
+  crown: 'Crown',
+  border: 'Border',
+  pt_box: 'PT Box',
+};
+
+function getLayerTransform(card, key) {
+  const raw = (card.layer_transforms && card.layer_transforms[key]) || {};
+  return {
+    dx: Number(raw.dx) || 0,
+    dy: Number(raw.dy) || 0,
+    crop_l: Math.max(0, Math.min(720, Number(raw.crop_l) || 0)),
+    crop_t: Math.max(0, Math.min(1020, Number(raw.crop_t) || 0)),
+    crop_r: Math.max(0, Math.min(720, Number(raw.crop_r) || 0)),
+    crop_b: Math.max(0, Math.min(1020, Number(raw.crop_b) || 0)),
+  };
+}
+
+function getCardStatDisplay(card) {
+  const hasPower = card.power !== null && card.power !== undefined && String(card.power).trim() !== '';
+  const hasToughness = card.toughness !== null && card.toughness !== undefined && String(card.toughness).trim() !== '';
+  if (hasPower) {
+    return {
+      text: hasToughness ? `${String(card.power).trim()}/${String(card.toughness).trim()}` : String(card.power).trim(),
+      isLoyalty: false,
+    };
+  }
+  const hasLoyalty = card.loyalty !== null && card.loyalty !== undefined && String(card.loyalty).trim() !== '';
+  if (hasLoyalty) {
+    return {
+      text: String(card.loyalty).trim(),
+      isLoyalty: true,
+    };
+  }
+  return null;
+}
+
 function getInteractiveRegions(card) {
   const L = ensureCardLayout(card);
   const regions = [];
@@ -468,13 +511,14 @@ function getInteractiveRegions(card) {
     resizable: true,
   });
 
-  if (card.power !== null && card.power !== undefined && String(card.power).trim() !== '') {
+  const statInfo = getCardStatDisplay(card);
+  if (statInfo) {
     const ptFontSize = L.pt_text.font_size || 34;
     const ptTextW = 90;
     const ptTextH = ptFontSize * 1.2;
     regions.push({
       key: 'pt_text',
-      label: 'P/T',
+      label: statInfo.isLoyalty ? 'Loyalty' : 'P/T',
       x: L.pt_text.x - ptTextW / 2,
       y: L.pt_text.y - ptTextH / 2,
       w: ptTextW,
@@ -526,6 +570,28 @@ function getInteractiveRegions(card) {
     w: L.art.w,
     h: L.art.h,
     resizable: true,
+  });
+
+  // Frame component interactive regions (Move by dragging, Crop via handles)
+  const hiddenMap = Array.isArray(card.hidden_layers)
+    ? Object.fromEntries(card.hidden_layers.map((k) => [k, true]))
+    : (card.hidden_layers || {});
+  const fc = card.frame_components || {};
+  FRAME_COMP_KEYS.forEach((fk) => {
+    if (hiddenMap[fk] || !fc[fk]) return;
+    const tr = getLayerTransform(card, fk);
+    const rw = Math.max(24, 750 - tr.crop_l - tr.crop_r);
+    const rh = Math.max(24, 1050 - tr.crop_t - tr.crop_b);
+    regions.push({
+      key: fk,
+      label: `${FRAME_COMP_LABELS[fk] || fk} (Drag: Move · Handles: Crop)`,
+      x: tr.crop_l + tr.dx,
+      y: tr.crop_t + tr.dy,
+      w: rw,
+      h: rh,
+      resizable: true,
+      isFrameComp: true,
+    });
   });
 
   return regions;
@@ -732,15 +798,89 @@ function drawSetSymbol(targetCtx, setCode, rarity, rightX, centerY, size) {
   targetCtx.restore();
 }
 
+function parseLoyaltyParagraph(para) {
+  const m = String(para || '').trim().match(/^\[?([+\-\u2212](?:\d+|X)|0)\]?\s*:\s*(.*)$/i);
+  if (!m) return null;
+  const raw = m[1].toUpperCase();
+  let dir = 'zero';
+  let label = raw;
+  if (raw.startsWith('+')) {
+    dir = 'up';
+  } else if (raw.startsWith('-') || raw.startsWith('\u2212')) {
+    dir = 'down';
+    label = `\u2212${raw.slice(1)}`;
+  }
+  return { label, dir, rest: m[2] || '' };
+}
+
+function drawLoyaltyBadge(ctx, cx, cy, w, h, dir, label, textColor = '#ffffff') {
+  ctx.save();
+  const hw = w / 2;
+  const hh = h / 2;
+  ctx.beginPath();
+  if (dir === 'up') {
+    // Classic MTG Loyalty Up: pointed top pentagon
+    ctx.moveTo(cx, cy - hh);
+    ctx.lineTo(cx + hw, cy - hh * 0.22);
+    ctx.lineTo(cx + hw * 0.88, cy + hh);
+    ctx.lineTo(cx - hw * 0.88, cy + hh);
+    ctx.lineTo(cx - hw, cy - hh * 0.22);
+    ctx.closePath();
+  } else if (dir === 'down') {
+    // Classic MTG Loyalty Down: pointed bottom pentagon
+    ctx.moveTo(cx - hw * 0.88, cy - hh);
+    ctx.lineTo(cx + hw * 0.88, cy - hh);
+    ctx.lineTo(cx + hw, cy + hh * 0.22);
+    ctx.lineTo(cx, cy + hh);
+    ctx.lineTo(cx - hw, cy + hh * 0.22);
+    ctx.closePath();
+  } else if (dir === 'start') {
+    // Bottom-right Starting Loyalty shield
+    ctx.moveTo(cx - hw * 0.92, cy - hh * 0.72);
+    ctx.quadraticCurveTo(cx, cy - hh * 1.08, cx + hw * 0.92, cy - hh * 0.72);
+    ctx.lineTo(cx + hw, cy + hh * 0.12);
+    ctx.quadraticCurveTo(cx + hw * 0.6, cy + hh * 0.88, cx, cy + hh);
+    ctx.quadraticCurveTo(cx - hw * 0.6, cy + hh * 0.88, cx - hw, cy + hh * 0.12);
+    ctx.closePath();
+  } else {
+    // Classic MTG Loyalty 0: flat shield/hex
+    ctx.moveTo(cx - hw * 0.82, cy - hh * 0.86);
+    ctx.lineTo(cx + hw * 0.82, cy - hh * 0.86);
+    ctx.lineTo(cx + hw, cy);
+    ctx.lineTo(cx + hw * 0.82, cy + hh * 0.86);
+    ctx.lineTo(cx - hw * 0.82, cy + hh * 0.86);
+    ctx.lineTo(cx - hw, cy);
+    ctx.closePath();
+  }
+  ctx.fillStyle = '#111317';
+  ctx.fill();
+  ctx.lineWidth = Math.max(1.8, h * 0.065);
+  ctx.strokeStyle = '#d4dae3';
+  ctx.stroke();
+
+  const fontPx = Math.round(h * (label.length >= 3 ? 0.44 : 0.52));
+  ctx.font = `bold ${fontPx}px "BelerenLocal", Georgia, serif`;
+  ctx.fillStyle = textColor || '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const yNudge = dir === 'up' ? hh * 0.14 : (dir === 'down' ? -hh * 0.12 : 0);
+  ctx.fillText(label, cx, cy + yNudge, w * 0.86);
+  ctx.restore();
+}
+
 function measureOracleBlockHeight(targetCtx, oracleText, flavorText, boxW, fontSize) {
   const lineHeight = Math.round(fontSize * 1.24);
   let totalH = 0;
   targetCtx.font = `${fontSize}px "MPlantinLocal", Georgia, serif`;
   const spaceW = targetCtx.measureText(' ').width;
+  const badgeIndent = Math.round(fontSize * 2.25);
 
   const paragraphs = (oracleText || '').split('\n').filter((p) => p.trim().length > 0);
   paragraphs.forEach((para) => {
-    const words = para.trim().split(/\s+/);
+    const loy = parseLoyaltyParagraph(para);
+    const effectiveW = loy ? Math.max(80, boxW - badgeIndent) : boxW;
+    const textToWrap = loy ? loy.rest : para.trim();
+    const words = textToWrap ? textToWrap.split(/\s+/) : [];
     let lineW = 0;
     let lines = 1;
     words.forEach((word) => {
@@ -751,14 +891,15 @@ function measureOracleBlockHeight(targetCtx, oracleText, flavorText, boxW, fontS
           ? fontSize * 0.9
           : targetCtx.measureText(part).width;
       });
-      if (lineW + wordW > boxW && lineW > 0) {
+      if (lineW + wordW > effectiveW && lineW > 0) {
         lines++;
         lineW = wordW + spaceW;
       } else {
         lineW += wordW + spaceW;
       }
     });
-    totalH += lines * lineHeight + Math.round(lineHeight * 0.22);
+    const minLoyH = loy ? Math.round(fontSize * 1.55) : 0;
+    totalH += Math.max(lines * lineHeight, minLoyH) + Math.round(lineHeight * 0.28);
   });
 
   if (flavorText && flavorText.trim()) {
@@ -795,22 +936,72 @@ function drawRichOracleText(targetCtx, oracleText, flavorText, box) {
   const contentHeight = measureOracleBlockHeight(targetCtx, oracleText, flavorText, maxW, fontSize);
   const verticalOffset = Math.max(0, Math.floor((maxH - contentHeight) / 2));
   let curY = box.y + fontSize + verticalOffset;
+  const badgeIndent = Math.round(fontSize * 2.25);
 
   targetCtx.save();
   targetCtx.beginPath();
-  targetCtx.rect(box.x - 2, box.y - 2, box.w + 4, box.h + 4);
+  targetCtx.rect(box.x - 4, box.y - 4, box.w + 8, box.h + 8);
   targetCtx.clip();
   targetCtx.textAlign = 'left';
   targetCtx.textBaseline = 'alphabetic';
 
   const paragraphs = (oracleText || '').split('\n').filter((p) => p.trim().length > 0);
-  paragraphs.forEach((para) => {
-    const words = para.trim().split(/\s+/);
+  paragraphs.forEach((para, pIdx) => {
+    const loy = parseLoyaltyParagraph(para);
+    const startX = loy ? (box.x + badgeIndent) : box.x;
+    const effectiveW = loy ? Math.max(80, maxW - badgeIndent) : maxW;
+    const textToWrap = loy ? loy.rest : para.trim();
+    const words = textToWrap ? textToWrap.split(/\s+/) : [];
+
+    // Subtle divider between consecutive loyalty abilities
+    if (loy && pIdx > 0) {
+      targetCtx.save();
+      targetCtx.strokeStyle = isLightColor(textColor) ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.16)';
+      targetCtx.lineWidth = 1;
+      targetCtx.beginPath();
+      targetCtx.moveTo(box.x + 6, curY - fontSize * 0.95);
+      targetCtx.lineTo(box.x + maxW - 6, curY - fontSize * 0.95);
+      targetCtx.stroke();
+      targetCtx.restore();
+    }
+
+    const wrappedLines = [];
     let lineTokens = [];
     let lineWidth = 0;
 
+    targetCtx.font = `${fontSize}px "MPlantinLocal", Georgia, serif`;
+    const spaceW = targetCtx.measureText(' ').width;
+
+    words.forEach((word) => {
+      const parts = word.split(/(\{[^}]+\})/g).filter(Boolean);
+      const wordTokens = [];
+      let wordW = 0;
+      parts.forEach((part) => {
+        if (part.startsWith('{') && part.endsWith('}')) {
+          const w = fontSize * 0.9;
+          wordTokens.push({ type: 'mana', raw: part, width: w });
+          wordW += w;
+        } else {
+          targetCtx.font = `${fontSize}px "MPlantinLocal", Georgia, serif`;
+          const w = targetCtx.measureText(part).width;
+          wordTokens.push({ type: 'text', text: part, width: w });
+          wordW += w;
+        }
+      });
+
+      if (lineWidth + wordW > effectiveW && lineTokens.length > 0) {
+        wrappedLines.push(lineTokens);
+        lineTokens = [...wordTokens, { type: 'text', text: ' ', width: spaceW }];
+        lineWidth = wordW + spaceW;
+      } else {
+        lineTokens.push(...wordTokens, { type: 'text', text: ' ', width: spaceW });
+        lineWidth += wordW + spaceW;
+      }
+    });
+    if (lineTokens.length > 0) wrappedLines.push(lineTokens);
+
     function flushLine(tokens, y) {
-      let x = box.x;
+      let x = startX;
       tokens.forEach((tk) => {
         if (tk.type === 'mana') {
           const r = fontSize * 0.42;
@@ -843,41 +1034,25 @@ function drawRichOracleText(targetCtx, oracleText, flavorText, box) {
       });
     }
 
-    targetCtx.font = `${fontSize}px "MPlantinLocal", Georgia, serif`;
-    const spaceW = targetCtx.measureText(' ').width;
+    const paraStartY = curY;
+    const numLines = Math.max(1, wrappedLines.length);
+    const blockH = Math.max(numLines * lineHeight, loy ? Math.round(fontSize * 1.55) : 0);
 
-    words.forEach((word) => {
-      const parts = word.split(/(\{[^}]+\})/g).filter(Boolean);
-      const wordTokens = [];
-      let wordW = 0;
-      parts.forEach((part) => {
-        if (part.startsWith('{') && part.endsWith('}')) {
-          const w = fontSize * 0.9;
-          wordTokens.push({ type: 'mana', raw: part, width: w });
-          wordW += w;
-        } else {
-          targetCtx.font = `${fontSize}px "MPlantinLocal", Georgia, serif`;
-          const w = targetCtx.measureText(part).width;
-          wordTokens.push({ type: 'text', text: part, width: w });
-          wordW += w;
-        }
-      });
+    if (loy) {
+      const badgeW = Math.round(fontSize * 1.85);
+      const badgeH = Math.round(fontSize * 1.38);
+      const badgeCx = box.x + Math.round(badgeIndent * 0.46);
+      const textTopY = paraStartY - fontSize * 0.78;
+      const textBottomY = paraStartY + (numLines - 1) * lineHeight + fontSize * 0.16;
+      const badgeCy = (textTopY + textBottomY) / 2;
+      drawLoyaltyBadge(targetCtx, badgeCx, badgeCy, badgeW, badgeH, loy.dir, loy.label, '#ffffff');
+    }
 
-      if (lineWidth + wordW > maxW && lineTokens.length > 0) {
-        flushLine(lineTokens, curY);
-        curY += lineHeight;
-        lineTokens = [...wordTokens, { type: 'text', text: ' ', width: spaceW }];
-        lineWidth = wordW + spaceW;
-      } else {
-        lineTokens.push(...wordTokens, { type: 'text', text: ' ', width: spaceW });
-        lineWidth += wordW + spaceW;
-      }
+    wrappedLines.forEach((tokens, idx) => {
+      flushLine(tokens, paraStartY + idx * lineHeight);
     });
 
-    if (lineTokens.length > 0) {
-      flushLine(lineTokens, curY);
-      curY += Math.round(lineHeight * 1.22);
-    }
+    curY = paraStartY + blockH + Math.round(lineHeight * 0.28);
   });
 
   if (flavorText && flavorText.trim()) {
@@ -934,6 +1109,12 @@ async function loadTransparentLayer(relPath, layerKey = '') {
     octx.drawImage(img, bx, by, w - bx * 2, h - by * 2, 0, 0, 750, 1050);
   } else {
     octx.drawImage(img, 0, 0, 750, 1050);
+  }
+
+  // Native RGBA PNG assets already have exact transparency; never chroma-key their black border
+  if (relPath.toLowerCase().endsWith('.png')) {
+    transparentLayerCache.set(cacheKey, off);
+    return off;
   }
 
   try {
@@ -1057,6 +1238,7 @@ function computeBaseLayerKey(card) {
     card.hidden_layers || null,
     card.layer_opacities || null,
     card.layer_colors || null,
+    card.layer_transforms || null,
     card.frame_components || null,
     card.shapes || null,
   ]);
@@ -1122,16 +1304,28 @@ function drawCardForeground(octx, card) {
     color: card.layout?.oracle_box?.color || '#111111',
   });
 
-  if (card.power !== null && card.power !== undefined && String(card.power) !== '') {
-    const ptColor = card.layout?.pt_text?.color || '#111111';
-    octx.save();
-    octx.fillStyle = ptColor;
-    applyTextShadowIfLight(octx, ptColor);
-    octx.font = `bold ${card.layout?.pt_text?.font_size || 38}px "BelerenLocal", serif`;
-    octx.textAlign = 'center';
-    octx.textBaseline = 'middle';
-    octx.fillText(`${card.power}/${card.toughness ?? ''}`, card.layout?.pt_text?.x || 648, card.layout?.pt_text?.y || 970);
-    octx.restore();
+  const statInfo = getCardStatDisplay(card);
+  if (statInfo) {
+    const ptX = card.layout?.pt_text?.x || 648;
+    const ptY = card.layout?.pt_text?.y || 970;
+    const ptSize = card.layout?.pt_text?.font_size || 38;
+    if (statInfo.isLoyalty) {
+      const userColor = card.layout?.pt_text?.color;
+      const loyColor = (userColor && userColor.toLowerCase() !== '#111111') ? userColor : '#ffffff';
+      const shieldW = Math.round(ptSize * 2.15);
+      const shieldH = Math.round(ptSize * 1.65);
+      drawLoyaltyBadge(octx, ptX, ptY, shieldW, shieldH, 'start', statInfo.text, loyColor);
+    } else {
+      const ptColor = card.layout?.pt_text?.color || '#111111';
+      octx.save();
+      octx.fillStyle = ptColor;
+      applyTextShadowIfLight(octx, ptColor);
+      octx.font = `bold ${ptSize}px "BelerenLocal", serif`;
+      octx.textAlign = 'center';
+      octx.textBaseline = 'middle';
+      octx.fillText(statInfo.text, ptX, ptY);
+      octx.restore();
+    }
   }
 
   if (card.artist) {
@@ -1207,17 +1401,29 @@ async function renderCardCanvas(card) {
       const op = opacities[key] ?? 1.0;
       if (op <= 0.01 || !fc[key]) return;
       const overrideColor = getLayerColorOverride(key);
+      const tr = getLayerTransform(card, key);
+      const applyTrClip = () => {
+        if (clipYRange) {
+          _baseCtx.beginPath();
+          _baseCtx.rect(0, clipYRange[0], W, clipYRange[1] - clipYRange[0]);
+          _baseCtx.clip();
+        }
+        const cw = Math.max(1, W - tr.crop_l - tr.crop_r);
+        const ch = Math.max(1, H - tr.crop_t - tr.crop_b);
+        if (tr.crop_l || tr.crop_t || tr.crop_r || tr.crop_b) {
+          _baseCtx.beginPath();
+          _baseCtx.rect(tr.crop_l + tr.dx, tr.crop_t + tr.dy, cw, ch);
+          _baseCtx.clip();
+        }
+        if (tr.dx || tr.dy) _baseCtx.translate(tr.dx, tr.dy);
+      };
 
       let drawSrc = null;
       if (overrideColor) {
         if (key === 'background') {
           // Fill the exact rounded Frame silhouette (preserving the black card border & bottom collector band)
           _baseCtx.save();
-          if (clipYRange) {
-            _baseCtx.beginPath();
-            _baseCtx.rect(0, clipYRange[0], W, clipYRange[1] - clipYRange[0]);
-            _baseCtx.clip();
-          }
+          applyTrClip();
           _baseCtx.globalAlpha = op;
           _baseCtx.fillStyle = overrideColor;
           _baseCtx.beginPath();
@@ -1241,11 +1447,7 @@ async function renderCardCanvas(card) {
         const bgImg = await loadCachedImage(encodeAssetPath(fc[key]));
         if (seq !== renderSeq || !bgImg) return;
         _baseCtx.save();
-        if (clipYRange) {
-          _baseCtx.beginPath();
-          _baseCtx.rect(0, clipYRange[0], W, clipYRange[1] - clipYRange[0]);
-          _baseCtx.clip();
-        }
+        applyTrClip();
         // Clip textured Frame JPG to the exact rounded Frame silhouette so the true Background color remains visible
         _baseCtx.beginPath();
         _baseCtx.roundRect(27, 28, 696, 946, 26);
@@ -1271,11 +1473,7 @@ async function renderCardCanvas(card) {
 
       if (!drawSrc) return;
       _baseCtx.save();
-      if (clipYRange) {
-        _baseCtx.beginPath();
-        _baseCtx.rect(0, clipYRange[0], W, clipYRange[1] - clipYRange[0]);
-        _baseCtx.clip();
-      }
+      applyTrClip();
       _baseCtx.globalAlpha = op;
       _baseCtx.drawImage(drawSrc, 0, 0, W, H);
       _baseCtx.restore();
@@ -1662,22 +1860,32 @@ function renderFrameSelectors(card) {
       }
     }
     const currentItem = items.find((it) => it.rel_path === currentVal);
+    const displayLabel = currentItem
+      ? currentItem.label
+      : (currentVal ? currentVal.split('/').pop().replace(/_\[oculta\]\.(jpg|png)$/i, '').replace(/\.(jpg|png)$/i, '') : '(None)');
 
     const wrap = document.createElement('div');
     wrap.style.cssText = 'position:relative; margin-bottom:8px;';
     wrap.innerHTML = `
       <label class="label" style="margin-top:0;">${title}</label>
-      <button type="button" class="btn btn-sm" style="width:100%; justify-content:space-between; text-align:left;">
-        <span class="cb-fs-val" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${currentItem ? currentItem.label : '(None)'}</span>
-        <span>▾</span>
-      </button>
+      <div class="row" style="gap:4px;">
+        <button type="button" class="btn btn-sm cb-fs-trigger" style="flex:1; min-width:0; justify-content:space-between; text-align:left;">
+          <span class="cb-fs-val" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${displayLabel}</span>
+          <span>▾</span>
+        </button>
+        <button type="button" class="btn btn-sm cb-fs-expand" title="Browse all ${title} in visual pop-up grid" style="padding:4px 6px; flex-shrink:0;">${iconSvg('grid', 12)}</button>
+      </div>
       <div class="cb-fs-menu" style="display:none; position:relative; z-index:20; margin-top:4px; border:1px solid var(--border); border-radius:6px; background:var(--surface); padding:6px; max-height:190px; overflow-y:auto;">
         <input type="text" class="input cb-fs-search" placeholder="Filter..." style="margin-bottom:4px; padding:4px 6px; font-size:11px;">
         <div class="cb-fs-list" style="display:flex; flex-direction:column; gap:2px;"></div>
       </div>
     `;
 
-    const trigger = wrap.querySelector('button');
+    const trigger = wrap.querySelector('.cb-fs-trigger');
+    const expandBtn = wrap.querySelector('.cb-fs-expand');
+    expandBtn?.addEventListener('click', () => {
+      window.__cbOpenCompBrowser?.(k, 'all');
+    });
     const valSpan = wrap.querySelector('.cb-fs-val');
     const menu = wrap.querySelector('.cb-fs-menu');
     const searchIn = wrap.querySelector('.cb-fs-search');
@@ -1772,7 +1980,8 @@ function populateDetailControls(card) {
   document.getElementById('cb-field-mana').value = card.mana_cost || '';
   document.getElementById('cb-field-type').value = card.type_line || '';
   document.getElementById('cb-field-oracle').value = card.oracle_text || '';
-  document.getElementById('cb-field-pt').value = card.power != null ? `${card.power}/${card.toughness ?? ''}` : '';
+  const statDisp = getCardStatDisplay(card);
+  document.getElementById('cb-field-pt').value = statDisp ? statDisp.text : '';
   document.getElementById('cb-field-artist').value = card.artist || '';
   const setIn = document.getElementById('cb-field-set');
   const rarSel = document.getElementById('cb-field-rarity');
@@ -1819,6 +2028,82 @@ function bindDetailEvents() {
   document.getElementById('cb-add-circle-btn')?.addEventListener('click', () => addOverlayShape('circle'));
   document.getElementById('cb-undo-btn')?.addEventListener('click', performUndo);
   document.getElementById('cb-redo-btn')?.addEventListener('click', performRedo);
+  function deleteComponentByKey(key, targetCard = null) {
+    const card = targetCard || getActiveCard();
+    if (!card || !key) return false;
+    if (FRAME_COMP_KEYS.has(key)) {
+      if (!card.frame_components?.[key]) return false;
+      pushUndoState(card);
+      card.frame_components[key] = '';
+      if (card.layer_transforms) delete card.layer_transforms[key];
+      if (card.layer_colors) delete card.layer_colors[key];
+      card.hidden_layers = Array.isArray(card.hidden_layers)
+        ? Object.fromEntries(card.hidden_layers.map((k) => [k, true]))
+        : (card.hidden_layers || {});
+      card.hidden_layers[key] = true;
+      if (selectedElementKey === key) selectedElementKey = null;
+      layerManager?.setSelected(null);
+      renderFrameSelectors(card);
+      layerManager?.render(card);
+      renderCardCanvas(card);
+      persistState(true);
+      showToast(`Removed ${FRAME_COMP_LABELS[key] || key} (Ctrl+Z to undo)`);
+      return true;
+    }
+    if (key.startsWith('shape:')) {
+      const sid = key.slice(6);
+      if (!(card.shapes || []).some((s) => s.id === sid)) return false;
+      pushUndoState(card);
+      card.shapes = (card.shapes || []).filter((s) => s.id !== sid);
+      card.layer_order = (card.layer_order || []).filter((k) => k !== key);
+      if (card.layer_opacities) delete card.layer_opacities[key];
+      if (card.hidden_layers && !Array.isArray(card.hidden_layers)) delete card.hidden_layers[key];
+      if (selectedElementKey === key) selectedElementKey = null;
+      layerManager?.setSelected(null);
+      renderShapesList(card);
+      layerManager?.render(card);
+      renderCardCanvas(card);
+      persistState(true);
+      showToast('Removed shape (Ctrl+Z to undo)');
+      return true;
+    }
+    if (key === 'art') {
+      pushUndoState(card);
+      card.hidden_layers = Array.isArray(card.hidden_layers)
+        ? Object.fromEntries(card.hidden_layers.map((k) => [k, true]))
+        : (card.hidden_layers || {});
+      card.hidden_layers.art = true;
+      if (selectedElementKey === key) selectedElementKey = null;
+      layerManager?.setSelected(null);
+      layerManager?.render(card);
+      renderCardCanvas(card);
+      persistState(true);
+      showToast('Hidden Artwork layer (Ctrl+Z to undo)');
+      return true;
+    }
+    const textFieldMap = {
+      title: () => { card.name = ''; },
+      official_title: () => { card.official_name = ''; },
+      mana_cost: () => { card.mana_cost = ''; },
+      type_line: () => { card.type_line = ''; },
+      oracle_box: () => { card.oracle_text = ''; card.flavor_text = ''; },
+      pt_text: () => { card.power = null; card.toughness = null; card.loyalty = null; },
+      artist: () => { card.artist = ''; },
+    };
+    if (textFieldMap[key]) {
+      pushUndoState(card);
+      textFieldMap[key]();
+      selectedElementKey = null;
+      populateDetailControls(card);
+      renderCardCanvas(card);
+      persistState(true);
+      showToast(`Cleared ${key.replace('_', ' ')} (Ctrl+Z to undo)`);
+      return true;
+    }
+    return false;
+  }
+  window.__cbDeleteComponentByKey = deleteComponentByKey;
+
   window.addEventListener('keydown', (evt) => {
     if (detailView.style.display === 'none') return;
     const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
@@ -1830,6 +2115,9 @@ function bindDetailEvents() {
     } else if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'y') {
       evt.preventDefault();
       performRedo();
+    } else if ((evt.key === 'Delete' || evt.key === 'Backspace') && selectedElementKey) {
+      evt.preventDefault();
+      deleteComponentByKey(selectedElementKey);
     }
   });
 
@@ -1996,9 +2284,21 @@ function bindDetailEvents() {
     persistState(true);
   });
   syncField('cb-field-pt', (c, v) => {
-    const parts = v.split('/');
-    c.power = parts[0]?.trim() || null;
-    c.toughness = parts[1]?.trim() || null;
+    const clean = (v || '').trim();
+    if (!clean) {
+      c.power = null;
+      c.toughness = null;
+      c.loyalty = null;
+    } else if (clean.includes('/')) {
+      const parts = clean.split('/');
+      c.power = parts[0]?.trim() || null;
+      c.toughness = parts[1]?.trim() || null;
+      c.loyalty = null;
+    } else {
+      c.loyalty = clean;
+      c.power = null;
+      c.toughness = null;
+    }
   });
   const bindTextColor = (elId, layoutKey) => {
     syncField(elId, (c, v) => {
@@ -2120,6 +2420,7 @@ function bindDetailEvents() {
     card.brightness = 1.0;
     card.bg_color = '';
     card.layer_colors = {};
+    card.layer_transforms = {};
     card.art_over_top = false;
     card.hide_card_text = false;
     card.crop_mask = 'free';
@@ -2169,12 +2470,16 @@ function bindDetailEvents() {
     const fc = card.frame_components || {};
     const relPath = fc[layerKey];
     if (!relPath) return false;
+    const tr = getLayerTransform(card, layerKey);
+    const rx = mx - tr.dx;
+    const ry = my - tr.dy;
+    if (rx < tr.crop_l || rx > 750 - tr.crop_r || ry < tr.crop_t || ry > 1050 - tr.crop_b) return false;
     if (layerKey === 'background') return true;
     const cacheKey = `${layerKey}::${relPath}`;
     const off = transparentLayerCache.get(cacheKey);
     if (!off) return false;
-    const px = Math.max(0, Math.min(749, Math.round(mx)));
-    const py = Math.max(0, Math.min(1049, Math.round(my)));
+    const px = Math.max(0, Math.min(749, Math.round(rx)));
+    const py = Math.max(0, Math.min(1049, Math.round(ry)));
     try {
       const data = off.getContext('2d', { willReadFrequently: true }).getImageData(px, py, 1, 1).data;
       return data[3] > 20;
@@ -2460,21 +2765,17 @@ function bindDetailEvents() {
       closeTextPopover();
     }
 
-    if (hit.type === 'frame') {
-      renderCardCanvas(card);
-      return;
-    }
-
     const L = ensureCardLayout(card);
     const preDragSnap = cloneCardSnapshot(card);
     const initialLayout = JSON.parse(JSON.stringify(L));
     const initialShapes = JSON.parse(JSON.stringify(card.shapes || []));
+    const initialTransforms = JSON.parse(JSON.stringify(card.layer_transforms || {}));
     if (hit.type === 'handle') {
-      dragState = { mode: 'resize', key: hit.key, handle: hit.handle, startX: mx, startY: my, initialLayout, initialShapes, changed: false, preDragSnap };
+      dragState = { mode: 'resize', key: hit.key, handle: hit.handle, startX: mx, startY: my, initialLayout, initialShapes, initialTransforms, changed: false, preDragSnap };
     } else if (hit.key === 'art' && evt.altKey) {
-      dragState = { mode: 'pan-art', key: 'art', startX: mx, startY: my, initialLayout, initialShapes, changed: false, preDragSnap };
+      dragState = { mode: 'pan-art', key: 'art', startX: mx, startY: my, initialLayout, initialShapes, initialTransforms, changed: false, preDragSnap };
     } else {
-      dragState = { mode: 'move', key: hit.key, startX: mx, startY: my, initialLayout, initialShapes, changed: false, preDragSnap };
+      dragState = { mode: 'move', key: hit.key, startX: mx, startY: my, initialLayout, initialShapes, initialTransforms, changed: false, preDragSnap };
     }
     renderCardCanvas(card);
   });
@@ -2536,6 +2837,15 @@ function bindDetailEvents() {
       else if (k === 'oracle_box') { L.oracle_box.x = init.oracle_box.x + dx; L.oracle_box.y = init.oracle_box.y + dy; }
       else if (k === 'pt_text') { L.pt_text.x = init.pt_text.x + dx; L.pt_text.y = init.pt_text.y + dy; }
       else if (k === 'artist') { L.artist.x = init.artist.x + dx; L.artist.y = init.artist.y + dy; }
+      else if (FRAME_COMP_KEYS.has(k)) {
+        const tInit = (dragState.initialTransforms && dragState.initialTransforms[k]) || { dx: 0, dy: 0, crop_l: 0, crop_t: 0, crop_r: 0, crop_b: 0 };
+        card.layer_transforms = card.layer_transforms || {};
+        card.layer_transforms[k] = {
+          ...tInit,
+          dx: Math.round((tInit.dx || 0) + dx),
+          dy: Math.round((tInit.dy || 0) + dy),
+        };
+      }
       else if (k.startsWith('shape:') && Array.isArray(card.shapes)) {
         const sid = k.slice(6);
         const sInit = (dragState.initialShapes || []).find((s) => s.id === sid);
@@ -2544,7 +2854,26 @@ function bindDetailEvents() {
       }
     } else if (dragState.mode === 'resize') {
       const h = dragState.handle;
-      if (k.startsWith('shape:') && Array.isArray(card.shapes)) {
+      if (FRAME_COMP_KEYS.has(k)) {
+        const tInit = (dragState.initialTransforms && dragState.initialTransforms[k]) || { dx: 0, dy: 0, crop_l: 0, crop_t: 0, crop_r: 0, crop_b: 0 };
+        let cl = Number(tInit.crop_l) || 0;
+        let ct = Number(tInit.crop_t) || 0;
+        let cr = Number(tInit.crop_r) || 0;
+        let cb = Number(tInit.crop_b) || 0;
+        if (h.includes('w')) cl = Math.max(0, Math.min(750 - cr - 24, cl + dx));
+        if (h.includes('e')) cr = Math.max(0, Math.min(750 - cl - 24, cr - dx));
+        if (h.includes('n')) ct = Math.max(0, Math.min(1050 - cb - 24, ct + dy));
+        if (h.includes('s')) cb = Math.max(0, Math.min(1050 - ct - 24, cb - dy));
+        card.layer_transforms = card.layer_transforms || {};
+        card.layer_transforms[k] = {
+          dx: Number(tInit.dx) || 0,
+          dy: Number(tInit.dy) || 0,
+          crop_l: Math.round(cl),
+          crop_t: Math.round(ct),
+          crop_r: Math.round(cr),
+          crop_b: Math.round(cb),
+        };
+      } else if (k.startsWith('shape:') && Array.isArray(card.shapes)) {
         const sid = k.slice(6);
         const sInit = (dragState.initialShapes || []).find((s) => s.id === sid);
         const sCur = card.shapes.find((s) => s.id === sid);
@@ -2675,6 +3004,7 @@ function bindDetailEvents() {
 
     if (card) {
       if (changed && preSnap) pushUndoState(card, preSnap);
+      if (changed) layerManager?.render(card);
       renderCardCanvas(card);
       if (changed) persistState(true);
     }
@@ -3125,6 +3455,9 @@ function bindChangeArtModal() {
       selectedElementKey = selectedKey || null;
       const card = changedCard || getActiveCard();
       if (card) renderCardCanvas(card);
+    },
+    (delKey, changedCard) => {
+      window.__cbDeleteComponentByKey?.(delKey, changedCard);
     }
   );
 
@@ -3454,6 +3787,138 @@ function bindChangeArtModal() {
   txtCheckModal?.addEventListener('click', (e) => {
     if (e.target === txtCheckModal) txtCheckModal.classList.remove('open');
   });
+
+  // Component Browser Pop-up Modal (mix & match components across all templates)
+  const compModal = document.getElementById('cb-comp-modal');
+  const compCloseBtn = document.getElementById('cb-comp-close-btn');
+  const compTypeSel = document.getElementById('cb-comp-type-filter');
+  const compStyleSel = document.getElementById('cb-comp-style-filter');
+  const compSearchIn = document.getElementById('cb-comp-search');
+  const compCountEl = document.getElementById('cb-comp-count');
+  const compGrid = document.getElementById('cb-comp-grid');
+
+  function populateCompStyleFilter() {
+    if (!compStyleSel) return;
+    const prev = compStyleSel.value || 'all';
+    const keys = Object.keys(catalog || {}).sort();
+    compStyleSel.innerHTML = '<option value="all">All Template Styles</option>'
+      + keys.map((k) => `<option value="${k}">${k}</option>`).join('');
+    if (keys.includes(prev) || prev === 'all') compStyleSel.value = prev;
+  }
+
+  function renderCompBrowserGrid() {
+    if (!compGrid) return;
+    const typeFilter = compTypeSel?.value || 'all';
+    const styleFilter = compStyleSel?.value || 'all';
+    const q = (compSearchIn?.value || '').trim().toLowerCase();
+    const typesToScan = typeFilter === 'all'
+      ? ['background', 'pinlines', 'name_box', 'crown', 'border', 'pt_box']
+      : [typeFilter];
+    const stylesToScan = styleFilter === 'all'
+      ? Object.keys(catalog || {}).sort()
+      : [styleFilter];
+
+    const matches = [];
+    for (const sk of stylesToScan) {
+      const styleCat = catalog[sk];
+      if (!styleCat) continue;
+      const shortStyle = sk.replace(/^Automated Templates\/|^Manual Templates\//, '');
+      for (const tk of typesToScan) {
+        const items = styleCat[tk] || [];
+        for (const it of items) {
+          if (q) {
+            const hay = `${it.label} ${shortStyle} ${FRAME_COMP_LABELS[tk] || tk} ${it.folder || ''}`.toLowerCase();
+            if (!hay.includes(q)) continue;
+          }
+          matches.push({ styleKey: sk, shortStyle, compKey: tk, item: it });
+        }
+      }
+    }
+
+    if (compCountEl) compCountEl.textContent = `${matches.length} component${matches.length === 1 ? '' : 's'}`;
+    compGrid.innerHTML = '';
+    if (!matches.length) {
+      compGrid.innerHTML = '<p style="color:var(--text-muted); grid-column:1/-1; padding:12px;">No components match this filter.</p>';
+      return;
+    }
+
+    const activeCard = getActiveCard();
+    const maxShow = 240;
+    const slice = matches.slice(0, maxShow);
+    slice.forEach(({ shortStyle, compKey, item }) => {
+      const isActive = Boolean(activeCard?.frame_components?.[compKey] === item.rel_path);
+      const tile = document.createElement('div');
+      tile.className = 'art-result-card';
+      tile.style.cssText = `cursor:pointer; ${isActive ? 'outline:2px solid var(--accent);' : ''}`;
+      tile.innerHTML = `
+        <div style="position:relative; width:100%; aspect-ratio:5/7; background:#111; border-radius:4px; overflow:hidden; margin-bottom:4px;">
+          <img src="${item.url}" loading="lazy" style="width:100%; height:100%; object-fit:contain; display:block;">
+          <span style="position:absolute; top:4px; left:4px; font-size:9.5px; font-weight:700; padding:1px 5px; border-radius:4px; background:rgba(15,23,42,0.85); color:#e2e8f0; border:1px solid rgba(255,255,255,0.15);">${FRAME_COMP_LABELS[compKey] || compKey}</span>
+        </div>
+        <div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${item.label}">${item.label}</div>
+        <div style="font-size:9.5px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${shortStyle}">${shortStyle}</div>
+      `;
+      tile.addEventListener('click', (evt) => {
+        const card = getActiveCard();
+        if (!card) return;
+        pushUndoState(card);
+        card.frame_components = card.frame_components || {};
+        card.frame_components[compKey] = item.rel_path;
+        if (card.layer_transforms) delete card.layer_transforms[compKey];
+        card.hidden_layers = Array.isArray(card.hidden_layers)
+          ? Object.fromEntries(card.hidden_layers.map((k) => [k, true]))
+          : (card.hidden_layers || {});
+        delete card.hidden_layers[compKey];
+        selectedElementKey = compKey;
+        layerManager?.setSelected(compKey);
+        renderFrameSelectors(card);
+        layerManager?.render(card);
+        renderCardCanvas(card);
+        persistState(true);
+        showToast(`Applied ${FRAME_COMP_LABELS[compKey] || compKey}: ${item.label}`);
+        if (!evt.shiftKey) compModal?.classList.remove('open');
+        else renderCompBrowserGrid();
+      });
+      compGrid.appendChild(tile);
+    });
+
+    if (matches.length > maxShow) {
+      const note = document.createElement('p');
+      note.style.cssText = 'grid-column:1/-1; font-size:11px; color:var(--text-muted); text-align:center; padding:6px;';
+      note.textContent = `Showing first ${maxShow} of ${matches.length} components — refine search or filter by Type / Style to see more.`;
+      compGrid.appendChild(note);
+    }
+  }
+
+  function openCompBrowser(initialType = 'all', initialStyle = 'all') {
+    populateCompStyleFilter();
+    if (compTypeSel) compTypeSel.value = initialType || 'all';
+    if (compStyleSel) {
+      compStyleSel.value = (initialStyle && (initialStyle === 'all' || catalog[initialStyle]))
+        ? initialStyle
+        : 'all';
+    }
+    if (compSearchIn) compSearchIn.value = '';
+    renderCompBrowserGrid();
+    compModal?.classList.add('open');
+    compSearchIn?.focus();
+  }
+  window.__cbOpenCompBrowser = openCompBrowser;
+
+  document.getElementById('cb-add-comp-btn')?.addEventListener('click', () => {
+    const card = getActiveCard();
+    openCompBrowser('all', card?.frame_components?.style || 'all');
+  });
+  document.getElementById('cb-layer-add-comp-btn')?.addEventListener('click', () => {
+    openCompBrowser('all', 'all');
+  });
+  compCloseBtn?.addEventListener('click', () => compModal?.classList.remove('open'));
+  compModal?.addEventListener('click', (e) => {
+    if (e.target === compModal) compModal.classList.remove('open');
+  });
+  compTypeSel?.addEventListener('change', renderCompBrowserGrid);
+  compStyleSel?.addEventListener('change', renderCompBrowserGrid);
+  compSearchIn?.addEventListener('input', renderCompBrowserGrid);
 
   document.getElementById('cb-export-ready-btn').addEventListener('click', async () => {
     const readySet = getReadyIds();

@@ -39,10 +39,11 @@ function normalizeHiddenLayers(raw) {
 }
 
 export class LayerManager {
-  constructor(listEl, onChange, onSelect = null) {
+  constructor(listEl, onChange, onSelect = null, onDelete = null) {
     this.listEl = listEl;
     this.onChange = onChange;
     this.onSelect = onSelect;
+    this.onDelete = onDelete;
     this.dragKey = null;
     this.selectedKey = null;
   }
@@ -110,16 +111,26 @@ export class LayerManager {
         const canColor = COLORABLE_FRAME_KEYS.has(key);
         const curColor = canColor ? ((card.layer_colors && card.layer_colors[key]) || '') : '';
         const hasColor = Boolean(curColor && curColor !== 'no-color');
+        const tr = card.layer_transforms && card.layer_transforms[key];
+        const hasTransform = Boolean(tr && (tr.dx || tr.dy || tr.crop_l || tr.crop_t || tr.crop_r || tr.crop_b));
         const colorCtrlHtml = canColor
           ? `<input type="color" data-act="layer-color" value="${hasColor ? curColor : '#1e293b'}" title="${hasColor ? `Color overlay: ${curColor}` : 'Set solid color overlay (no-color)'}" style="width:18px; height:18px; padding:0; border:1px solid ${hasColor ? 'var(--accent)' : 'var(--border)'}; border-radius:3px; background:none; cursor:pointer; opacity:${hasColor ? '1' : '0.45'}; flex-shrink:0;">`
             + (hasColor ? `<button type="button" class="btn btn-sm" data-act="layer-color-clear" title="Clear color (restore texture)" style="padding:1px 3px;">${iconSvg('x', 11)}</button>` : '')
+          : '';
+        const resetTrHtml = (canColor && hasTransform)
+          ? `<button type="button" class="btn btn-sm" data-act="reset-tr" title="Reset move &amp; crop" style="padding:2px 4px;">${iconSvg('rotate-ccw', 11)}</button>`
+          : '';
+        const delCompHtml = (canColor && !isEmptyFrame)
+          ? `<button type="button" class="btn btn-sm" data-act="del-comp" title="Delete component (Del)" style="padding:2px 4px;">${iconSvg('trash', 11)}</button>`
           : '';
         li.innerHTML = `
           <span title="Drag to reorder" style="cursor:grab; opacity:0.6; display:inline-flex;">${iconSvg('grip', 12)}</span>
           <button type="button" class="btn btn-sm" data-act="toggle" title="${isHidden ? 'Show layer' : 'Hide layer'}" aria-pressed="${isHidden ? 'true' : 'false'}">${iconSvg(isHidden ? 'eye-off' : 'eye', 13)}</button>
           <span class="layer-name">${LAYER_LABELS[key] || key}${isEmptyFrame ? ' <small style="opacity:0.6;">(empty)</small>' : ''}</span>
           ${colorCtrlHtml}
-          <input type="range" min="0" max="1" step="0.05" value="${opacity}" data-act="opacity" style="width:46px;" title="Opacity">
+          <input type="range" min="0" max="1" step="0.05" value="${opacity}" data-act="opacity" style="width:42px;" title="Opacity">
+          ${resetTrHtml}
+          ${delCompHtml}
         `;
       }
 
@@ -128,11 +139,13 @@ export class LayerManager {
       const colorInput = li.querySelector('[data-act="color"]');
       const layerColorInput = li.querySelector('[data-act="layer-color"]');
       const layerColorClearBtn = li.querySelector('[data-act="layer-color-clear"]');
+      const resetTrBtn = li.querySelector('[data-act="reset-tr"]');
+      const delCompBtn = li.querySelector('[data-act="del-comp"]');
       const dupBtn = li.querySelector('[data-act="dup"]');
       const delBtn = li.querySelector('[data-act="del"]');
 
       // Prevent draggable <li> from hijacking clicks/drags on interactive controls
-      [toggleBtn, opacityInput, colorInput, layerColorInput, layerColorClearBtn, dupBtn, delBtn].filter(Boolean).forEach((ctrl) => {
+      [toggleBtn, opacityInput, colorInput, layerColorInput, layerColorClearBtn, resetTrBtn, delCompBtn, dupBtn, delBtn].filter(Boolean).forEach((ctrl) => {
         ctrl.addEventListener('pointerdown', (e) => {
           e.stopPropagation();
           li.draggable = false;
@@ -140,6 +153,34 @@ export class LayerManager {
         ctrl.addEventListener('pointerup', () => { li.draggable = true; });
         ctrl.addEventListener('pointercancel', () => { li.draggable = true; });
       });
+
+      if (resetTrBtn) {
+        resetTrBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (card.layer_transforms) delete card.layer_transforms[key];
+          this.render(card);
+          this.onChange?.(card);
+        });
+      }
+
+      if (delCompBtn) {
+        delCompBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (this.onDelete) {
+            this.onDelete(key, card);
+          } else {
+            if (card.frame_components) card.frame_components[key] = '';
+            if (card.layer_transforms) delete card.layer_transforms[key];
+            if (card.layer_colors) delete card.layer_colors[key];
+            card.hidden_layers = normalizeHiddenLayers(card.hidden_layers);
+            card.hidden_layers[key] = true;
+            if (this.selectedKey === key) this.selectedKey = null;
+            this.render(card);
+            this.onSelect?.(null, card);
+            this.onChange?.(card);
+          }
+        });
+      }
 
       if (layerColorInput) {
         layerColorInput.addEventListener('input', (e) => {
