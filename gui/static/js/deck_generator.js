@@ -280,6 +280,8 @@ async function persist() {
       duplex_flip: cfg.duplex_flip,
       export_dpi: exportDpi,
       card_scales: cfg.card_scales,
+      generic_back: cfg.generic_back || null,
+      custom_backs: cfg.custom_backs || {},
       collision_mode: 'check',
     };
 

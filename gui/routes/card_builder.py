@@ -11,10 +11,12 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Body, File, Form, HTTPException, Query, Response, UploadFile
 from PIL import Image, ImageDraw
 
-from config import DEFAULT_EXPORT_DPI
+from config import DEFAULT_EXPORT_DPI, PREVIEW_CACHE_DIR, STANDARD_CARD_H_PX, STANDARD_CARD_W_PX
 from core.art_index import art_index
 from core.card_renderer import (
     auto_select_frame_components,
+    style_art_below_frame,
+    style_layout_patch,
     clamp_export_dpi,
     compose_card_export,
     create_blank_card_from_image,
@@ -302,7 +304,11 @@ async def api_cb_auto_frame(payload: Dict[str, Any] = Body(...)):
     style_key = (payload.get("style_key") or "Automated Templates/normal").strip()
     catalog = scan_template_catalog()
     fc = auto_select_frame_components(card, style_key=style_key, catalog=catalog)
-    return {"frame_components": fc}
+    return {
+        "frame_components": fc,
+        "layout_patch": style_layout_patch(style_key),
+        "art_below_frame": style_art_below_frame(style_key),
+    }
 
 
 _TPL_PREVIEW_CACHE_DIR = os.path.join(tempfile.gettempdir(), "deckgen_tpl_previews_v1")
@@ -396,3 +402,36 @@ async def api_cb_template_preview(style: str = Query(...)):
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+def _render_layer_png_bytes(pdf_path: str) -> bytes:
+    """Render a frame layer PDF at preview size, keeping its real alpha (cached on disk)."""
+    st = os.stat(pdf_path)
+    digest = hashlib.md5(f"{pdf_path}|{st.st_mtime_ns}|{st.st_size}".encode("utf-8")).hexdigest()
+    cache_dir = os.path.join(PREVIEW_CACHE_DIR, "layer_png")
+    cache_path = os.path.join(cache_dir, f"{digest}.png")
+    if os.path.isfile(cache_path):
+        with open(cache_path, "rb") as f:
+            return f.read()
+    rgba = render_pdf_layer_rgba(pdf_path, STANDARD_CARD_W_PX, STANDARD_CARD_H_PX)
+    buf = io.BytesIO()
+    rgba.save(buf, format="PNG")
+    data = buf.getvalue()
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(cache_path, "wb") as f:
+            f.write(data)
+    except OSError:
+        pass
+    return data
+
+
+@router.get("/layer-png")
+async def api_cb_layer_png(rel_path: str = Query(...)):
+    """Transparent PNG of a template layer, rendered from its PDF (the JPG has no alpha)."""
+    pdf_path = jpg_rel_path_to_pdf_abs_path(rel_path.strip())
+    if not pdf_path or not pdf_path.lower().endswith(".pdf"):
+        raise HTTPException(status_code=404, detail="Layer PDF not found")
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(None, lambda: _render_layer_png_bytes(pdf_path))
+    return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-cache"})

@@ -6,3 +6,7 @@ assets
 assets.zip
 psd
 decks_json
+
+.venv
+.DS_Store
+CLAUDE.md

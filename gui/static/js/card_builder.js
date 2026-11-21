@@ -234,6 +234,23 @@ function ensureCardLayout(card) {
   return card.layout;
 }
 
+// Applies the per-style layout returned by /api/card-builder/auto-frame
+// (see STYLE_LAYOUT_OVERRIDES in gui/core/card_renderer.py).
+function applyStyleLayoutPatch(card, data) {
+  if (!card || !data) return;
+  const L = ensureCardLayout(card);
+  for (const [k, fields] of Object.entries(data.layout_patch || {})) {
+    L[k] = { ...(L[k] || {}), ...fields };
+  }
+  const defaultOrder = ['background', 'art', 'pinlines', 'name_box', 'crown', 'border', 'pt_box'];
+  const order = (card.layer_order || defaultOrder).filter((k) => k !== 'art');
+  const bgIdx = order.indexOf('background');
+  if (bgIdx !== -1) {
+    order.splice(data.art_below_frame ? bgIdx : bgIdx + 1, 0, 'art');
+    card.layer_order = order;
+  }
+}
+
 function drawSingleShape(targetCtx, s, opOverride = undefined) {
   if (!s) return;
   const op = opOverride !== undefined
@@ -483,15 +500,17 @@ function getInteractiveRegions(card) {
     });
   }
 
-  regions.push({
-    key: 'oracle_box',
-    label: 'Oracle Text',
-    x: L.oracle_box.x,
-    y: L.oracle_box.y,
-    w: L.oracle_box.w,
-    h: L.oracle_box.h,
-    resizable: true,
-  });
+  if (!L.oracle_box.hidden) {
+    regions.push({
+      key: 'oracle_box',
+      label: 'Oracle Text',
+      x: L.oracle_box.x,
+      y: L.oracle_box.y,
+      w: L.oracle_box.w,
+      h: L.oracle_box.h,
+      resizable: true,
+    });
+  }
 
   regions.push({
     key: 'artist',
@@ -1113,7 +1132,7 @@ function drawCardForeground(octx, card) {
 
   drawSetSymbol(octx, card.set, card.rarity, setRightX, card.layout?.set_symbol?.y || 620, setSize);
 
-  drawRichOracleText(octx, card.oracle_text || '', card.flavor_text || '', {
+  if (!card.layout?.oracle_box?.hidden) drawRichOracleText(octx, card.oracle_text || '', card.flavor_text || '', {
     x: card.layout?.oracle_box?.x || 56,
     y: card.layout?.oracle_box?.y || 663,
     w: card.layout?.oracle_box?.w || 638,
@@ -1237,6 +1256,25 @@ async function renderCardCanvas(card) {
         _tintCtx.fillRect(0, 0, W, H);
         _tintCtx.globalCompositeOperation = 'source-over';
         drawSrc = _tintCanvas;
+      } else if (key === 'background' && order.indexOf('art') < order.indexOf('background')) {
+        // Art-below-frame styles (e.g. token-textless): the background has transparent holes
+        // for the art. JPGs have no alpha, so draw the PDF rendered server-side with its alpha.
+        const bgPng = await loadCachedImage(`/api/card-builder/layer-png?rel_path=${encodeURIComponent(fc[key])}`);
+        if (seq !== renderSeq) return;
+        if (bgPng) {
+          _baseCtx.save();
+          if (clipYRange) {
+            _baseCtx.beginPath();
+            _baseCtx.rect(0, clipYRange[0], W, clipYRange[1] - clipYRange[0]);
+            _baseCtx.clip();
+          }
+          _baseCtx.globalAlpha = op;
+          _baseCtx.drawImage(bgPng, 0, 0, W, H);
+          _baseCtx.restore();
+          return;
+        }
+        drawSrc = await loadTransparentLayer(fc[key], key);
+        if (seq !== renderSeq || !drawSrc) return;
       } else if (key === 'background') {
         const bgImg = await loadCachedImage(encodeAssetPath(fc[key]));
         if (seq !== renderSeq || !bgImg) return;
@@ -1880,6 +1918,7 @@ function bindDetailEvents() {
       if (resp.ok) {
         const data = await resp.json();
         card.frame_components = data.frame_components;
+        applyStyleLayoutPatch(card, data);
         card.hidden_layers = card.hidden_layers || {};
         ['background', 'pinlines', 'name_box', 'crown', 'pt_box'].forEach((k) => {
           if (!card.frame_components?.[k]) card.hidden_layers[k] = true;
@@ -2141,6 +2180,7 @@ function bindDetailEvents() {
       if (resp.ok) {
         const data = await resp.json();
         card.frame_components = data.frame_components;
+        applyStyleLayoutPatch(card, data);
         ['background', 'pinlines', 'name_box', 'crown', 'pt_box'].forEach((k) => {
           if (!card.frame_components?.[k]) card.hidden_layers[k] = true;
           else delete card.hidden_layers[k];

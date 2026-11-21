@@ -58,6 +58,56 @@ DEFAULT_LAYOUT = {
     "artist": {"x": 47, "y": 1022, "font_size": pt(4.3), "color": "#ffffff"},
 }
 
+# Per-style layout overrides on top of DEFAULT_LAYOUT (750x1050 canvas coordinates).
+# Only the listed fields change; any field overridden by some style is reset to its
+# DEFAULT_LAYOUT value when switching to a style that doesn't override it.
+# "art_below_frame" moves the art layer under the background (for full-art templates
+# whose background is transparent except for the title/type bars).
+STYLE_LAYOUT_OVERRIDES: Dict[str, dict] = {
+    "Automated Templates/token-textless": {
+        "art_below_frame": True,
+        "layout": {
+            "art": {"x": 0, "y": 0, "w": 750, "h": 1050},
+            "type_line": {"y": 897},
+            "set_symbol": {"y": 886},
+            "oracle_box": {"hidden": True},
+        },
+    },
+}
+
+_LAYOUT_FIELD_FALLBACKS = {"hidden": False}
+
+
+def style_layout_patch(style_key: str) -> dict:
+    """Layout fields to apply when switching a card to `style_key` (overrides or defaults)."""
+    style_layout = (STYLE_LAYOUT_OVERRIDES.get(style_key) or {}).get("layout", {})
+    patch: Dict[str, dict] = {}
+    for cfg in STYLE_LAYOUT_OVERRIDES.values():
+        for key, fields in cfg.get("layout", {}).items():
+            for field in fields:
+                if field in style_layout.get(key, {}):
+                    value = style_layout[key][field]
+                else:
+                    value = DEFAULT_LAYOUT.get(key, {}).get(field, _LAYOUT_FIELD_FALLBACKS.get(field))
+                patch.setdefault(key, {})[field] = value
+    return patch
+
+
+def style_art_below_frame(style_key: str) -> bool:
+    return bool((STYLE_LAYOUT_OVERRIDES.get(style_key) or {}).get("art_below_frame"))
+
+
+def apply_style_layout(card: dict, style_key: str) -> None:
+    layout = card.setdefault("layout", {})
+    for key, fields in style_layout_patch(style_key).items():
+        layout[key] = {**(layout.get(key) or {}), **fields}
+    order = [k for k in (card.get("layer_order") or []) if k != "art"]
+    if "background" in order:
+        bg_idx = order.index("background")
+        order.insert(bg_idx if style_art_below_frame(style_key) else bg_idx + 1, "art")
+        card["layer_order"] = order
+
+
 GUILD_PAIRS = ["WU", "UB", "BR", "RG", "GW", "WB", "BG", "GU", "UR", "RW"]
 
 
@@ -276,6 +326,7 @@ def extract_scryfall_card_payload(raw_card: dict, count: int = 1, catalog: Optio
     }
     fc = auto_select_frame_components(payload, style_key=style_key, catalog=catalog)
     payload["frame_components"] = fc
+    apply_style_layout(payload, style_key)
     payload["hidden_layers"]["border"] = True
     for k in ("crown", "pt_box"):
         if not fc.get(k):
@@ -315,6 +366,7 @@ def create_blank_card_from_image(name: str, data_url: str, style_key: str = "Aut
     }
     fc = auto_select_frame_components(payload, style_key=style_key, catalog=catalog)
     payload["frame_components"] = fc
+    apply_style_layout(payload, style_key)
     for k in ("border", "crown", "pt_box"):
         if not fc.get(k):
             payload["hidden_layers"][k] = True
