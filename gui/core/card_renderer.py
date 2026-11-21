@@ -113,31 +113,24 @@ def scan_template_catalog() -> Dict[str, Dict[str, List[dict]]]:
             }
             for root, _, files in os.walk(style_path):
                 rel_folder = os.path.relpath(root, style_path).replace("\\", "/")
-                if any(skip in rel_folder for skip in ("Text and Icons", "Legal", "Typeline and Rules Text")):
+                if any(skip in rel_folder for skip in ("Text and Icons", "Legal")):
                     continue
                 for f in sorted(files):
-                    fl = f.lower()
-                    if not (fl.endswith(".jpg") or fl.endswith(".png")):
+                    if not f.lower().endswith(".jpg"):
                         continue
                     if "Border Crop" in f or "Reference" in f:
                         continue
                     rel_asset_path = os.path.relpath(os.path.join(root, f), ASSETS_DIR).replace("\\", "/")
-                    base_label = f.replace("_[oculta].jpg", "").replace(".jpg", "").replace(".png", "")
-                    rf_lower = rel_folder.lower()
-                    if rf_lower.startswith("frame/"):
-                        sub_tag = rel_folder[len("Frame/"):].replace("/", " · ")
-                        display_label = f"{sub_tag} — {base_label}"
-                    else:
-                        display_label = base_label
                     item = {
-                        "label": display_label,
+                        "label": f.replace("_[oculta].jpg", "").replace(".jpg", ""),
                         "rel_path": rel_asset_path,
                         "url": f"/assets/{urllib.parse.quote(rel_asset_path)}",
                         "folder": rel_folder,
                     }
+                    rf_lower = rel_folder.lower()
                     if "background" in rf_lower or "nyx" in rf_lower or rf_lower in ("land", "nonland"):
                         categories["background"].append(item)
-                    elif "pinlines" in rf_lower or "textbox" in rf_lower or rf_lower == "frame" or rf_lower.startswith("frame/"):
+                    elif "pinlines" in rf_lower or "textbox" in rf_lower:
                         categories["pinlines"].append(item)
                     elif "name" in rf_lower:
                         categories["name_box"].append(item)
@@ -176,10 +169,10 @@ def _pick_layer(items, preferred_tokens, folder_hint=None):
         for it in candidates:
             if it["label"].lower() == tk:
                 return it["rel_path"]
-        # 2. Numeric prefix exact match (e.g. "04_R", "01_W", "Legendary · Creature — 043_G")
-        prefix_pat = re.compile(rf"(?:^|—\s*)\d+_{re.escape(tk)}(_\[oculta\])?$", re.IGNORECASE)
+        # 2. Numeric prefix exact match (e.g. "04_R", "01_W", "109_Normal Border", "108_Legendary Border_[oculta]")
+        prefix_pat = re.compile(rf"^\d+_{re.escape(tk)}(_\[oculta\])?$", re.IGNORECASE)
         for it in candidates:
-            if prefix_pat.search(it["label"]):
+            if prefix_pat.match(it["label"]):
                 return it["rel_path"]
         # 3. Word/token boundary match (never match "r" inside "Artifact" or "Border")
         boundary_pat = re.compile(rf"(?<![a-z0-9]){re.escape(tk)}(?![a-z0-9])", re.IGNORECASE)
@@ -227,16 +220,10 @@ def auto_select_frame_components(card_data: dict, style_key: str = "Automated Te
         if not any(tok in it["label"].lower() for tok in ("(white)", "(silver)", "(gold)", "crop"))
     ] or style_cat["border"]
 
-    if style_key.lower().endswith("/token"):
-        token_folder = f"Frame/{'Legendary' if is_legendary else 'Non-Legendary'}/{'Creature' if is_creature else 'Non-Creature'}"
-        pin_hint = token_folder
-    else:
-        pin_hint = "Land" if is_land else "Nonland"
-
     return {
         "style": style_key,
         "background": _pick_layer(style_cat["background"], bg_tokens, folder_hint=("Nyx" if is_nyx else "Background")),
-        "pinlines": _pick_layer(style_cat["pinlines"], pin_tokens, folder_hint=pin_hint),
+        "pinlines": _pick_layer(style_cat["pinlines"], pin_tokens, folder_hint=("Land" if is_land else "Nonland")),
         "name_box": _pick_layer(style_cat["name_box"], bg_tokens),
         "crown": _pick_layer(style_cat["crown"], pin_tokens) if is_legendary else "",
         "border": _pick_layer(black_borders, border_pref),
@@ -267,7 +254,6 @@ def extract_scryfall_card_payload(raw_card: dict, count: int = 1, catalog: Optio
         "flavor_text": face0.get("flavor_text") or raw_card.get("flavor_text", ""),
         "power": face0.get("power") if face0.get("power") is not None else raw_card.get("power"),
         "toughness": face0.get("toughness") if face0.get("toughness") is not None else raw_card.get("toughness"),
-        "loyalty": face0.get("loyalty") if face0.get("loyalty") is not None else raw_card.get("loyalty"),
         "artist": (hd_matches[0].get("artist") if hd_matches else None) or face0.get("artist") or raw_card.get("artist", ""),
         "set": raw_card.get("set", "mtg"),
         "rarity": raw_card.get("rarity", "common"),
@@ -516,33 +502,6 @@ def compose_card_export(
     default_opacity = max(0.0, min(1.0, float(card.get("frame_opacity", 1.0))))
     layer_opacities = card.get("layer_opacities") or {}
     layer_colors = card.get("layer_colors") or {}
-    layer_transforms = card.get("layer_transforms") or {}
-
-    def _apply_layer_transform(comp_rgba: Image.Image, comp_key: str) -> Image.Image:
-        tr = layer_transforms.get(comp_key)
-        if not isinstance(tr, dict):
-            return comp_rgba
-        dx = float(tr.get("dx") or 0)
-        dy = float(tr.get("dy") or 0)
-        cl = max(0.0, min(720.0, float(tr.get("crop_l") or 0)))
-        ct = max(0.0, min(1020.0, float(tr.get("crop_t") or 0)))
-        cr = max(0.0, min(720.0, float(tr.get("crop_r") or 0)))
-        cb = max(0.0, min(1020.0, float(tr.get("crop_b") or 0)))
-        if dx == 0 and dy == 0 and cl == 0 and ct == 0 and cr == 0 and cb == 0:
-            return comp_rgba
-        sx0 = int(round(cl * export_scale))
-        sy0 = int(round(ct * export_scale))
-        sx1 = max(sx0 + 1, int(round((750.0 - cr) * export_scale)))
-        sy1 = max(sy0 + 1, int(round((1050.0 - cb) * export_scale)))
-        sx1 = min(export_w, sx1)
-        sy1 = min(export_h, sy1)
-        cropped = comp_rgba.crop((sx0, sy0, sx1, sy1))
-        out = Image.new("RGBA", (export_w, export_h), (0, 0, 0, 0))
-        dest_x = int(round((cl + dx) * export_scale))
-        dest_y = int(round((ct + dy) * export_scale))
-        out.paste(cropped, (dest_x, dest_y))
-        del cropped
-        return out
 
     def _tint_layer_solid(rgba_img: Image.Image, hex_color: str) -> Image.Image:
         ch = str(hex_color or "").strip().lstrip("#")
@@ -648,27 +607,6 @@ def compose_card_export(
                 canvas_img.alpha_composite(_apply_layer_opacity(art_box_canvas, art_op))
                 del art_box_canvas
 
-    def _load_comp_rgba(rel_p: str) -> Optional[Image.Image]:
-        if rel_p.lower().endswith(".png"):
-            abs_p = os.path.join(ASSETS_DIR, rel_p.lstrip("/"))
-            if not os.path.isfile(abs_p):
-                return None
-            rel_used = os.path.relpath(abs_p, ASSETS_DIR)
-            if rel_used not in used_pdf_components:
-                used_pdf_components.append(rel_used)
-            with Image.open(abs_p) as im:
-                rgba = im.convert("RGBA")
-                if rgba.size != (export_w, export_h):
-                    rgba = rgba.resize((export_w, export_h), Image.LANCZOS)
-                return rgba
-        pdf_p = jpg_rel_path_to_pdf_abs_path(rel_p)
-        if not pdf_p:
-            return None
-        rel_used = os.path.relpath(pdf_p, ASSETS_DIR)
-        if rel_used not in used_pdf_components:
-            used_pdf_components.append(rel_used)
-        return render_pdf_layer_rgba(pdf_p, export_w, export_h)
-
     def _composite_comp(comp_key):
         comp_op = _layer_op(comp_key)
         if comp_op <= 0.001:
@@ -676,13 +614,16 @@ def compose_card_export(
         rel_p = fc.get(comp_key)
         if not rel_p:
             return
-        comp_rgba = _load_comp_rgba(rel_p)
-        if comp_rgba is None:
+        pdf_p = jpg_rel_path_to_pdf_abs_path(rel_p)
+        if not pdf_p:
             return
+        rel_used = os.path.relpath(pdf_p, ASSETS_DIR)
+        if rel_used not in used_pdf_components:
+            used_pdf_components.append(rel_used)
+        comp_rgba = render_pdf_layer_rgba(pdf_p, export_w, export_h)
         override_col = str(layer_colors.get(comp_key) or "").strip()
         if override_col and re.match(r"^#[0-9a-fA-F]{6}$", override_col):
             comp_rgba = _tint_layer_solid(comp_rgba, override_col)
-        comp_rgba = _apply_layer_transform(comp_rgba, comp_key)
         canvas_img.alpha_composite(_apply_layer_opacity(comp_rgba, comp_op))
         del comp_rgba
 
@@ -739,8 +680,9 @@ def compose_card_export(
                 comp_op = _layer_op(comp_key)
                 rel_p = fc.get(comp_key)
                 if rel_p and comp_op > 0.001:
-                    comp_img = _load_comp_rgba(rel_p)
-                    if comp_img is not None:
+                    pdf_p = jpg_rel_path_to_pdf_abs_path(rel_p)
+                    if pdf_p:
+                        comp_img = render_pdf_layer_rgba(pdf_p, export_w, export_h)
                         bottom_crop = comp_img.crop((0, split_y, export_w, export_h))
                         canvas_img.alpha_composite(_apply_layer_opacity(bottom_crop, comp_op), dest=(0, split_y))
                         del comp_img, bottom_crop
