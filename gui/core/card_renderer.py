@@ -26,6 +26,7 @@ from config import (
     STANDARD_CARD_W_PX,
 )
 from core.art_index import art_index
+from core.asset_paths import clean_layer_stem, migrate_rel_path
 from utils.conversions import parse_hex
 from utils.text import safe_card_filename
 
@@ -71,6 +72,13 @@ STYLE_LAYOUT_OVERRIDES: Dict[str, dict] = {
             "type_line": {"y": 897},
             "set_symbol": {"y": 886},
             "oracle_box": {"hidden": True},
+        },
+    },
+        "Automated Templates/ixalan": {
+        "art_below_frame": False,
+        "layout": {
+            "title": {"x": 100, "y": 90, "max_w": 490, "font_size": pt(9.0), "color": "#111111"},
+            "type_line": {"x": 150, "y": 629, "max_w": 550, "font_size": pt(7.5), "color": "#111111"},
         },
     },
 }
@@ -172,7 +180,7 @@ def scan_template_catalog() -> Dict[str, Dict[str, List[dict]]]:
                         continue
                     rel_asset_path = os.path.relpath(os.path.join(root, f), ASSETS_DIR).replace("\\", "/")
                     item = {
-                        "label": f.replace("_[oculta].jpg", "").replace(".jpg", ""),
+                        "label": clean_layer_stem(os.path.splitext(f)[0]),
                         "rel_path": rel_asset_path,
                         "url": f"/assets/{urllib.parse.quote(rel_asset_path)}",
                         "folder": rel_folder,
@@ -219,17 +227,12 @@ def _pick_layer(items, preferred_tokens, folder_hint=None):
         for it in candidates:
             if it["label"].lower() == tk:
                 return it["rel_path"]
-        # 2. Numeric prefix exact match (e.g. "04_R", "01_W", "109_Normal Border", "108_Legendary Border_[oculta]")
-        prefix_pat = re.compile(rf"^\d+_{re.escape(tk)}(_\[oculta\])?$", re.IGNORECASE)
-        for it in candidates:
-            if prefix_pat.match(it["label"]):
-                return it["rel_path"]
-        # 3. Word/token boundary match (never match "r" inside "Artifact" or "Border")
+        # 2. Word/token boundary match (never match "r" inside "Artifact" or "Border")
         boundary_pat = re.compile(rf"(?<![a-z0-9]){re.escape(tk)}(?![a-z0-9])", re.IGNORECASE)
         for it in candidates:
             if boundary_pat.search(it["label"]):
                 return it["rel_path"]
-        # 4. Substring fallback only for multi-char descriptive tokens (e.g. "Legendary Border", "Gold")
+        # 3. Substring fallback only for multi-char descriptive tokens (e.g. "Legendary Border", "Gold")
         if len(tk) > 2:
             for it in candidates:
                 if tk in it["label"].lower():
@@ -423,7 +426,7 @@ def remove_solid_bg_pil(pil_img: Image.Image, tolerance: int = 28, clear_art_box
 def jpg_rel_path_to_pdf_abs_path(rel_path: str) -> Optional[str]:
     if not rel_path:
         return None
-    norm = os.path.normpath(rel_path).lstrip("/\\")
+    norm = os.path.normpath(migrate_rel_path(rel_path)).lstrip("/\\")
     if norm.startswith(".."):
         return None
     jpg_abs = os.path.join(ASSETS_DIR, norm)

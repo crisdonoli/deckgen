@@ -8,6 +8,8 @@ import sys
 import tempfile
 from typing import Any, Dict, Optional
 
+from core.asset_paths import migrate_card_frame_paths
+
 STATE_FILENAME = "state.json"
 
 DEFAULT_DECK_GEN_CONFIG = {
@@ -104,6 +106,8 @@ def normalize_loaded_state(raw: Dict[str, Any], fallback_root: Optional[str] = N
             base["card_builder"]["cards"] = cb["cards"]
         elif isinstance(raw.get("cards"), list):
             base["card_builder"]["cards"] = raw["cards"]
+        for card in base["card_builder"]["cards"]:
+            migrate_card_frame_paths(card)
         if isinstance(cb.get("ready_ids"), list):
             base["card_builder"]["ready_ids"] = cb["ready_ids"]
         base["card_builder"]["active_card_id"] = cb.get("active_card_id")
