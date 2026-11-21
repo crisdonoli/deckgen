@@ -11,12 +11,11 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Body, File, Form, HTTPException, Query, Response, UploadFile
 from PIL import Image, ImageDraw
 
-from config import DEFAULT_EXPORT_DPI, PREVIEW_CACHE_DIR, STANDARD_CARD_H_PX, STANDARD_CARD_W_PX
+from config import DEFAULT_EXPORT_DPI, DEFAULT_STYLE_KEY, PREVIEW_CACHE_DIR, STANDARD_CARD_H_PX, STANDARD_CARD_W_PX
 from core.art_index import art_index
+from core.card_layouts import style_art_below_frame, style_layout_patch
 from core.card_renderer import (
     auto_select_frame_components,
-    style_art_below_frame,
-    style_layout_patch,
     clamp_export_dpi,
     compose_card_export,
     create_blank_card_from_image,
@@ -42,7 +41,7 @@ async def api_cb_templates():
 async def api_cb_search(payload: Dict[str, Any] = Body(...)):
     query = (payload.get("query") or "").strip()
     root_dir = (payload.get("root_dir") or "").strip()
-    style_key = (payload.get("style_key") or "Automated Templates/normal").strip()
+    style_key = (payload.get("style_key") or DEFAULT_STYLE_KEY).strip()
     if not query:
         raise HTTPException(status_code=400, detail="Debe ingresar el nombre de una carta.")
 
@@ -86,7 +85,7 @@ async def api_cb_search(payload: Dict[str, Any] = Body(...)):
 @router.post("/upload-txt")
 async def api_cb_upload_txt(
     root_dir: str = Form(default=""),
-    style_key: str = Form(default="Automated Templates/normal"),
+    style_key: str = Form(default=DEFAULT_STYLE_KEY),
     txt_file: UploadFile = File(...),
 ):
     raw_bytes = await txt_file.read()
@@ -151,7 +150,7 @@ async def api_cb_upload_txt(
 
 @router.post("/import-pngs")
 async def api_cb_import_pngs(
-    style_key: str = Form(default="Automated Templates/normal"),
+    style_key: str = Form(default=DEFAULT_STYLE_KEY),
     files: List[UploadFile] = File(...),
 ):
     catalog = scan_template_catalog()
@@ -172,7 +171,7 @@ async def api_cb_import_pngs(
 @router.post("/import-png-dir")
 async def api_cb_import_png_dir(payload: Dict[str, Any] = Body(...)):
     dir_path = (payload.get("dir_path") or "").strip()
-    style_key = (payload.get("style_key") or "Automated Templates/normal").strip()
+    style_key = (payload.get("style_key") or DEFAULT_STYLE_KEY).strip()
     if not dir_path or not os.path.isdir(dir_path):
         raise HTTPException(status_code=400, detail="Directorio de imágenes no encontrado.")
 
@@ -301,7 +300,7 @@ async def api_cb_export_batch(payload: Dict[str, Any] = Body(...)):
 @router.post("/auto-frame")
 async def api_cb_auto_frame(payload: Dict[str, Any] = Body(...)):
     card = payload.get("card") or {}
-    style_key = (payload.get("style_key") or "Automated Templates/normal").strip()
+    style_key = (payload.get("style_key") or DEFAULT_STYLE_KEY).strip()
     catalog = scan_template_catalog()
     fc = auto_select_frame_components(card, style_key=style_key, catalog=catalog)
     return {

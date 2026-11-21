@@ -22,7 +22,7 @@ Launcher options (`run.py`):
 - `--host 127.0.0.1`
 - `--no-browser` (starts the server without opening a browser tab)
 
-### Assets & Custom Landing Background (`mana-master`, `keyrune-master`, `Automated Templates`, `Manual Templates`, and HQ Arts) 
+### Assets & Custom Landing Background (`mana-master`, `keyrune-master`, `Templates`, and HQ Arts)
 - Download [Templates](https://drive.google.com/file/d/1BhOkhvsduhb0yyGTecgy4alU49KAr84B/view?usp=drive_link) (updated: 20-11-2026) and extract it into the root folder of this project. 
 
 Your directory tree should look like:
@@ -32,14 +32,17 @@ Your directory tree should look like:
 ├── assets
 │   ├── artofmtg_artists_cards.json
 │   ├── artofmtg_cards.json
-│   ├── Automated Templates
 │   ├── bloomburrow.json
 │   ├── foundations.json
 │   ├── keyrune-master
 │   ├── lost-caverns.json
 │   ├── mana-master
-│   ├── Manual Templates
 │   ├── murders-karlov.json
+│   ├── Templates
+│   │   ├── normal
+│   │   ├── saga
+│   │   ├── token
+│   │   └── ...
 │   └── wild-eldraine.json
 ├── gui
 │   ├── app.py
@@ -53,10 +56,41 @@ Your directory tree should look like:
 │   ├── static
 │   ├── templates
 │   └── utils
-├── tests
+├── scripts
 ├── README.md
 ├── requirements.txt
 └── run.py
+```
+
+### Frame templates
+
+Each folder in `assets/Templates/` is one **Template Style** (shown in the Card Builder by its folder name, e.g. `normal`, `ixalan`). Inside a style, subfolders group the frame layers and file names describe the layer itself:
+
+```text
+Templates/normal/
+├── Background/W.jpg + W.pdf        # one .jpg preview + .pdf (full quality) per layer
+├── Pinlines & Textbox/...
+├── Name & Title Boxes/...
+├── Legendary Crown/...
+├── PT Box/...
+├── Border/...
+└── Art Frame.jpg + .pdf            # reference shape of the art window
+```
+
+- Layers are sorted into frame components (`background`, `pinlines`, `name_box`, `crown`, `border`, `pt_box`) from their folder names, and auto-selected from the card's colors and type line (`W`, `UB`, `Gold`, `Artifact`, `Land`, `Colourless`...).
+- `token` uses a single full-frame layer per color in `Frame/<Legendary|Non-Legendary>/<Creature|Non-Creature>/`.
+- Folders named `WIP`, `Text and Icons`/`Text & Icons` and `Legal`, plus `Border Crop` and `* Reference` layers, are ignored.
+- Per-style text and art positions live in `gui/core/card_layouts.py` (`STYLE_LAYOUT_OVERRIDES`). The art boxes come from each style's `Art Frame`; regenerate them after adding or changing a style:
+
+```bash
+python scripts/measure_art_frames.py
+```
+
+Projects saved with the older layout (`Automated Templates/` / `Manual Templates/`, `001_W_[oculta].jpg` file names) are migrated automatically when loaded. To convert an old asset download to the current file names:
+
+```bash
+python scripts/strip_asset_prefixes.py                            # dry run
+python scripts/strip_asset_prefixes.py --apply [--delete-unused]  # rename (and drop unused layers)
 ```
 
 ## Key Features
@@ -79,15 +113,12 @@ Your directory tree should look like:
 - `gui/app.py`: FastAPI server, static/assets mounting, and no-cache headers.
 - `gui/core/workspace.py`: Root Directory management, atomic `state.json` persistence, and collision versioning (`-1`, `-2`).
 - `gui/core/art_index.py`: $O(1)$ + inverted-token + fuzzy index over `gui/data/unified_art.json` and extra JSONs, plus Scryfall cache.
-- `gui/core/card_renderer.py`: Independent layer composition, pop-out art, brightness, background color, and PDF/PNG export.
+- `gui/core/card_renderer.py`: Template catalog, frame auto-selection, independent layer composition, pop-out art, brightness, background color, and PDF/PNG export.
+- `gui/core/card_layouts.py`: Default card layout and per-style overrides (`STYLE_LAYOUT_OVERRIDES`).
+- `gui/core/asset_paths.py`: Migration of template paths and style keys saved with older asset layouts.
 - `gui/core/sheets.py` & `gui/services/deck_service.py`: Sheet layout, individual card scaling, custom backs, and background PNG/JPG → PDF conversion.
 - `gui/static/js/modules/`: Modular ES6 frontend (`workspace_client.js`, `crop_masks.js`, `layer_manager.js`).
-
-## Tests
-
-```bash
-python3 -m unittest discover -s tests -v
-```
+- `scripts/`: Asset maintenance (`measure_art_frames.py`, `strip_asset_prefixes.py`) and the art scrapers that produced the art JSONs.
 
 ## External Tools & Credits
 

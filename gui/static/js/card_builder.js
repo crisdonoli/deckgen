@@ -57,7 +57,7 @@ function ensureCardBuilderState() {
     workspaceState = {
       project_name: 'Temporal',
       root_dir: getActiveRootDir(),
-      card_builder: { cards: [], ready_ids: [], global_frame_style: 'Automated Templates/normal' },
+      card_builder: { cards: [], ready_ids: [], global_frame_style: 'Templates/normal' },
       deck_generator: {},
     };
   }
@@ -235,7 +235,7 @@ function ensureCardLayout(card) {
 }
 
 // Applies the per-style layout returned by /api/card-builder/auto-frame
-// (see STYLE_LAYOUT_OVERRIDES in gui/core/card_renderer.py).
+// (see STYLE_LAYOUT_OVERRIDES in gui/core/card_layouts.py).
 function applyStyleLayoutPatch(card, data) {
   if (!card || !data) return;
   const L = ensureCardLayout(card);
@@ -1673,7 +1673,7 @@ function hideFrameHoverPreview() {
 function renderFrameSelectors(card) {
   const container = document.getElementById('cb-frame-selectors');
   if (!container) return;
-  const styleKey = card.frame_components?.style || 'Automated Templates/normal';
+  const styleKey = card.frame_components?.style || 'Templates/normal';
   const styleCat = catalog[styleKey] || {};
   const keys = [
     ['background', 'Frame'],
@@ -1851,9 +1851,9 @@ function populateDetailControls(card) {
   layerManager.render(card);
 }
 
-// "Automated Templates/ixalan" -> "ixalan" (display only; the full key stays as the value)
+// "Templates/ixalan" -> "ixalan" (display only; the full key stays as the value)
 function styleDisplayName(styleKey) {
-  return String(styleKey || '').replace(/^(Automated|Manual) Templates\//i, '');
+  return String(styleKey || '').replace(/^((Automated|Manual) )?Templates\//i, '');
 }
 
 function bindDetailEvents() {
@@ -2180,7 +2180,7 @@ function bindDetailEvents() {
       const resp = await fetch('/api/card-builder/auto-frame', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ card, style_key: 'Automated Templates/normal' }),
+        body: JSON.stringify({ card, style_key: 'Templates/normal' }),
       });
       if (resp.ok) {
         const data = await resp.json();
@@ -3156,7 +3156,7 @@ function bindChangeArtModal() {
     if (!sel) return;
     sel.innerHTML = styleKeys.length
       ? styleKeys.map((k) => `<option value="${k}" title="${k}">${styleDisplayName(k)}</option>`).join('')
-      : '<option value="Automated Templates/normal">normal</option>';
+      : '<option value="Templates/normal">normal</option>';
   });
 
   layerManager = new LayerManager(
@@ -3275,7 +3275,7 @@ function bindChangeArtModal() {
     subEl.textContent = `0 / ${entries.length}`;
 
     let imported = 0;
-    const styleKey = ensureCardBuilderState().global_frame_style || 'Automated Templates/normal';
+    const styleKey = ensureCardBuilderState().global_frame_style || 'Templates/normal';
 
     try {
       for (let i = 0; i < entries.length; i++) {
@@ -3366,7 +3366,7 @@ function bindChangeArtModal() {
   const txtCheckClose = document.getElementById('cb-txt-check-close');
 
   async function retryFetchCardFromTxt(entry) {
-    const styleKey = ensureCardBuilderState().global_frame_style || 'Automated Templates/normal';
+    const styleKey = ensureCardBuilderState().global_frame_style || 'Templates/normal';
     const resp = await fetch('/api/card-builder/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

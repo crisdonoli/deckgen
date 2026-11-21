@@ -19,14 +19,17 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageOps
 from config import (
     ASSETS_DIR,
     DEFAULT_EXPORT_DPI,
+    DEFAULT_STYLE_KEY,
     DPI,
     MAX_EXPORT_DPI,
     MIN_EXPORT_DPI,
     STANDARD_CARD_H_PX,
     STANDARD_CARD_W_PX,
+    TEMPLATES_GROUP,
 )
 from core.art_index import art_index
 from core.asset_paths import clean_layer_stem, migrate_rel_path
+from core.card_layouts import DEFAULT_LAYOUT, apply_style_layout
 from utils.conversions import parse_hex
 from utils.text import safe_card_filename
 
@@ -36,85 +39,6 @@ except ImportError:
     pymupdf = None
 
 Image.MAX_IMAGE_PIXELS = max(getattr(Image, "MAX_IMAGE_PIXELS", 89478485) or 89478485, 120_000_000)
-
-CARD_WIDTH_INCHES = 2.5
-BASE_DPI = STANDARD_CARD_W_PX / float(CARD_WIDTH_INCHES)
-
-
-def pt(points: float) -> int:
-    return int(round((points * BASE_DPI) / 72.0))
-
-
-DEFAULT_LAYOUT = {
-    "canvas": {"w": STANDARD_CARD_W_PX, "h": STANDARD_CARD_H_PX},
-    "art": {"x": 34, "y": 109, "w": 682, "h": 477, "scale": 1.0, "offset_x": 0, "offset_y": 0},
-    "title": {"x": 56, "y": 90, "max_w": 490, "font_size": pt(9.0), "color": "#111111"},
-    "official_title": {"x": 56, "y": 114, "max_w": 490, "font_size": pt(5.5), "color": "#111111"},
-    "mana_cost": {"x": 692, "y": 88, "size": pt(8.5), "align": "right"},
-    "type_line": {"x": 56, "y": 629, "max_w": 550, "font_size": pt(7.5), "color": "#111111"},
-    "set_symbol": {"x": 692, "y": 620, "size": pt(9.8), "align": "right"},
-    "oracle_box": {"x": 56, "y": 663, "w": 638, "h": 303, "font_size": pt(7.2), "color": "#111111"},
-    "pt_box": {"x": 580, "y": 934, "w": 135, "h": 71},
-    "pt_text": {"x": 648, "y": 970, "font_size": pt(9.2), "color": "#111111"},
-    "artist": {"x": 47, "y": 1022, "font_size": pt(4.3), "color": "#ffffff"},
-}
-
-# Per-style layout overrides on top of DEFAULT_LAYOUT (750x1050 canvas coordinates).
-# Only the listed fields change; any field overridden by some style is reset to its
-# DEFAULT_LAYOUT value when switching to a style that doesn't override it.
-# "art_below_frame" moves the art layer under the background (for full-art templates
-# whose background is transparent except for the title/type bars).
-STYLE_LAYOUT_OVERRIDES: Dict[str, dict] = {
-    "Automated Templates/token-textless": {
-        "art_below_frame": True,
-        "layout": {
-            "art": {"x": 0, "y": 0, "w": 750, "h": 1050},
-            "type_line": {"y": 897},
-            "set_symbol": {"y": 886},
-            "oracle_box": {"hidden": True},
-        },
-    },
-        "Automated Templates/ixalan": {
-        "art_below_frame": False,
-        "layout": {
-            "title": {"x": 100, "y": 90, "max_w": 490, "font_size": pt(9.0), "color": "#111111"},
-            "type_line": {"x": 150, "y": 629, "max_w": 550, "font_size": pt(7.5), "color": "#111111"},
-        },
-    },
-}
-
-_LAYOUT_FIELD_FALLBACKS = {"hidden": False}
-
-
-def style_layout_patch(style_key: str) -> dict:
-    """Layout fields to apply when switching a card to `style_key` (overrides or defaults)."""
-    style_layout = (STYLE_LAYOUT_OVERRIDES.get(style_key) or {}).get("layout", {})
-    patch: Dict[str, dict] = {}
-    for cfg in STYLE_LAYOUT_OVERRIDES.values():
-        for key, fields in cfg.get("layout", {}).items():
-            for field in fields:
-                if field in style_layout.get(key, {}):
-                    value = style_layout[key][field]
-                else:
-                    value = DEFAULT_LAYOUT.get(key, {}).get(field, _LAYOUT_FIELD_FALLBACKS.get(field))
-                patch.setdefault(key, {})[field] = value
-    return patch
-
-
-def style_art_below_frame(style_key: str) -> bool:
-    return bool((STYLE_LAYOUT_OVERRIDES.get(style_key) or {}).get("art_below_frame"))
-
-
-def apply_style_layout(card: dict, style_key: str) -> None:
-    layout = card.setdefault("layout", {})
-    for key, fields in style_layout_patch(style_key).items():
-        layout[key] = {**(layout.get(key) or {}), **fields}
-    order = [k for k in (card.get("layer_order") or []) if k != "art"]
-    if "background" in order:
-        bg_idx = order.index("background")
-        order.insert(bg_idx if style_art_below_frame(style_key) else bg_idx + 1, "art")
-        card["layer_order"] = order
-
 
 GUILD_PAIRS = ["WU", "UB", "BR", "RG", "GW", "WB", "BG", "GU", "UR", "RW"]
 
@@ -151,15 +75,13 @@ def get_color_code_for_templates(colors, color_identity, type_line):
 
 def scan_template_catalog() -> Dict[str, Dict[str, List[dict]]]:
     catalog: Dict[str, Dict[str, List[dict]]] = {}
-    for group in ("Automated Templates", "Manual Templates"):
-        group_dir = os.path.join(ASSETS_DIR, group)
-        if not os.path.isdir(group_dir):
-            continue
+    group_dir = os.path.join(ASSETS_DIR, TEMPLATES_GROUP)
+    if os.path.isdir(group_dir):
         for style in sorted(os.listdir(group_dir)):
             style_path = os.path.join(group_dir, style)
-            if not os.path.isdir(style_path) or style in ("Automated Templates", "WIP"):
+            if not os.path.isdir(style_path) or style == "WIP":
                 continue
-            style_key = f"{group}/{style}"
+            style_key = f"{TEMPLATES_GROUP}/{style}"
             categories = {
                 "background": [],
                 "pinlines": [],
@@ -171,7 +93,7 @@ def scan_template_catalog() -> Dict[str, Dict[str, List[dict]]]:
             }
             for root, _, files in os.walk(style_path):
                 rel_folder = os.path.relpath(root, style_path).replace("\\", "/")
-                if any(skip in rel_folder for skip in ("Text and Icons", "Legal")):
+                if any(skip in rel_folder for skip in ("Text and Icons", "Text & Icons", "Legal")):
                     continue
                 for f in sorted(files):
                     if not f.lower().endswith(".jpg"):
@@ -186,7 +108,14 @@ def scan_template_catalog() -> Dict[str, Dict[str, List[dict]]]:
                         "folder": rel_folder,
                     }
                     rf_lower = rel_folder.lower()
-                    if "background" in rf_lower or "nyx" in rf_lower or rf_lower in ("land", "nonland"):
+                    # token: one full frame per colour in Frame/<Legendary|Non-Legendary>/<Creature|Non-Creature>/,
+                    # plus a textbox "Fade" that sits over the art. Typeline/Rules Text there are sample text.
+                    if rf_lower.startswith("frame/"):
+                        categories["pinlines"].append(item)
+                    elif rf_lower.startswith("typeline and rules text"):
+                        if item["label"].lower() == "fade":
+                            categories["background"].append(item)
+                    elif "background" in rf_lower or "nyx" in rf_lower or rf_lower in ("land", "nonland"):
                         categories["background"].append(item)
                     elif "pinlines" in rf_lower or "textbox" in rf_lower:
                         categories["pinlines"].append(item)
@@ -240,10 +169,10 @@ def _pick_layer(items, preferred_tokens, folder_hint=None):
     return ""
 
 
-def auto_select_frame_components(card_data: dict, style_key: str = "Automated Templates/normal", catalog: Optional[dict] = None):
+def auto_select_frame_components(card_data: dict, style_key: str = DEFAULT_STYLE_KEY, catalog: Optional[dict] = None):
     if catalog is None:
         catalog = scan_template_catalog()
-    style_cat = catalog.get(style_key) or catalog.get("Automated Templates/normal")
+    style_cat = catalog.get(style_key) or catalog.get(DEFAULT_STYLE_KEY)
     if not style_cat:
         return {}
 
@@ -268,6 +197,22 @@ def auto_select_frame_components(card_data: dict, style_key: str = "Automated Te
     else:
         border_pref = ["Normal Border", "Planeswalker Border", "Border"]
 
+    if any(it["folder"].startswith("Frame/") for it in style_cat["pinlines"]):
+        # Single full-frame layer (token): name bar, border and PT box are part of it.
+        frame_folder = "Frame/{}/{}".format(
+            "Legendary" if is_legendary else "Non-Legendary",
+            "Creature" if is_creature else "Non-Creature",
+        )
+        return {
+            "style": style_key,
+            "background": _pick_layer(style_cat["background"], ["Fade"], folder_hint="Typeline and Rules Text/Rules Text"),
+            "pinlines": _pick_layer(style_cat["pinlines"], pin_tokens, folder_hint=frame_folder),
+            "name_box": "",
+            "crown": "",
+            "border": "",
+            "pt_box": "",
+        }
+
     black_borders = [
         it for it in style_cat["border"]
         if not any(tok in it["label"].lower() for tok in ("(white)", "(silver)", "(gold)", "crop"))
@@ -284,7 +229,7 @@ def auto_select_frame_components(card_data: dict, style_key: str = "Automated Te
     }
 
 
-def extract_scryfall_card_payload(raw_card: dict, count: int = 1, catalog: Optional[dict] = None, style_key: str = "Automated Templates/normal") -> dict:
+def extract_scryfall_card_payload(raw_card: dict, count: int = 1, catalog: Optional[dict] = None, style_key: str = DEFAULT_STYLE_KEY) -> dict:
     faces = raw_card.get("card_faces") or []
     face0 = faces[0] if faces else raw_card
     image_uris = raw_card.get("image_uris") or face0.get("image_uris") or {}
@@ -337,7 +282,7 @@ def extract_scryfall_card_payload(raw_card: dict, count: int = 1, catalog: Optio
     return payload
 
 
-def create_blank_card_from_image(name: str, data_url: str, style_key: str = "Automated Templates/normal", catalog: Optional[dict] = None) -> dict:
+def create_blank_card_from_image(name: str, data_url: str, style_key: str = DEFAULT_STYLE_KEY, catalog: Optional[dict] = None) -> dict:
     payload = {
         "id": str(uuid.uuid4()),
         "name": name,

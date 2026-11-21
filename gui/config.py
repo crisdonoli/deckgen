@@ -26,6 +26,9 @@ _ROOT_ASSETS = os.path.join(_PROJECT_ROOT, "assets")
 _GUI_ASSETS = os.path.join(_GUI_DIR, "assets")
 
 ASSETS_DIR = _ROOT_ASSETS if os.path.isdir(os.path.join(_ROOT_ASSETS, "mana-master")) else _GUI_ASSETS
+# Frame templates live in assets/Templates/<style>/; a style key is "Templates/<style>".
+TEMPLATES_GROUP = "Templates"
+DEFAULT_STYLE_KEY = f"{TEMPLATES_GROUP}/normal"
 DATA_DIR = os.path.join(_GUI_DIR, "data")
 UNIFIED_ART_PATH = os.path.join(DATA_DIR, "unified_art.json")
 

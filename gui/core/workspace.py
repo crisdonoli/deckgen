@@ -8,7 +8,8 @@ import sys
 import tempfile
 from typing import Any, Dict, Optional
 
-from core.asset_paths import migrate_card_frame_paths
+from config import DEFAULT_STYLE_KEY
+from core.asset_paths import migrate_card_frame_paths, migrate_style_key
 
 STATE_FILENAME = "state.json"
 
@@ -44,7 +45,7 @@ def default_project_state(root_dir: str, project_name: Optional[str] = None) -> 
             "cards": [],
             "ready_ids": [],
             "active_card_id": None,
-            "global_frame_style": "Automated Templates/normal",
+            "global_frame_style": DEFAULT_STYLE_KEY,
             "export_dpi": 1200,
             "export_format": "pdf",
         },
@@ -112,7 +113,7 @@ def normalize_loaded_state(raw: Dict[str, Any], fallback_root: Optional[str] = N
             base["card_builder"]["ready_ids"] = cb["ready_ids"]
         base["card_builder"]["active_card_id"] = cb.get("active_card_id")
         if cb.get("global_frame_style"):
-            base["card_builder"]["global_frame_style"] = cb["global_frame_style"]
+            base["card_builder"]["global_frame_style"] = migrate_style_key(cb["global_frame_style"])
         if cb.get("export_dpi"):
             base["card_builder"]["export_dpi"] = cb["export_dpi"]
         if cb.get("export_format") in ("pdf", "png"):
