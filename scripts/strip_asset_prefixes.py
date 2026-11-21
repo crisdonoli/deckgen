@@ -15,7 +15,7 @@ Optionally (--delete-unused) deletes what the app never reads:
   - the "Text and Icons" / "Text & Icons" and "Legal" folders of every style (the
     Card Builder draws text, mana and set symbols itself);
   - "Border Crop" and "... Reference" layers (guides from the PSD templates).
-scan_template_catalog() skips all of them. Can be run again after the rename.
+The renderer skips all of them. Can be run again after the rename.
 
 Usage:
     python scripts/strip_asset_prefixes.py                          # dry run

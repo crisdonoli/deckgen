@@ -9,7 +9,6 @@ import tempfile
 from typing import Any, Dict, Optional
 
 from config import DEFAULT_STYLE_KEY
-from core.asset_paths import migrate_card_frame_paths, migrate_style_key
 
 STATE_FILENAME = "state.json"
 
@@ -108,13 +107,11 @@ def normalize_loaded_state(raw: Dict[str, Any], fallback_root: Optional[str] = N
             base["card_builder"]["cards"] = cb["cards"]
         elif isinstance(raw.get("cards"), list):
             base["card_builder"]["cards"] = raw["cards"]
-        for card in base["card_builder"]["cards"]:
-            migrate_card_frame_paths(card)
         if isinstance(cb.get("ready_ids"), list):
             base["card_builder"]["ready_ids"] = cb["ready_ids"]
         base["card_builder"]["active_card_id"] = cb.get("active_card_id")
         if cb.get("global_frame_style"):
-            base["card_builder"]["global_frame_style"] = migrate_style_key(cb["global_frame_style"])
+            base["card_builder"]["global_frame_style"] = cb["global_frame_style"]
         if cb.get("export_dpi"):
             base["card_builder"]["export_dpi"] = cb["export_dpi"]
         if cb.get("export_format") in ("pdf", "png"):

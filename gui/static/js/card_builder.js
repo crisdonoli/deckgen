@@ -8,8 +8,8 @@ import {
   setGlobalLoading,
   showToast,
 } from './modules/workspace_client.js?v=21';
-import { CropMaskModal } from './modules/crop_masks.js?v=2';
-import { LayerManager } from './modules/layer_manager.js?v=27';
+import { CropMaskModal, loadImageElement } from './modules/crop_masks.js?v=2';
+import { LayerManager, renderProjectFace } from './modules/layer_manager.js?v=28';
 
 initThemeAndNavbar('card-builder');
 
@@ -39,6 +39,8 @@ const ctx = canvas.getContext('2d');
 
 let layerManager = null;
 let cropModal = null;
+
+const state = { project: null, faceIndex: 0, faces: {}, dirty: false };
 
 function toSameOriginUrl(src) {
   if (!src) return '';
@@ -3006,6 +3008,12 @@ function bindChangeArtModal() {
   };
 
   function selectArt(url, artist) {
+    if (pendingProjectArt) {
+      pendingProjectArt = false;
+      modal.classList.remove('open');
+      applyProjectArt(url);
+      return;
+    }
     const card = getActiveCard();
     if (!card) return;
     card.custom_art_data = url.startsWith('data:') ? url : '';
@@ -3230,8 +3238,263 @@ function bindChangeArtModal() {
   });
 }
 
+let pendingProjectArt = false;
+
+const PROJECT_TEXT_FIELDS = {
+  'cb-field-name': 'title',
+  'cb-field-mana': 'mana_cost',
+  'cb-field-type': 'type_line',
+  'cb-field-oracle': 'oracle_text',
+  'cb-field-pt': 'pt',
+  'cb-field-artist': 'collector_info',
+};
+
+function currentProjectFace() {
+  const faces = state.project?.faces || [];
+  return faces.find((f) => f.face_index === state.faceIndex) || faces[0] || null;
+}
+
+function projectFaceEntry(face, key) {
+  face.text_layers = face.text_layers || {};
+  if (!face.text_layers[key]) face.text_layers[key] = { text: '', bounds: null };
+  return face.text_layers[key];
+}
+
+function projectFaceValue(face, key) {
+  const entry = face?.text_layers?.[key];
+  if (!entry) return '';
+  if (key === 'pt') return [entry.power, entry.toughness].filter(Boolean).join('/');
+  if (key === 'collector_info') return entry.artist || '';
+  return entry.text || '';
+}
+
+function readProjectTextPanels(face) {
+  if (!face) return null;
+  for (const [id, key] of Object.entries(PROJECT_TEXT_FIELDS)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const entry = projectFaceEntry(face, key);
+    if (key === 'pt') {
+      const [power, toughness] = el.value.split('/');
+      entry.power = (power || '').trim() || null;
+      entry.toughness = (toughness || '').trim() || null;
+    } else if (key === 'collector_info') {
+      entry.artist = el.value.trim() || null;
+    } else {
+      entry.text = el.value;
+    }
+  }
+  return face;
+}
+
+function populateProjectTextPanels(face) {
+  if (!face) return;
+  for (const [id, key] of Object.entries(PROJECT_TEXT_FIELDS)) {
+    const el = document.getElementById(id);
+    if (el) el.value = projectFaceValue(face, key);
+  }
+}
+
+function syncProjectFaceSelect() {
+  const sel = document.getElementById('cb-sf-face');
+  if (!sel) return;
+  const faces = state.project?.faces || [];
+  sel.innerHTML = faces
+    .map((f) => `<option value="${f.face_index}">Cara ${(f.face_index ?? 0) + 1}${f.face_ref ? ` — ${f.face_ref}` : ''}</option>`)
+    .join('');
+  sel.value = String(state.faceIndex);
+}
+
+async function showProjectFace(faceIndex) {
+  state.faceIndex = faceIndex;
+  const face = currentProjectFace();
+  populateProjectTextPanels(face);
+  const sel = document.getElementById('cb-sf-face');
+  if (sel) sel.value = String(state.faceIndex);
+  if (!face) return;
+  const canvasEl = document.getElementById('cb-project-canvas');
+  if (canvasEl) await renderProjectFace(face, canvasEl);
+}
+
+function rememberProjectFaceEdits() {
+  const face = currentProjectFace();
+  if (!face) return;
+  readProjectTextPanels(face);
+  state.faces[face.face_index ?? 0] = face.text_layers;
+  state.dirty = true;
+}
+
+async function switchProjectFace(faceIndex) {
+  const next = Number(faceIndex);
+  if (!state.project || Number.isNaN(next) || next === state.faceIndex) return;
+  rememberProjectFaceEdits();
+  await showProjectFace(next);
+}
+
+async function importFromScryfall() {
+  const statusEl = document.getElementById('cb-sf-status');
+  const errorEl = document.getElementById('cb-sf-error');
+  if (errorEl) errorEl.style.display = 'none';
+  if (statusEl) statusEl.textContent = 'Importing from Scryfall...';
+  const faceIndex = Number(document.getElementById('cb-sf-face')?.value || 0);
+  const rawJson = (document.getElementById('cb-sf-json')?.value || '').trim();
+  const payload = {
+    card: rawJson ? JSON.parse(rawJson) : null,
+    url: (document.getElementById('cb-sf-url')?.value || '').trim(),
+    name: (document.getElementById('cb-sf-name')?.value || '').trim(),
+    set: (document.getElementById('cb-sf-set')?.value || '').trim(),
+    face_index: faceIndex,
+    showcase_style_override: (document.getElementById('cb-sf-showcase')?.value || '').trim(),
+  };
+  let resp;
+  try {
+    resp = await fetch('/api/card-builder/import-scryfall', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    if (errorEl) { errorEl.textContent = String(err); errorEl.style.display = 'block'; }
+    if (statusEl) statusEl.textContent = '';
+    return;
+  }
+  if (!resp.ok) {
+    const detail = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
+    if (errorEl) { errorEl.textContent = detail.detail || `HTTP ${resp.status}`; errorEl.style.display = 'block'; }
+    if (statusEl) statusEl.textContent = '';
+    return;
+  }
+  const project = await resp.json();
+  const edits = state.faces || {};
+  state.project = project;
+  state.faces = {};
+  (project.faces || []).forEach((face) => {
+    const saved = edits[face.face_index ?? 0];
+    face.text_layers = face.text_layers || {};
+    if (saved) {
+      Object.entries(saved).forEach(([key, entry]) => {
+        face.text_layers[key] = { ...(face.text_layers[key] || {}), ...entry };
+      });
+    }
+    state.faces[face.face_index ?? 0] = face.text_layers;
+  });
+  state.faceIndex = (project.faces || []).some((f) => f.face_index === faceIndex) ? faceIndex : (project.faces?.[0]?.face_index ?? 0);
+  state.dirty = false;
+  syncProjectFaceSelect();
+  await showProjectFace(state.faceIndex);
+  const warnings = [...(project.warnings || []), ...(project.faces || []).flatMap((f) => f.warnings || [])];
+  if (statusEl) statusEl.textContent = warnings.length ? `Imported. Warnings: ${warnings.join(', ')}` : 'Imported.';
+  document.getElementById('cb-sf-import-modal')?.classList.remove('open');
+}
+
+async function exportCard() {
+  const errorEl = document.getElementById('cb-sf-error');
+  if (!state.project) return;
+  const resp = await fetch('/api/card-builder/export', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: state.project.project_id, face_index: state.faceIndex }),
+  });
+  if (resp.status !== 200) {
+    const detail = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
+    if (errorEl) { errorEl.textContent = detail.detail || `HTTP ${resp.status}`; errorEl.style.display = 'block'; }
+    return;
+  }
+  const blob = await resp.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${state.project.name || state.project.project_id}-face${state.faceIndex}.png`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function applyProjectArt(url) {
+  const face = currentProjectFace();
+  if (!face || !url) return;
+  face.art_layer = { ...(face.art_layer || {}), url };
+  state.dirty = true;
+  const canvasEl = document.getElementById('cb-project-canvas');
+  if (canvasEl) await renderProjectFace(face, canvasEl);
+}
+
+async function upscaleDataUrl(dataUrl, factor) {
+  const img = await loadImageElement(dataUrl);
+  const target = document.createElement('canvas');
+  target.width = img.naturalWidth * factor;
+  target.height = img.naturalHeight * factor;
+  const targetCtx = target.getContext('2d');
+  targetCtx.imageSmoothingEnabled = true;
+  targetCtx.imageSmoothingQuality = 'high';
+  targetCtx.drawImage(img, 0, 0, target.width, target.height);
+  return target.toDataURL('image/png');
+}
+
+function openArtMenu() {
+  document.getElementById('cb-art-menu')?.remove();
+  const menu = document.createElement('div');
+  menu.id = 'cb-art-menu';
+  menu.style.cssText = 'position:fixed; z-index:9999; top:110px; left:50%; transform:translateX(-50%); background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); padding:10px; display:flex; flex-direction:column; gap:8px; min-width:230px; box-shadow:0 12px 30px rgba(0,0,0,0.35);';
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/png,image/jpeg,image/webp';
+  fileInput.hidden = true;
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    const raw = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.readAsDataURL(file);
+    });
+    const factor = Number(document.getElementById('cb-ca-upscale')?.value || 1);
+    await applyProjectArt(factor > 1 ? await upscaleDataUrl(raw, factor) : raw);
+    menu.remove();
+  });
+  const uploadBtn = document.createElement('button');
+  uploadBtn.type = 'button';
+  uploadBtn.className = 'btn btn-sm';
+  uploadBtn.textContent = 'Upload image';
+  uploadBtn.addEventListener('click', () => fileInput.click());
+  const searchBtn = document.createElement('button');
+  searchBtn.type = 'button';
+  searchBtn.className = 'btn btn-sm';
+  searchBtn.textContent = 'Search art library';
+  searchBtn.addEventListener('click', () => {
+    pendingProjectArt = true;
+    menu.remove();
+    document.getElementById('cb-change-art-btn')?.click();
+  });
+  const upscaleBtn = document.createElement('button');
+  upscaleBtn.type = 'button';
+  upscaleBtn.className = 'btn btn-sm';
+  upscaleBtn.textContent = 'Upscale current art';
+  upscaleBtn.addEventListener('click', async () => {
+    const face = currentProjectFace();
+    const factor = Number(document.getElementById('cb-ca-upscale')?.value || 1);
+    if (face?.art_layer?.url && factor > 1) await applyProjectArt(await upscaleDataUrl(face.art_layer.url, factor));
+    menu.remove();
+  });
+  menu.append(uploadBtn, searchBtn, upscaleBtn, fileInput);
+  document.body.appendChild(menu);
+}
+
+function bindProjectPanels() {
+  document.getElementById('cb-scryfall-import-btn')?.addEventListener('click', () => {
+    const statusEl = document.getElementById('cb-sf-status');
+    const errorEl = document.getElementById('cb-sf-error');
+    if (statusEl) statusEl.textContent = '';
+    if (errorEl) errorEl.style.display = 'none';
+    syncProjectFaceSelect();
+    document.getElementById('cb-sf-import-modal')?.classList.add('open');
+  });
+  document.getElementById('cb-sf-import')?.addEventListener('click', importFromScryfall);
+  document.getElementById('cb-sf-face')?.addEventListener('change', (e) => switchProjectFace(e.target.value));
+  document.getElementById('cb-export-single-png-btn')?.addEventListener('click', exportCard);
+  document.getElementById('cb-replace-art-btn')?.addEventListener('click', openArtMenu);
+}
+
 (async function init() {
-  if (document.fonts) {
+  if (document.fonts && document.fonts.ready) {
     await Promise.allSettled([
       document.fonts.load('24px Mana'),
       document.fonts.load('24px Keyrune'),
@@ -3294,6 +3557,7 @@ function bindChangeArtModal() {
 
   bindDetailEvents();
   bindChangeArtModal();
+  bindProjectPanels();
   renderLists();
 
   document.getElementById('nav-save-state-btn')?.addEventListener('click', () => persistState(false));

@@ -25,7 +25,12 @@ _PROJECT_ROOT = os.path.abspath(os.path.join(_GUI_DIR, ".."))
 _ROOT_ASSETS = os.path.join(_PROJECT_ROOT, "assets")
 _GUI_ASSETS = os.path.join(_GUI_DIR, "assets")
 
-ASSETS_DIR = _ROOT_ASSETS if os.path.isdir(os.path.join(_ROOT_ASSETS, "mana-master")) else _GUI_ASSETS
+if os.path.isdir(os.path.join(_ROOT_ASSETS, "resources")):
+    ASSETS_DIR = _ROOT_ASSETS
+elif os.path.isdir(_GUI_ASSETS):
+    ASSETS_DIR = _GUI_ASSETS
+else:
+    ASSETS_DIR = _ROOT_ASSETS
 # Frame templates live in assets/Templates/<style>/; a style key is "Templates/<style>".
 TEMPLATES_GROUP = "Templates"
 DEFAULT_STYLE_KEY = f"{TEMPLATES_GROUP}/normal"

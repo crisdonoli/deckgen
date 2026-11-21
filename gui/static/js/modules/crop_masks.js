@@ -218,3 +218,56 @@ export class CropMaskModal {
     if (this.onApply) this.onApply(dataUrl, this.maskType);
   }
 }
+
+export function loadImageElement(src) {
+  return new Promise((resolve) => {
+    if (!src) return resolve(null);
+    const img = new Image();
+    if (!/^data:/i.test(src)) img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+export function applyMaskToCanvas(canvas, maskImage) {
+  if (!canvas || !maskImage) return canvas;
+  const aux = document.createElement('canvas');
+  aux.width = canvas.width;
+  aux.height = canvas.height;
+  const auxCtx = aux.getContext('2d');
+  auxCtx.drawImage(maskImage, 0, 0, canvas.width, canvas.height);
+  const ctx = canvas.getContext('2d');
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(aux, 0, 0);
+  ctx.restore();
+  return canvas;
+}
+
+// zone: {x,y,w,h} in absolute canvas coordinates; transform: {x,y,scale,rotation}
+export function drawArtInto(targetCtx, artImage, zone, transform = {}) {
+  if (!artImage || !zone) return;
+  const scale = Math.max(zone.w / artImage.width, zone.h / artImage.height) * (transform.scale || 1);
+  const dw = artImage.width * scale;
+  const dh = artImage.height * scale;
+  targetCtx.save();
+  targetCtx.beginPath();
+  targetCtx.rect(zone.x, zone.y, zone.w, zone.h);
+  targetCtx.clip();
+  if (transform.rotation) {
+    targetCtx.translate(zone.x + zone.w / 2 + (transform.x || 0), zone.y + zone.h / 2 + (transform.y || 0));
+    targetCtx.rotate((transform.rotation * Math.PI) / 180);
+    targetCtx.drawImage(artImage, -dw / 2, -dh / 2, dw, dh);
+  } else {
+    targetCtx.drawImage(
+      artImage,
+      zone.x + (zone.w - dw) / 2 + (transform.x || 0),
+      zone.y + (zone.h - dh) / 2 + (transform.y || 0),
+      dw,
+      dh
+    );
+  }
+  targetCtx.restore();
+}
+

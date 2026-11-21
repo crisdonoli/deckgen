@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Tutorial - DeckGen Studio</title>
+  <link rel="stylesheet" href="/static/css/main.css?v=32">
+  <script type="module">
+    import { initThemeAndNavbar, loadActiveWorkspaceState } from '/static/js/modules/workspace_client.js';
+    initThemeAndNavbar('tutorial');
+    loadActiveWorkspaceState();
+  </script>
+</head>
+<body>
+  $navbar
+  <main class="tutorial-container">
+    <h1 style="margin: 0 0 6px;">User Guide — DeckGen Studio</h1>
+    <p style="color: var(--text-muted); margin: 0 0 20px;">End-to-end workflow from project setup to print-ready PDF sheet export.</p>
+
+    <section class="tutorial-step">
+      <h2>1. Projects, Root Directory & <code>state.json</code></h2>
+      <ul>
+        <li>On <strong>Home</strong>, click <strong>Create Project</strong> to link a new or existing Root Directory.</li>
+        <li>DeckGen automatically initializes <code>state.json</code> along with <code>cards/fronts</code>, <code>cards/backs</code>, <code>cards/json</code>, and <code>sheets/</code>.</li>
+        <li>Use <strong>Load Project</strong> (or the Saved Projects list) to reopen a folder or load a saved <code>state.json</code>. Only the active project is loaded into memory.</li>
+      </ul>
+    </section>
+
+    <section class="tutorial-step">
+      <h2>2. Card Builder: Importing, Global Variants & <code>Loaded</code> vs. <code>Ready</code> Lists</h2>
+      <ul>
+        <li><strong>Import cards:</strong> Upload an MTGO <code>.txt</code> decklist, single <code>.png</code> files, or an entire <code>.png</code> folder, or search by card name (HD local JSONs first with Scryfall fallback).</li>
+        <li><strong>Workflow lists:</strong> Imported cards appear in <strong>Loaded Cards</strong>. Check <strong>Ready</strong> on finished cards to move them to <strong>Ready to Export</strong> (uncheck anytime to keep editing).</li>
+        <li><strong>Safe editing:</strong> Click any card to open the detail editor and click <strong>← Back</strong> to return to the lists with all edits saved to <code>state.json</code>.</li>
+        <li><strong>Global variants:</strong> Pick a frame style and click <strong>Apply to entire library</strong> to update all loaded cards at once.</li>
+      </ul>
+    </section>
+
+    <section class="tutorial-step">
+      <h2>3. Template Crop Masks, Layers & Adjustments</h2>
+      <ul>
+        <li><strong>Change Art:</strong> Opens a tabbed modal for <em>HD JSONs</em>, <em>Scryfall</em>, or <em>Upload Image</em> with visual previews.</li>
+        <li><strong>Template Crop Masks:</strong> In <strong>✂ Crop Art</strong>, choose <em>Classic Art Box</em>, <em>Extended Art (Angled)</em>, <em>Circular / Oval Vignette</em>, or <em>Full Art / Saga</em>. Zoom and pan; the output preserves mask geometry and alpha.</li>
+        <li><strong>Independent Layer Manager:</strong> Drag any layer (<code>crown</code>, <code>pinlines</code>, <code>art</code>, etc.) independently; a blue drop indicator shows where it will land.</li>
+        <li><strong>Brightness & Background:</strong> Adjust artwork <strong>Brightness</strong>, customize the <strong>Background Color</strong>, or add translucent background boxes for full-art cards.</li>
+      </ul>
+    </section>
+
+    <section class="tutorial-step">
+      <h2>4. Deck Generator: Ribbon UI, Individual Scaling & Background Conversion</h2>
+      <ul>
+        <li><strong>Unified Ribbon Bar:</strong> Configure source folder, paper (A3/A4/A4-3), orientation, cut marks, and view mode (<strong>Both</strong>, <strong>Only Fronts</strong>, or <strong>Only Backs</strong>) from one toolbar.</li>
+        <li><strong>Dual Preview & Individual Scale:</strong> Page through Fronts and Backs independently. Click any card slot on the sheet to adjust its <strong>individual scale</strong>.</li>
+        <li><strong>Automatic background conversion:</strong> Selecting a folder with <code>.png</code>/<code>.jpg</code> images automatically converts them to PDF in Python in the background.</li>
+        <li><strong>Collision-safe export:</strong> Click <strong>Export Sheet</strong> and pick your DPI. If the destination exists, choose to <strong>Overwrite</strong> or create a sequential version (<code>-1</code>, <code>-2</code>, etc.).</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

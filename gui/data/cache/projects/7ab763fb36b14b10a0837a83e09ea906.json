@@ -1,0 +1,249 @@
+{
+  "project_id": "7ab763fb36b14b10a0837a83e09ea906",
+  "created_at": "2026-11-21T23:39:48.325231+00:00",
+  "name": "Lightning Bolt",
+  "set": "msc",
+  "collector_number": "806",
+  "canvas": {
+    "width": 1500,
+    "height": 2100
+  },
+  "faces": [
+    {
+      "face_index": null,
+      "face_ref": "Lightning Bolt",
+      "taxonomy": {
+        "frame": "2015",
+        "layout": "normal",
+        "structural_type_override": "standard",
+        "box_variant": "regular",
+        "frame_effects": [
+          "showcase"
+        ],
+        "crown_style": "none",
+        "has_nickname": false,
+        "border_color": "black",
+        "corner_cut": "modern_radius",
+        "frame_texture_material": "red_volcanic",
+        "color_blend_mode": "monocolor",
+        "showcase_style": "none",
+        "_trace": {
+          "frame": {
+            "section": "frame_mapping",
+            "rule": "2015",
+            "condition": null,
+            "fork_directories": [
+              "img/frames/m15/new/",
+              "img/frames/m15/regular/"
+            ]
+          },
+          "layout": {
+            "section": "layout_mapping",
+            "rule": "normal",
+            "condition": null,
+            "fork_directories": [
+              "img/frames/m15/new/"
+            ]
+          },
+          "structural_type_override": {
+            "section": "structural_type_override_mapping",
+            "rule": 3,
+            "condition": "default",
+            "fork_directories": []
+          },
+          "box_variant": {
+            "section": "box_variant_mapping",
+            "rule": null,
+            "condition": null,
+            "fork_directories": []
+          },
+          "frame_effects": {
+            "section": "frame_effects_and_finish_mapping",
+            "rule": [
+              "universes_beyond"
+            ],
+            "condition": null,
+            "fork_directories": [
+              "img/frames/m15/new/ub/",
+              "img/frames/m15/ub/regular/"
+            ]
+          },
+          "crown_style": {
+            "section": "crown_style_mapping",
+            "rule": 0,
+            "condition": "'legendary' not in frame_effects",
+            "fork_directories": []
+          },
+          "has_nickname": {
+            "section": "has_nickname_mapping",
+            "rule": "is_null",
+            "condition": null,
+            "fork_directories": []
+          },
+          "border_color": {
+            "section": "border_color_mapping",
+            "rule": "black",
+            "condition": null,
+            "fork_directories": []
+          },
+          "corner_cut": {
+            "section": "corner_cut_mapping",
+            "rule": "modern_radius",
+            "condition": "default"
+          },
+          "frame_texture_material": {
+            "section": "texture_and_color_blend_mapping",
+            "rule": 11,
+            "condition": "colors == ['R']"
+          },
+          "color_blend_mode": {
+            "section": "texture_and_color_blend_mapping",
+            "rule": 11,
+            "condition": "colors == ['R']"
+          },
+          "showcase_style": {
+            "section": "showcase_style_mapping",
+            "rule": null,
+            "condition": null,
+            "fork_directories": []
+          },
+          "frame_dir_set": {
+            "directories": [
+              "img/frames/m15/new/"
+            ],
+            "warning": null
+          }
+        }
+      },
+      "frame_stack": [
+        {
+          "z_index": 10,
+          "asset_role": "base_frame",
+          "id": "eef4db0db1ceef43",
+          "filename": "eef4db0db1ceef43.png",
+          "url": "/assets/resources/frames/eef4db0db1ceef43.png"
+        },
+        {
+          "z_index": 20,
+          "asset_role": "mask",
+          "id": "ea64bc2ab0210a43",
+          "filename": "ea64bc2ab0210a43.png",
+          "url": "/assets/resources/frames/ea64bc2ab0210a43.png"
+        },
+        {
+          "z_index": 21,
+          "asset_role": "mask",
+          "id": "00e0ea9f113dc0e8",
+          "filename": "00e0ea9f113dc0e8.png",
+          "url": "/assets/resources/frames/00e0ea9f113dc0e8.png"
+        },
+        {
+          "z_index": 22,
+          "asset_role": "mask",
+          "id": "54c95f26e579ac8e",
+          "filename": "54c95f26e579ac8e.png",
+          "url": "/assets/resources/frames/54c95f26e579ac8e.png"
+        },
+        {
+          "z_index": 60,
+          "asset_role": "border",
+          "id": "dd37f7af9151e955",
+          "filename": "dd37f7af9151e955.png",
+          "url": "/assets/resources/frames/dd37f7af9151e955.png"
+        },
+        {
+          "z_index": 70,
+          "asset_role": "other",
+          "id": "4d82f3272976dc05",
+          "filename": "4d82f3272976dc05.png",
+          "url": "/assets/resources/frames/4d82f3272976dc05.png"
+        },
+        {
+          "z_index": 80,
+          "asset_role": "pinline",
+          "id": "abaa0883ebc63353",
+          "filename": "abaa0883ebc63353.png",
+          "url": "/assets/resources/frames/abaa0883ebc63353.png"
+        }
+      ],
+      "art_layer": {
+        "url": "/api/card-builder/asset/46fa4c1e13dfb3f6aec7b835370b9c48e51cbc64.jpg",
+        "transform": {
+          "x": 68,
+          "y": 218,
+          "scale": 1.0,
+          "rotation": 0
+        },
+        "bounds": {
+          "x": 68,
+          "y": 218,
+          "w": 1364,
+          "h": 954
+        },
+        "source_original": "https://cards.scryfall.io/art_crop/front/7/6/7673784e-db4b-43a1-8d55-1bb9fc1e284f.jpg?1783903008"
+      },
+      "text_layers": {
+        "title": {
+          "x": 112,
+          "y": 180,
+          "max_w": 980
+        },
+        "mana_cost": {
+          "x": 1384,
+          "y": 176
+        },
+        "type_line": {
+          "x": 112,
+          "y": 1258,
+          "max_w": 1100
+        },
+        "oracle_text": {
+          "x": 112,
+          "y": 1326,
+          "w": 1276,
+          "h": 606
+        },
+        "flavor_text": {
+          "x": 112,
+          "y": 1326,
+          "w": 1276,
+          "h": 606
+        },
+        "pt": {
+          "power": null,
+          "toughness": null,
+          "box": {
+            "x": 1160,
+            "y": 1868,
+            "w": 270,
+            "h": 142
+          },
+          "text": {
+            "x": 1296,
+            "y": 1940
+          }
+        },
+        "collector_info": {
+          "set": "msc",
+          "collector_number": "806",
+          "rarity": "uncommon",
+          "artist": "Milivoj Ćeran",
+          "lang": "en",
+          "box": {
+            "x": 94,
+            "y": 2044
+          }
+        }
+      },
+      "warnings": [
+        "substituted:universes_beyond->showcase",
+        "mask_dir:img/frames/m15/new",
+        "pinline_dir:img/frames/m15/new/extended"
+      ]
+    }
+  ],
+  "set_symbol": {
+    "url": "/api/card-builder/asset/9ed8c29c0f2fd5d999bcc1a14eba80344b7a4824.svg"
+  },
+  "warnings": []
+}

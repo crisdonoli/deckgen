@@ -1,4 +1,5 @@
 import { iconSvg } from './icons.js?v=1';
+import { applyMaskToCanvas, drawArtInto, loadImageElement } from './crop_masks.js?v=2';
 
 const LAYER_LABELS = {
   background: 'Frame',
@@ -271,4 +272,68 @@ export class LayerManager {
       this.listEl.appendChild(li);
     });
   }
+}
+
+export async function renderProjectFace(face, canvasEl, opts = {}) {
+  const size = opts.canvas || { width: 1500, height: 2100 };
+  const width = Number(size.width) || 1500;
+  const height = Number(size.height) || 2100;
+  const ctx = canvasEl.getContext('2d');
+
+  canvasEl.width = width;
+  canvasEl.height = height;
+  canvasEl.style.maxWidth = '100%';
+  canvasEl.style.height = 'auto';
+  canvasEl.style.transform = '';
+  ctx.clearRect(0, 0, width, height);
+
+  const result = { layers: 0, skipped: [] };
+  const art = face?.art_layer;
+  if (art?.url) {
+    const artImg = await loadImageElement(art.url);
+    if (artImg) {
+      drawArtInto(ctx, artImg, art.bounds || { x: 0, y: 0, w: width, h: height }, art.transform || {});
+      result.layers += 1;
+    } else {
+      result.skipped.push(art.url);
+    }
+  }
+
+  const stack = [...(face?.frame_stack || [])].sort((a, b) => (Number(a.z_index) || 0) - (Number(b.z_index) || 0));
+  for (const layer of stack) {
+    if (!layer?.url) continue;
+    const img = await loadImageElement(layer.url);
+    if (!img) {
+      result.skipped.push(layer.url);
+      continue;
+    }
+    const maskSrc = layer.mask_url || layer.mask_id;
+    let source = img;
+    let sourceWidth = width;
+    let sourceHeight = height;
+    if (maskSrc) {
+      const maskImg = await loadImageElement(maskSrc);
+      if (!maskImg) {
+        result.skipped.push(layer.url);
+        continue;
+      }
+      const scratch = document.createElement('canvas');
+      scratch.width = width;
+      scratch.height = height;
+      const scratchCtx = scratch.getContext('2d');
+      scratchCtx.drawImage(img, 0, 0, width, height);
+      applyMaskToCanvas(scratch, maskImg);
+      source = scratch;
+      sourceWidth = width;
+      sourceHeight = height;
+    }
+    ctx.save();
+    ctx.globalAlpha = layer.opacity ?? 1;
+    if (layer.blend) ctx.globalCompositeOperation = layer.blend;
+    ctx.drawImage(source, 0, 0, sourceWidth, sourceHeight);
+    ctx.restore();
+    result.layers += 1;
+  }
+
+  return result;
 }

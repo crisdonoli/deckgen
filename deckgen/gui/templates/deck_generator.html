@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Deck Generator - DeckGen Studio</title>
+  <link rel="stylesheet" href="/static/css/main.css?v=32">
+  <script type="module" src="/static/js/deck_generator.js?v=26"></script>
+</head>
+<body>
+  $navbar
+
+  <main class="dg-ribbon-shell">
+    <!-- Office Ribbon Top Toolbar -->
+    <section class="ribbon-bar">
+      <div class="ribbon-group">
+        <div class="ribbon-controls">
+          <button type="button" id="dg-pick-source-btn" class="btn"><i data-ico="folder"></i> Fronts Folder</button>
+          <span id="dg-source-label" style="font-size:11px; color:var(--text-muted); max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">cards/fronts</span>
+          <button type="button" id="dg-pick-back-btn" class="btn">🃏 Set Back (PDF/PNG)</button>
+          <input type="file" id="dg-back-file-input" accept=".pdf,.png,.jpg,.jpeg,.webp" hidden>
+          <span id="dg-back-label" style="font-size:11px; color:var(--text-muted); max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">None</span>
+          <label class="row" style="font-size:12px; cursor:pointer;" title="Double-faced cards: print the second face on the back of the first instead of as its own front card">
+            <input type="checkbox" id="dg-dfc-backs">
+            <span>DFC back faces as backs</span>
+          </label>
+        </div>
+        <div class="ribbon-group-title">Fronts &amp; Single Back</div>
+      </div>
+
+      <div class="ribbon-group">
+        <div class="ribbon-controls">
+          <select id="dg-paper" class="select" style="width:76px;">
+            <option value="a4" selected>A4</option>
+            <option value="a3">A3</option>
+            <option value="a4-3">A4-3</option>
+          </select>
+          <label class="row" style="font-size:12px; cursor:pointer;">
+            <input type="checkbox" id="dg-landscape">
+            <span>Landscape</span>
+          </label>
+          <label class="row" style="font-size:12px;">
+            <span>Gap (mm):</span>
+            <input type="number" id="dg-spacing" class="input" value="0" min="0" max="5" step="0.5" style="width:56px;">
+          </label>
+        </div>
+        <div class="ribbon-group-title">Paper</div>
+      </div>
+
+      <div class="ribbon-group">
+        <div class="ribbon-controls">
+          <select id="dg-cut" class="select" style="width:92px;">
+            <option value="corners" selected>Corners</option>
+            <option value="full">Full</option>
+            <option value="none">None</option>
+          </select>
+          <input type="color" id="dg-cut-color" value="#ff0000" title="Cut mark color" style="width:30px; height:26px; border:1px solid var(--border); border-radius:4px; padding:0; cursor:pointer;">
+          <input type="number" id="dg-thickness" class="input" value="0.5" min="0.1" step="0.1" style="width:54px;" title="Thickness (pt)">
+          <input type="number" id="dg-mark-len" class="input" value="3.0" min="1" step="0.5" style="width:54px;" title="Mark length (mm)">
+        </div>
+        <div class="ribbon-group-title">Cut Marks</div>
+      </div>
+
+      <div class="ribbon-group">
+        <div class="ribbon-controls">
+          <select id="dg-view-mode" class="select" style="width:155px;">
+            <option value="both" selected>Both (Front &amp; Back)</option>
+            <option value="fronts">Only Fronts</option>
+            <option value="backs">Only Backs</option>
+          </select>
+          <label class="row" style="font-size:12px; cursor:pointer;">
+            <input type="checkbox" id="dg-duplex-flip" checked>
+            <span>Duplex Mirror</span>
+          </label>
+        </div>
+        <div class="ribbon-group-title">View</div>
+      </div>
+
+      <div class="ribbon-group">
+        <div class="ribbon-controls">
+          <span id="dg-selected-slot-label" style="font-size:11.5px; color:var(--text-muted);">Click a card</span>
+          <input type="range" id="dg-slot-scale" min="0.75" max="1.25" step="0.01" value="1.0" style="width:95px;" disabled>
+          <span id="dg-slot-scale-val" style="font-size:11.5px; width:36px;">1.00×</span>
+          <button type="button" id="dg-slot-scale-reset" class="btn btn-sm" disabled>Reset</button>
+        </div>
+        <div class="ribbon-group-title">Individual Scale</div>
+      </div>
+
+      <div class="ribbon-group">
+        <div class="ribbon-controls">
+          <button type="button" id="dg-export-sheet-btn" class="btn btn-primary"><i data-ico="printer"></i> Export Sheet</button>
+        </div>
+        <div class="ribbon-group-title">Export</div>
+      </div>
+    </section>
+
+    <!-- Dual Preview Area -->
+    <section id="dg-dual-preview" class="dg-dual-preview">
+      <!-- Fronts Pane -->
+      <div id="dg-pane-fronts" class="dg-pane">
+        <div class="row-between">
+          <strong>Fronts</strong>
+          <div class="row" style="gap:6px;">
+            <button type="button" id="dg-front-prev" class="btn btn-sm">◀</button>
+            <input type="range" id="dg-front-slider" min="0" max="0" value="0" style="width:110px;">
+            <span id="dg-front-page-label" style="font-size:12px;">1 / 1</span>
+            <button type="button" id="dg-front-next" class="btn btn-sm">▶</button>
+          </div>
+        </div>
+        <div class="dg-sheet-stage" id="dg-front-stage">
+          <img id="dg-front-img" alt="Fronts Preview">
+          <div id="dg-front-hitboxes"></div>
+        </div>
+      </div>
+
+      <!-- Backs Pane -->
+      <div id="dg-pane-backs" class="dg-pane">
+        <div class="row-between">
+          <strong>Backs</strong>
+          <div class="row" style="gap:6px;">
+            <button type="button" id="dg-back-prev" class="btn btn-sm">◀</button>
+            <input type="range" id="dg-back-slider" min="0" max="0" value="0" style="width:110px;">
+            <span id="dg-back-page-label" style="font-size:12px;">1 / 1</span>
+            <button type="button" id="dg-back-next" class="btn btn-sm">▶</button>
+          </div>
+        </div>
+        <div class="dg-sheet-stage" id="dg-back-stage">
+          <img id="dg-back-img" alt="Backs Preview">
+          <div id="dg-back-hitboxes"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Export DPI Popup (No folder picker!) -->
+  <div id="dg-export-modal" class="modal-overlay">
+    <div class="modal-content" style="width: 400px; max-width: 94vw;">
+      <div class="modal-header">
+        <span><i data-ico="printer"></i> Export Sheets to PDF</span>
+        <button type="button" class="modal-close" id="dg-export-close">&times;</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:12px;">
+        <p style="margin:0; font-size:12px; color:var(--text-muted);">
+          Sheets will be exported automatically into your active project's <code>sheets/</code> folder.
+        </p>
+        <div>
+          <label class="label" style="margin-top:0;">Face to export</label>
+          <select id="dg-export-face" class="select">
+            <option value="fronts">Fronts</option>
+            <option value="backs">Backs</option>
+          </select>
+        </div>
+        <div>
+          <label class="label" style="margin-top:0;">Resolution (DPI)</label>
+          <select id="dg-export-dpi" class="select">
+            <option value="300" selected>300 DPI (Fast standard)</option>
+            <option value="600">600 DPI (High quality)</option>
+            <option value="1200">1200 DPI (Maximum sharpness)</option>
+          </select>
+        </div>
+        <div id="dg-export-progress" style="display:none; font-size:12px; color:var(--accent);">Processing and converting in background...</div>
+        <div class="row" style="justify-content:flex-end;">
+          <button type="button" id="dg-export-cancel" class="btn">Cancel</button>
+          <button type="button" id="dg-export-confirm" class="btn btn-primary">Generate PDF</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Front Card Custom Back Pop-Up (Flip / DFC Cards) -->
+  <div id="dg-front-card-modal" class="modal-overlay">
+    <div class="modal-content" style="width: 720px; max-width: 95vw;">
+      <div class="modal-header">
+        <span id="dg-fc-title">Card Options</span>
+        <button type="button" class="modal-close" id="dg-fc-close">&times;</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
+        <div class="row-between" style="flex-wrap:wrap; gap:8px;">
+          <div style="padding:6px 10px; border:1px solid var(--border); border-radius:6px; background:var(--surface-2); font-size:12px;">
+            Current Back: <strong id="dg-fc-back-status">Generic Back</strong>
+          </div>
+          <div class="row" style="gap:6px; flex-wrap:wrap;">
+            <input type="file" id="dg-fc-back-input" accept=".pdf,.png,.jpg,.jpeg,.webp" hidden>
+            <button type="button" id="dg-fc-reset-back-btn" class="btn btn-sm">Use Generic Back</button>
+            <button type="button" id="dg-fc-upload-back-btn" class="btn btn-primary btn-sm"><i data-ico="upload"></i> Upload from Computer (PDF/PNG)</button>
+          </div>
+        </div>
+        <div>
+          <div class="row-between" style="margin-bottom:6px;">
+            <span style="font-size:12px; font-weight:600;">Project Cards (click a card to set as Custom Back)</span>
+            <input type="text" id="dg-fc-filter" class="input" placeholder="Filter project cards..." style="width:210px;">
+          </div>
+          <div id="dg-fc-project-grid" class="art-results-grid" style="grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); max-height:48vh;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
