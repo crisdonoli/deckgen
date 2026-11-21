@@ -229,10 +229,35 @@ def auto_select_frame_components(card_data: dict, style_key: str = DEFAULT_STYLE
     }
 
 
-def extract_scryfall_card_payload(raw_card: dict, count: int = 1, catalog: Optional[dict] = None, style_key: str = DEFAULT_STYLE_KEY) -> dict:
+# Scryfall layouts whose faces are printed on separate sides: each face becomes its own card.
+DOUBLE_FACED_LAYOUTS = ("transform", "modal_dfc")
+
+
+def is_double_faced(raw_card: dict) -> bool:
+    return raw_card.get("layout") in DOUBLE_FACED_LAYOUTS and len(raw_card.get("card_faces") or []) >= 2
+
+
+def extract_scryfall_card_payloads(raw_card: dict, count: int = 1, catalog: Optional[dict] = None, style_key: str = DEFAULT_STYLE_KEY) -> List[dict]:
+    """One card payload per printed side: both faces of a transform/modal DFC, else a single card."""
+    if not is_double_faced(raw_card):
+        return [extract_scryfall_card_payload(raw_card, count=count, catalog=catalog, style_key=style_key)]
+    return [
+        extract_scryfall_card_payload(raw_card, count=count, catalog=catalog, style_key=style_key, face_index=i)
+        for i in range(len(raw_card["card_faces"]))
+    ]
+
+
+# Adventure cards: one printed side, the adventure spell (face 1) on the left page of the textbox.
+ADVENTURE_STYLE_KEY = f"{TEMPLATES_GROUP}/adventure"
+
+
+def extract_scryfall_card_payload(raw_card: dict, count: int = 1, catalog: Optional[dict] = None, style_key: str = DEFAULT_STYLE_KEY, face_index: int = 0) -> dict:
     faces = raw_card.get("card_faces") or []
-    face0 = faces[0] if faces else raw_card
-    image_uris = raw_card.get("image_uris") or face0.get("image_uris") or {}
+    is_adventure = raw_card.get("layout") == "adventure" and len(faces) >= 2
+    if is_adventure and os.path.isdir(os.path.join(ASSETS_DIR, ADVENTURE_STYLE_KEY)):
+        style_key = ADVENTURE_STYLE_KEY
+    face0 = faces[face_index] if face_index < len(faces) else (faces[0] if faces else raw_card)
+    image_uris = face0.get("image_uris") or raw_card.get("image_uris") or {}
     name = face0.get("name") or raw_card.get("name", "Unknown Card")
 
     # Priority 1: Check unified HD local JSON
@@ -245,7 +270,7 @@ def extract_scryfall_card_payload(raw_card: dict, count: int = 1, catalog: Optio
     payload = {
         "id": str(uuid.uuid4()),
         "name": name,
-        "official_name": raw_card.get("printed_name") or "",
+        "official_name": face0.get("printed_name") or raw_card.get("printed_name") or "",
         "mana_cost": face0.get("mana_cost") or raw_card.get("mana_cost", ""),
         "type_line": face0.get("type_line") or raw_card.get("type_line", ""),
         "oracle_text": face0.get("oracle_text") or raw_card.get("oracle_text", ""),
@@ -271,7 +296,23 @@ def extract_scryfall_card_payload(raw_card: dict, count: int = 1, catalog: Optio
         "hidden_layers": {"border": True},
         "layer_opacities": {},
         "layout": json.loads(json.dumps(DEFAULT_LAYOUT)),
+        "scryfall_layout": raw_card.get("layout") or "normal",
     }
+    if is_adventure:
+        adv = faces[1]
+        payload["adventure"] = {
+            "name": adv.get("name", ""),
+            "mana_cost": adv.get("mana_cost", ""),
+            "type_line": adv.get("type_line", ""),
+            "oracle_text": adv.get("oracle_text", ""),
+            "flavor_text": adv.get("flavor_text", ""),
+        }
+    if is_double_faced(raw_card):
+        payload["dfc"] = {
+            "full_name": raw_card.get("name", ""),
+            "face_index": face_index,
+            "face_names": [f.get("name", "") for f in faces],
+        }
     fc = auto_select_frame_components(payload, style_key=style_key, catalog=catalog)
     payload["frame_components"] = fc
     apply_style_layout(payload, style_key)

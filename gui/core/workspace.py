@@ -28,6 +28,7 @@ DEFAULT_DECK_GEN_CONFIG = {
     "card_scales": {},
     "custom_backs": {},
     "generic_back": "",
+    "dfc_backs": False,
 }
 
 
@@ -124,6 +125,11 @@ def normalize_loaded_state(raw: Dict[str, Any], fallback_root: Optional[str] = N
         for k, v in DEFAULT_DECK_GEN_CONFIG.items():
             if k in dg and dg[k] is not None:
                 base["deck_generator"][k] = dg[k]
+        scales = base["deck_generator"].get("card_scales")
+        if isinstance(scales, dict) and scales:
+            from services.deck_service import migrate_index_card_scales
+            source = base["deck_generator"].get("source_folder") or os.path.join(base["root_dir"], "cards", "fronts")
+            base["deck_generator"]["card_scales"] = migrate_index_card_scales(scales, source)
 
     return base
 

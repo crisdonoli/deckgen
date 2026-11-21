@@ -15,6 +15,7 @@ let workspaceState = null;
 let frontPage = 0;
 let backPage = 0;
 let selectedSlotIndex = null;
+let selectedScaleKey = null; // card_scales key: the front card's file name (shared by its back)
 
 function ensureDgConfig() {
   if (!workspaceState) {
@@ -53,6 +54,7 @@ function readControlsToConfig() {
   cfg.mark_len = parseFloat(document.getElementById('dg-mark-len').value) || 3.0;
   cfg.view_mode = document.getElementById('dg-view-mode').value;
   cfg.duplex_flip = document.getElementById('dg-duplex-flip').checked;
+  cfg.dfc_backs = document.getElementById('dg-dfc-backs').checked;
   return cfg;
 }
 
@@ -66,6 +68,7 @@ function applyConfigToControls(cfg) {
   document.getElementById('dg-mark-len').value = cfg.mark_len ?? 3.0;
   document.getElementById('dg-view-mode').value = cfg.view_mode || 'both';
   document.getElementById('dg-duplex-flip').checked = cfg.duplex_flip !== false;
+  document.getElementById('dg-dfc-backs').checked = Boolean(cfg.dfc_backs);
   document.getElementById('dg-back-label').textContent = cfg.generic_back ? cfg.generic_back.split('/').pop() : 'None';
   document.getElementById('dg-source-label').textContent = cfg.source_folder
     ? cfg.source_folder.split('/').pop()
@@ -100,9 +103,23 @@ function renderSlotHitboxes(containerEl, slots, face = 'fronts') {
     badge.textContent = `${slot.scale.toFixed(2)}×`;
     box.appendChild(badge);
 
+    if (slot.dfc) {
+      const isFront = slot.dfc.role === 'front';
+      const tag = document.createElement('span');
+      tag.className = 'dg-dfc-badge' + (isFront ? '' : ' is-back');
+      tag.textContent = isFront ? '⇄ Front' : '⇄ Back';
+      tag.title = isFront
+        ? `Double-faced card, front face. Back face (${slot.dfc.other}) ${slot.dfc.back_on_reverse ? 'is printed on the reverse' : 'is printed as its own front card'}.`
+        : (slot.dfc.back_on_reverse
+          ? `Double-faced card, back face of ${slot.dfc.other}.`
+          : `Double-faced card, back face of ${slot.dfc.other}, printed as its own front card. Enable "DFC back faces as backs" to print it on the reverse.`);
+      box.appendChild(tag);
+    }
+
     box.addEventListener('click', () => {
       selectedSlotIndex = slot.index;
-      const curScale = cfg.card_scales[String(slot.index)] ?? 1.0;
+      selectedScaleKey = slot.scale_key ?? String(slot.index);
+      const curScale = cfg.card_scales[selectedScaleKey] ?? 1.0;
       document.getElementById('dg-selected-slot-label').textContent = `#${slot.index + 1} ${slot.name.slice(0, 14)}`;
       const slider = document.getElementById('dg-slot-scale');
       const resetBtn = document.getElementById('dg-slot-scale-reset');
@@ -138,6 +155,7 @@ async function fetchFacePreview(face, page) {
       card_scales: cfg.card_scales,
       generic_back: cfg.generic_back || null,
       custom_backs: cfg.custom_backs || {},
+      dfc_backs: Boolean(cfg.dfc_backs),
     }),
   });
   if (!resp.ok) return null;
@@ -196,7 +214,7 @@ async function persist() {
     showToast('Configuración guardada en state.json');
   });
 
-  ['dg-paper', 'dg-landscape', 'dg-spacing', 'dg-cut', 'dg-cut-color', 'dg-thickness', 'dg-mark-len', 'dg-duplex-flip'].forEach((id) => {
+  ['dg-paper', 'dg-landscape', 'dg-spacing', 'dg-cut', 'dg-cut-color', 'dg-thickness', 'dg-mark-len', 'dg-duplex-flip', 'dg-dfc-backs'].forEach((id) => {
     document.getElementById(id).addEventListener('change', () => {
       readControlsToConfig();
       persist();
@@ -237,13 +255,13 @@ async function persist() {
     if (selectedSlotIndex === null) return;
     const val = parseFloat(e.target.value);
     document.getElementById('dg-slot-scale-val').textContent = `${val.toFixed(2)}×`;
-    ensureDgConfig().card_scales[String(selectedSlotIndex)] = val;
+    ensureDgConfig().card_scales[selectedScaleKey] = val;
   });
   scaleSlider.addEventListener('change', () => { persist(); refreshPreviews(); });
 
   document.getElementById('dg-slot-scale-reset').addEventListener('click', () => {
     if (selectedSlotIndex === null) return;
-    delete ensureDgConfig().card_scales[String(selectedSlotIndex)];
+    delete ensureDgConfig().card_scales[selectedScaleKey];
     scaleSlider.value = '1.0';
     document.getElementById('dg-slot-scale-val').textContent = '1.00×';
     persist();
@@ -282,6 +300,7 @@ async function persist() {
       card_scales: cfg.card_scales,
       generic_back: cfg.generic_back || null,
       custom_backs: cfg.custom_backs || {},
+      dfc_backs: Boolean(cfg.dfc_backs),
       collision_mode: 'check',
     };
 

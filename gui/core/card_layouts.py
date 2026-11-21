@@ -27,6 +27,12 @@ DEFAULT_LAYOUT = {
     "pt_box": {"x": 580, "y": 934, "w": 135, "h": 71},
     "pt_text": {"x": 648, "y": 970, "font_size": pt(9.2), "color": "#111111"},
     "artist": {"x": 47, "y": 1022, "font_size": pt(4.3), "color": "#ffffff"},
+    # Adventure spell (card["adventure"], only drawn for adventure cards): left page of the
+    # Templates/adventure textbox. Title bar y 661-707, dark type bar 707-757, text below.
+    "adventure_title": {"x": 60, "y": 694, "max_w": 240, "font_size": 28, "color": "#111111"},
+    "adventure_mana_cost": {"x": 362, "y": 692, "size": 26, "align": "right"},
+    "adventure_type_line": {"x": 60, "y": 742, "max_w": 290, "font_size": 25, "color": "#ffffff"},
+    "adventure_oracle_box": {"x": 58, "y": 764, "w": 306, "h": 196, "font_size": 26, "color": "#111111"},
 }
 
 # Per-style layout overrides on top of DEFAULT_LAYOUT (750x1050 canvas coordinates).
@@ -67,7 +73,13 @@ STYLE_LAYOUT_OVERRIDES: Dict[str, dict] = {
             "type_line": {"x": 150, "y": 629, "max_w": 550, "font_size": pt(7.5), "color": "#111111"},
         },
     },
-    "Templates/adventure": {"layout": {"art": {'x': 54, 'y': 117, 'w': 642, 'h': 467}}},  # Art Frame.pdf
+    "Templates/adventure": {
+        "layout": {
+            "art": {'x': 54, 'y': 117, 'w': 642, 'h': 467},  # Art Frame.pdf
+            # Main card's rules text on the right page of the book; the left page is the adventure.
+            "oracle_box": {"x": 390, "w": 303, "h": 300},
+        },
+    },
     "Templates/doublefaced-back": {"layout": {"art": {'x': 54, 'y': 117, 'w': 642, 'h': 467}}},  # Art Frame.pdf
     "Templates/doublefaced-front": {"layout": {"art": {'x': 54, 'y': 117, 'w': 642, 'h': 467}}},  # Art Frame.pdf
     # Templates/ikoria: no art frame layer

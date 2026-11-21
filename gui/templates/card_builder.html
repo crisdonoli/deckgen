@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Card Builder - DeckGen Studio</title>
-  <link rel="stylesheet" href="/static/css/main.css?v=30">
+  <link rel="stylesheet" href="/static/css/main.css?v=32">
   <link rel="stylesheet" href="/assets/mana-master/css/mana.min.css">
   <link rel="stylesheet" href="/assets/keyrune-master/css/keyrune.min.css">
   <style>
@@ -22,7 +22,7 @@
       font-style: normal;
     }
   </style>
-  <script type="module" src="/static/js/card_builder.js?v=49"></script>
+  <script type="module" src="/static/js/card_builder.js?v=52"></script>
 </head>
 <body>
   $navbar
@@ -219,6 +219,10 @@
                 <button type="button" class="cb-text-tab" data-text-tab="oracle_box">Oracle</button>
                 <button type="button" class="cb-text-tab" data-text-tab="pt_text">P/T</button>
                 <button type="button" class="cb-text-tab" data-text-tab="artist">Artist</button>
+                <button type="button" class="cb-text-tab" data-text-tab="adventure_title" data-adventure>Adv. Title</button>
+                <button type="button" class="cb-text-tab" data-text-tab="adventure_mana_cost" data-adventure>Adv. Mana</button>
+                <button type="button" class="cb-text-tab" data-text-tab="adventure_type_line" data-adventure>Adv. Type</button>
+                <button type="button" class="cb-text-tab" data-text-tab="adventure_oracle_box" data-adventure>Adv. Text</button>
               </div>
 
               <div class="cb-text-group" data-text-key="title">
@@ -341,6 +345,62 @@
                   <label class="row" style="font-size:10.5px; gap:4px;">
                     <span>Color</span>
                     <input type="color" id="cb-color-artist" value="#ffffff" style="width:26px; height:20px; border:none; background:none; cursor:pointer;">
+                  </label>
+                </div>
+              </div>
+
+              <div class="cb-text-group" data-text-key="adventure_title">
+                <label class="label">Adventure Title</label>
+                <input type="text" id="cb-field-adv-name" class="input">
+                <div class="row-between" style="margin-top:6px; gap:6px;">
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Size</span>
+                    <input type="number" class="input cb-text-size-input" data-size-key="adventure_title" min="12" max="72" style="width:54px;">
+                  </label>
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Color</span>
+                    <input type="color" id="cb-color-adv-title" value="#111111" style="width:26px; height:20px; border:none; background:none; cursor:pointer;">
+                  </label>
+                </div>
+              </div>
+
+              <div class="cb-text-group" data-text-key="adventure_mana_cost">
+                <label class="label">Adventure Mana Cost</label>
+                <input type="text" id="cb-field-adv-mana" class="input" placeholder="{1}{B}">
+                <div class="row-between" style="margin-top:6px; gap:6px;">
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Icon Size</span>
+                    <input type="number" class="input cb-text-size-input" data-size-key="adventure_mana_cost" min="14" max="64" style="width:54px;">
+                  </label>
+                </div>
+              </div>
+
+              <div class="cb-text-group" data-text-key="adventure_type_line">
+                <label class="label">Adventure Type Line</label>
+                <input type="text" id="cb-field-adv-type" class="input">
+                <div class="row-between" style="margin-top:6px; gap:6px;">
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Size</span>
+                    <input type="number" class="input cb-text-size-input" data-size-key="adventure_type_line" min="12" max="54" style="width:54px;">
+                  </label>
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Color</span>
+                    <input type="color" id="cb-color-adv-type" value="#ffffff" style="width:26px; height:20px; border:none; background:none; cursor:pointer;">
+                  </label>
+                </div>
+              </div>
+
+              <div class="cb-text-group" data-text-key="adventure_oracle_box">
+                <label class="label">Adventure Rules Text</label>
+                <textarea id="cb-field-adv-oracle" class="textarea" rows="4"></textarea>
+                <div class="row-between" style="margin-top:6px; gap:6px;">
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Size</span>
+                    <input type="number" class="input cb-text-size-input" data-size-key="adventure_oracle_box" min="12" max="48" style="width:54px;">
+                  </label>
+                  <label class="row" style="font-size:10.5px; gap:4px;">
+                    <span>Color</span>
+                    <input type="color" id="cb-color-adv-oracle" value="#111111" style="width:26px; height:20px; border:none; background:none; cursor:pointer;">
                   </label>
                 </div>
               </div>

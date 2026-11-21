@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from config import DPI, PREVIEW_CACHE_DIR, RENDER_CACHE_DIR
 from core.pdf_build import IMAGE_EXTS, build_pdf, image_to_standard_pdf
 from core.workspace import check_dir_collision, ensure_workspace_subdirs, resolve_collision_target
-from services.deck_service import build_deck_sheets
+from services.deck_service import build_deck_sheets, dfc_back_pairs
 
 router = APIRouter(prefix="/api/deck")
 
@@ -52,6 +52,8 @@ async def api_deck_preview(payload: Dict[str, Any] = Body(...)):
     card_scales = payload.get("card_scales") or {}
     generic_back = payload.get("generic_back") or None
     custom_backs = payload.get("custom_backs") or {}
+    dfc_pairs = dfc_back_pairs(root_dir)
+    dfc_as_backs = bool(payload.get("dfc_backs"))
 
     loop = asyncio.get_running_loop()
     try:
@@ -73,6 +75,8 @@ async def api_deck_preview(payload: Dict[str, Any] = Body(...)):
                 card_scales=card_scales,
                 generic_back_path=generic_back,
                 custom_backs=custom_backs,
+                dfc_pairs=dfc_pairs,
+                dfc_as_backs=dfc_as_backs,
             ),
         )
     except Exception as exc:
@@ -113,6 +117,8 @@ async def api_deck_generate(payload: Dict[str, Any] = Body(...)):
     card_scales = payload.get("card_scales") or {}
     generic_back = payload.get("generic_back") or None
     custom_backs = payload.get("custom_backs") or {}
+    dfc_pairs = dfc_back_pairs(root_dir)
+    dfc_as_backs = bool(payload.get("dfc_backs"))
     collision_mode = payload.get("collision_mode")  # None | "check" | "overwrite" | "version"
 
     export_base_name = f"{face}_{paper}"
@@ -144,6 +150,8 @@ async def api_deck_generate(payload: Dict[str, Any] = Body(...)):
                 card_scales=card_scales,
                 generic_back_path=generic_back,
                 custom_backs=custom_backs,
+                dfc_pairs=dfc_pairs,
+                dfc_as_backs=dfc_as_backs,
                 progress_cb=_set_progress,
             ),
         )

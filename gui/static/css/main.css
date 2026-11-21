@@ -291,6 +291,21 @@ details.dg-accordion:not([open]) > summary::after { transform: rotate(-90deg); }
   transition: border-color 0.15s, transform 0.1s;
 }
 .cb-grid-item:hover { border-color: var(--accent); transform: translateY(-1px); }
+/* Face tag of a double-faced card (Card Builder board) */
+.cb-dfc-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  vertical-align: 1px;
+  color: #fff;
+  background: var(--accent);
+  cursor: help;
+}
+.cb-dfc-badge.is-back { background: #7c3aed; }
 .cb-grid-del-btn {
   position: absolute;
   top: 12px;
@@ -863,6 +878,20 @@ details.dg-accordion:not([open]) > summary::after { transform: rotate(-90deg); }
   padding: 1px 4px;
   border-radius: 3px;
 }
+/* Face tag of a double-faced card on a sheet slot (same colors as .cb-dfc-badge) */
+.dg-dfc-badge {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  cursor: help;
+}
+.dg-dfc-badge.is-back { background: #7c3aed; }
 
 /* Modals & Overlays */
 .modal-overlay {

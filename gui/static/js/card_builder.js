@@ -218,7 +218,15 @@ const DEFAULT_LAYOUT = {
   oracle_box: { x: 56, y: 663, w: 638, h: 303, font_size: 30, color: '#111111' },
   pt_text: { x: 648, y: 970, font_size: 38, color: '#111111' },
   artist: { x: 47, y: 1022, font_size: 18, color: '#ffffff' },
+  // Adventure spell (card.adventure): left page of the Templates/adventure textbox.
+  adventure_title: { x: 60, y: 694, max_w: 240, font_size: 28, color: '#111111' },
+  adventure_mana_cost: { x: 362, y: 692, size: 26 },
+  adventure_type_line: { x: 60, y: 742, max_w: 290, font_size: 25, color: '#ffffff' },
+  adventure_oracle_box: { x: 58, y: 764, w: 306, h: 196, font_size: 26, color: '#111111' },
 };
+
+const ADVENTURE_KEYS = ['adventure_title', 'adventure_mana_cost', 'adventure_type_line', 'adventure_oracle_box'];
+const TEXT_KEYS = ['mana_cost', 'title', 'official_title', 'set_symbol', 'type_line', 'pt_text', 'oracle_box', 'artist', ...ADVENTURE_KEYS];
 
 let selectedElementKey = null;
 let hoveredElementKey = null;
@@ -510,6 +518,31 @@ function getInteractiveRegions(card) {
       h: L.oracle_box.h,
       resizable: true,
     });
+  }
+
+  if (card.adventure) {
+    const A = card.adventure;
+    const at = L.adventure_title;
+    regions.push({
+      key: 'adventure_title', label: 'Adventure Title',
+      x: at.x, y: at.y - at.font_size * 0.9, w: at.max_w, h: at.font_size * 1.15, resizable: true,
+    });
+    const advMana = (A.mana_cost || '').match(/\{[^}]+\}/g) || [];
+    const am = L.adventure_mana_cost;
+    const amW = Math.max(1, advMana.length) * (am.size + 5);
+    regions.push({
+      key: 'adventure_mana_cost', label: 'Adventure Mana Cost',
+      x: am.x - amW, y: am.y - am.size * 0.88, w: amW, h: am.size * 1.15, resizable: true,
+    });
+    const aty = L.adventure_type_line;
+    regions.push({
+      key: 'adventure_type_line', label: 'Adventure Type Line',
+      x: aty.x, y: aty.y - aty.font_size * 0.9, w: aty.max_w, h: aty.font_size * 1.15, resizable: true,
+    });
+    if (!L.adventure_oracle_box.hidden) {
+      const ao = L.adventure_oracle_box;
+      regions.push({ key: 'adventure_oracle_box', label: 'Adventure Text', x: ao.x, y: ao.y, w: ao.w, h: ao.h, resizable: true });
+    }
   }
 
   regions.push({
@@ -1141,6 +1174,8 @@ function drawCardForeground(octx, card) {
     color: card.layout?.oracle_box?.color || '#111111',
   });
 
+  if (card.adventure) drawAdventureText(octx, card);
+
   if (card.power !== null && card.power !== undefined && String(card.power) !== '') {
     const ptColor = card.layout?.pt_text?.color || '#111111';
     octx.save();
@@ -1162,6 +1197,34 @@ function drawCardForeground(octx, card) {
     octx.restore();
   }
 
+}
+
+// Adventure spell on the left page of the adventure textbox (card.adventure, see
+// extract_scryfall_card_payload): title + mana cost, type line, rules text.
+function drawAdventureText(octx, card) {
+  const A = card.adventure;
+  const L = ensureCardLayout(card);
+  const drawLine = (lay, text) => {
+    const color = lay.color || '#111111';
+    octx.save();
+    octx.fillStyle = color;
+    applyTextShadowIfLight(octx, color);
+    octx.font = `bold ${lay.font_size}px "BelerenLocal", Georgia, serif`;
+    octx.textAlign = 'left';
+    octx.textBaseline = 'alphabetic';
+    octx.fillText(text || '', lay.x, lay.y, lay.max_w);
+    octx.restore();
+  };
+  const manaTokens = (A.mana_cost || '').match(/\{[^}]+\}/g) || [];
+  const am = L.adventure_mana_cost;
+  // keep the title clear of the mana symbols
+  const titleLay = { ...L.adventure_title };
+  titleLay.max_w = Math.max(80, Math.min(titleLay.max_w, am.x - manaTokens.length * (am.size + 5) - titleLay.x - 8));
+  drawLine(titleLay, A.name);
+  if (A.mana_cost) drawManaCost(octx, A.mana_cost, am.x, am.y, am.size);
+  drawLine(L.adventure_type_line, A.type_line);
+  const ao = L.adventure_oracle_box;
+  if (!ao.hidden) drawRichOracleText(octx, A.oracle_text || '', A.flavor_text || '', ao);
 }
 
 function renderTextOverlayDataUrl(card, requestedScale = 4) {
@@ -1434,7 +1497,7 @@ function renderLists() {
       row.innerHTML = `
         <img class="cb-list-thumb" src="${thumbSrc}" alt="${card.name || ''}">
         <div style="flex:1; min-width:0;">
-          <div style="font-weight:600; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${card.name || 'Untitled'}</div>
+          <div style="font-weight:600; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dfcBadgeHtml(card)}${card.name || 'Untitled'}</div>
           <div style="font-size:10.5px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${card.type_line || ''}</div>
         </div>
         <span style="font-size:11px; color:var(--text-muted);">×${card.count || 1}</span>
@@ -1470,7 +1533,7 @@ function renderLists() {
         <img class="cb-large-thumb" src="${thumbSrc}" alt="${card.name || ''}" title="Click to edit card">
         <div class="row-between" style="gap:8px;">
           <div style="min-width:0;">
-            <div style="font-weight:700; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${card.name || 'Untitled'}</div>
+            <div style="font-weight:700; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dfcBadgeHtml(card)}${card.name || 'Untitled'}</div>
             <div style="font-size:11px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${card.type_line || ''} · ×${card.count || 1}</div>
           </div>
           <label class="row" style="gap:4px; cursor:pointer; font-size:12px; flex-shrink:0;">
@@ -1510,7 +1573,7 @@ function renderLists() {
       item.innerHTML = `
         <button type="button" class="cb-grid-del-btn" title="Remove card from board" aria-label="Remove card">✕</button>
         <img class="cb-grid-thumb" src="${thumbSrc}" alt="${card.name || ''}">
-        <div style="font-weight:600; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${card.name || 'Untitled'}</div>
+        <div style="font-weight:600; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dfcBadgeHtml(card)}${card.name || 'Untitled'}</div>
         <div class="row-between" style="font-size:11px; color:var(--text-muted);">
           <span>×${card.count || 1}</span>
           <label class="row" style="gap:4px; cursor:pointer;" data-stop="1">
@@ -1557,6 +1620,16 @@ function renderLists() {
   }
 }
 
+// Small "⇄ Front/Back" tag for the faces of a double-faced card (see card.dfc), '' otherwise.
+function dfcBadgeHtml(card) {
+  const dfc = card?.dfc;
+  if (!dfc || !Array.isArray(dfc.face_names) || dfc.face_names.length < 2) return '';
+  const isFront = dfc.face_index === 0;
+  const other = dfc.face_names[isFront ? 1 : 0] || '';
+  const tip = `Double-faced card (${card.scryfall_layout || 'dfc'}): ${isFront ? 'front' : 'back'} face. Other face: ${other}`;
+  return `<span class="cb-dfc-badge${isFront ? '' : ' is-back'}" title="${tip.replace(/"/g, '&quot;')}">⇄ ${isFront ? 'Front' : 'Back'}</span>`;
+}
+
 function computeTxtCheckStatus() {
   const cb = ensureCardBuilderState();
   const manifest = cb.txt_manifest;
@@ -1567,7 +1640,7 @@ function computeTxtCheckStatus() {
   const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const cardNormIndex = new Map();
   cards.forEach((c) => {
-    [c.name, c.official_name, c.original_name].forEach((n) => {
+    [c.name, c.official_name, c.original_name, c.dfc?.full_name].forEach((n) => {
       const k = norm(n);
       if (k && !cardNormIndex.has(k)) cardNormIndex.set(k, c);
     });
@@ -1824,6 +1897,14 @@ function populateDetailControls(card) {
   document.getElementById('cb-color-oracle').value = card.layout?.oracle_box?.color || '#111111';
   document.getElementById('cb-color-pt').value = card.layout?.pt_text?.color || '#111111';
   document.getElementById('cb-color-artist').value = card.layout?.artist?.color || '#ffffff';
+  const adv = card.adventure || {};
+  document.getElementById('cb-field-adv-name').value = adv.name || '';
+  document.getElementById('cb-field-adv-mana').value = adv.mana_cost || '';
+  document.getElementById('cb-field-adv-type').value = adv.type_line || '';
+  document.getElementById('cb-field-adv-oracle').value = adv.oracle_text || '';
+  document.getElementById('cb-color-adv-title').value = card.layout?.adventure_title?.color || '#111111';
+  document.getElementById('cb-color-adv-type').value = card.layout?.adventure_type_line?.color || '#ffffff';
+  document.getElementById('cb-color-adv-oracle').value = card.layout?.adventure_oracle_box?.color || '#111111';
 
   const popEl = document.getElementById('cb-art-over-top');
   if (popEl) popEl.checked = Boolean(card.art_over_top);
@@ -2057,6 +2138,16 @@ function bindDetailEvents() {
   bindTextColor('cb-color-oracle', 'oracle_box');
   bindTextColor('cb-color-pt', 'pt_text');
   bindTextColor('cb-color-artist', 'artist');
+  bindTextColor('cb-color-adv-title', 'adventure_title');
+  bindTextColor('cb-color-adv-type', 'adventure_type_line');
+  bindTextColor('cb-color-adv-oracle', 'adventure_oracle_box');
+  const syncAdventureField = (id, prop) => syncField(id, (c, v) => {
+    if (c.adventure) c.adventure[prop] = v;
+  });
+  syncAdventureField('cb-field-adv-name', 'name');
+  syncAdventureField('cb-field-adv-mana', 'mana_cost');
+  syncAdventureField('cb-field-adv-type', 'type_line');
+  syncAdventureField('cb-field-adv-oracle', 'oracle_text');
   syncField('cb-brightness', (c, v) => {
     c.brightness = parseFloat(v);
     document.getElementById('cb-brightness-val').textContent = Number(c.brightness).toFixed(2);
@@ -2143,7 +2234,9 @@ function bindDetailEvents() {
       pt_text: card.layout?.pt_text?.color || '#111111',
       artist: card.layout?.artist?.color || '#ffffff',
     };
+    const prevAdvColors = Object.fromEntries(ADVENTURE_KEYS.map((k) => [k, card.layout?.[k]?.color]));
     card.layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
+    ADVENTURE_KEYS.forEach((k) => { if (prevAdvColors[k]) card.layout[k].color = prevAdvColors[k]; });
     card.layout.title.color = prevColors.title;
     card.layout.official_title.color = prevColors.official_title;
     card.layout.type_line.color = prevColors.type_line;
@@ -2242,7 +2335,7 @@ function bindDetailEvents() {
     }
 
     // 1. Text & icon foreground regions (topmost)
-    const textKeys = new Set(['mana_cost', 'title', 'official_title', 'set_symbol', 'type_line', 'pt_text', 'oracle_box', 'artist']);
+    const textKeys = new Set(TEXT_KEYS);
     for (const r of regions) {
       if (!textKeys.has(r.key)) continue;
       if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
@@ -2295,7 +2388,7 @@ function bindDetailEvents() {
   });
 
   // Contextual Text Inspector Popover inside Toolbox
-  const TEXT_POPOVER_KEYS = new Set(['title', 'official_title', 'mana_cost', 'type_line', 'set_symbol', 'oracle_box', 'pt_text', 'artist']);
+  const TEXT_POPOVER_KEYS = new Set(TEXT_KEYS);
   const TEXT_POPOVER_LABELS = {
     title: 'Card Title',
     official_title: 'Official / Original Name',
@@ -2305,6 +2398,10 @@ function bindDetailEvents() {
     oracle_box: 'Oracle Rules Text',
     pt_text: 'Power / Toughness',
     artist: 'Artist',
+    adventure_title: 'Adventure Title',
+    adventure_mana_cost: 'Adventure Mana Cost',
+    adventure_type_line: 'Adventure Type Line',
+    adventure_oracle_box: 'Adventure Rules Text',
   };
   const textPopoverEl = document.getElementById('cb-text-popover');
   const textPopoverTitleEl = document.getElementById('cb-text-popover-title');
@@ -2317,7 +2414,7 @@ function bindDetailEvents() {
     const L = ensureCardLayout(card);
     document.querySelectorAll('.cb-text-size-input').forEach((inp) => {
       const k = inp.dataset.sizeKey;
-      if (k === 'mana_cost') inp.value = Math.round(L.mana_cost?.size ?? 35);
+      if (k === 'mana_cost' || k === 'adventure_mana_cost') inp.value = Math.round(L[k]?.size ?? 35);
       else if (k === 'set_symbol') inp.value = Math.round(L.set_symbol?.size ?? 41);
       else if (L[k]) inp.value = Math.round(L[k].font_size ?? 24);
     });
@@ -2330,6 +2427,9 @@ function bindDetailEvents() {
     const card = getActiveCard();
     if (card) syncTextSizeInputs(card);
     if (textPopoverTitleEl) textPopoverTitleEl.textContent = TEXT_POPOVER_LABELS[key] || 'Text Settings';
+    textPopoverEl.querySelectorAll('.cb-text-tab[data-adventure]').forEach((t) => {
+      t.style.display = card?.adventure ? '' : 'none';
+    });
     textPopoverEl.querySelectorAll('.cb-text-tab').forEach((t) => {
       t.classList.toggle('active', t.dataset.textTab === key);
     });
@@ -2383,7 +2483,7 @@ function bindDetailEvents() {
       const k = inp.dataset.sizeKey;
       const val = parseInt(inp.value, 10);
       if (!Number.isFinite(val)) return;
-      if (k === 'mana_cost') L.mana_cost.size = Math.max(14, Math.min(64, val));
+      if (k === 'mana_cost' || k === 'adventure_mana_cost') L[k].size = Math.max(14, Math.min(64, val));
       else if (k === 'set_symbol') L.set_symbol.size = Math.max(14, Math.min(72, val));
       else if (L[k]) L[k].font_size = Math.max(10, Math.min(72, val));
       scheduleRender(card);
@@ -2581,6 +2681,7 @@ function bindDetailEvents() {
       else if (k === 'oracle_box') { L.oracle_box.x = init.oracle_box.x + dx; L.oracle_box.y = init.oracle_box.y + dy; }
       else if (k === 'pt_text') { L.pt_text.x = init.pt_text.x + dx; L.pt_text.y = init.pt_text.y + dy; }
       else if (k === 'artist') { L.artist.x = init.artist.x + dx; L.artist.y = init.artist.y + dy; }
+      else if (ADVENTURE_KEYS.includes(k)) { L[k].x = init[k].x + dx; L[k].y = init[k].y + dy; }
       else if (k.startsWith('shape:') && Array.isArray(card.shapes)) {
         const sid = k.slice(6);
         const sInit = (dragState.initialShapes || []).find((s) => s.id === sid);
@@ -2649,23 +2750,23 @@ function bindDetailEvents() {
         } else {
           L.art.x = nx; L.art.y = ny; L.art.w = nw; L.art.h = nh;
         }
-      } else if (k === 'oracle_box') {
+      } else if (k === 'oracle_box' || k === 'adventure_oracle_box') {
         let nx = init[k].x, ny = init[k].y, nw = init[k].w, nh = init[k].h;
         if (h.includes('e')) nw = Math.max(60, init[k].w + dx);
         if (h.includes('s')) nh = Math.max(40, init[k].h + dy);
         if (h.includes('w')) { const pw = init[k].w - dx; if (pw >= 60) { nw = pw; nx = init[k].x + dx; } }
         if (h.includes('n')) { const ph = init[k].h - dy; if (ph >= 40) { nh = ph; ny = init[k].y + dy; } }
         L[k].x = nx; L[k].y = ny; L[k].w = nw; L[k].h = nh;
-      } else if (k === 'title' || k === 'type_line' || k === 'official_title') {
+      } else if (['title', 'type_line', 'official_title', 'adventure_title', 'adventure_type_line'].includes(k)) {
         if (h.includes('e')) L[k].max_w = Math.max(100, (init[k].max_w || 470) + dx);
         if (h.includes('w')) { L[k].x = init[k].x + dx; L[k].max_w = Math.max(100, (init[k].max_w || 470) - dx); }
         if (h.includes('s') || h.includes('n')) {
           const df = h.includes('s') ? dy : -dy;
           L[k].font_size = Math.max(10, Math.min(72, (init[k].font_size || 28) + df * 0.5));
         }
-      } else if (k === 'mana_cost') {
+      } else if (k === 'mana_cost' || k === 'adventure_mana_cost') {
         const delta = h.includes('s') || h.includes('e') ? dy + dx * 0.3 : -(dy + dx * 0.3);
-        L.mana_cost.size = Math.max(14, Math.min(64, (init.mana_cost.size || 28) + delta * 0.4));
+        L[k].size = Math.max(14, Math.min(64, (init[k].size || 28) + delta * 0.4));
       } else if (k === 'set_symbol') {
         const delta = h.includes('s') || h.includes('e') ? dy : -dy;
         L.set_symbol.size = Math.max(16, Math.min(72, (init.set_symbol.size || 32) + delta * 0.5));
@@ -3214,6 +3315,16 @@ function bindChangeArtModal() {
     persistState(true);
   });
 
+  // A /search response holds one card, or both faces of a double-faced card (front, back).
+  function addSearchedCards(data, count) {
+    const cards = data?.cards?.length ? data.cards : (data?.card ? [data.card] : []);
+    cards.forEach((c) => {
+      if (count) c.count = count;
+      getCards().push(c);
+    });
+    return cards;
+  }
+
   document.getElementById('cb-search-btn').addEventListener('click', async () => {
     const q = document.getElementById('cb-search-input').value.trim();
     if (!q) return;
@@ -3226,10 +3337,10 @@ function bindChangeArtModal() {
     });
     const data = await resp.json();
     if (!resp.ok) return showToast(data.detail || 'Card not found');
-    getCards().push(data.card);
+    const added = addSearchedCards(data);
     renderLists();
     persistState(true);
-    showToast(`Added: ${data.card.name}`);
+    showToast(`Added: ${added.map((c) => c.name).join(' + ')}`);
     } finally { setGlobalLoading(false); }
   });
 
@@ -3289,11 +3400,7 @@ function bindChangeArtModal() {
           });
           if (resp.ok) {
             const data = await resp.json();
-            if (data.card) {
-              data.card.count = entry.count;
-              getCards().push(data.card);
-              imported++;
-            }
+            if (addSearchedCards(data, entry.count).length) imported++;
           }
         } catch {}
         const pct = Math.round(((i + 1) / entries.length) * 100);
@@ -3374,12 +3481,7 @@ function bindChangeArtModal() {
     });
     if (!resp.ok) return false;
     const data = await resp.json();
-    if (data.card) {
-      data.card.count = entry.count || 1;
-      getCards().push(data.card);
-      return true;
-    }
-    return false;
+    return addSearchedCards(data, entry.count || 1).length > 0;
   }
 
   function renderTxtCheckModal() {
