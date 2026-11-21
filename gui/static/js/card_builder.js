@@ -1851,6 +1851,11 @@ function populateDetailControls(card) {
   layerManager.render(card);
 }
 
+// "Automated Templates/ixalan" -> "ixalan" (display only; the full key stays as the value)
+function styleDisplayName(styleKey) {
+  return String(styleKey || '').replace(/^(Automated|Manual) Templates\//i, '');
+}
+
 function bindDetailEvents() {
   document.getElementById('cb-add-rect-btn')?.addEventListener('click', () => addOverlayShape('rect'));
   document.getElementById('cb-add-round-btn')?.addEventListener('click', () => addOverlayShape('rounded'));
@@ -1960,7 +1965,7 @@ function bindDetailEvents() {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'cb-tpl-card' + (styleKey === activeStyle ? ' active' : '');
-      const shortName = styleKey.replace(/^Automated Templates\//i, '');
+      const shortName = styleDisplayName(styleKey);
       const previewUrl = `/api/card-builder/template-preview?style=${encodeURIComponent(styleKey)}`;
       btn.innerHTML = `
         <img src="${previewUrl}" alt="${shortName}" loading="lazy">
@@ -3149,10 +3154,9 @@ function bindChangeArtModal() {
   ['cb-detail-style-select'].forEach((id) => {
     const sel = document.getElementById(id);
     if (!sel) return;
-    if (!sel) return;
     sel.innerHTML = styleKeys.length
-      ? styleKeys.map((k) => `<option value="${k}">${k}</option>`).join('')
-      : '<option value="Automated Templates/normal">Automated Templates/normal</option>';
+      ? styleKeys.map((k) => `<option value="${k}" title="${k}">${styleDisplayName(k)}</option>`).join('')
+      : '<option value="Automated Templates/normal">normal</option>';
   });
 
   layerManager = new LayerManager(
