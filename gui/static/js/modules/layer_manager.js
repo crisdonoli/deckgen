@@ -116,6 +116,66 @@ export function resolveManaSymbolUrl(raw) {
   return (cat.mana && cat.mana[norm]) || null;
 }
 
+const RARITY_LETTER = { common: 'c', uncommon: 'u', rare: 'r', mythic: 'm', special: 's', bonus: 's' };
+
+// The set's symbol for exactly this rarity in _shared/set_symbols (e.g. 10e-r), or null.
+export function exactSetSymbolUrl(setCode, rarity = 'common') {
+  const sets = getSymbolsCatalog().sets || {};
+  const r = String(rarity || 'common').trim().toLowerCase();
+  const key = `${String(setCode || '').trim().toLowerCase()}-${RARITY_LETTER[r] || r[0] || 'c'}`;
+  return sets[key] || null;
+}
+
+// Fill gradients (dark-light-dark, as in the _shared/set_symbols SVGs) and outline per rarity.
+const RARITY_SYMBOL_STYLE = {
+  common: { stops: ['#111111'], outline: '#ffffff' },
+  uncommon: { stops: ['#536e78', '#99aebc', '#d9eaf3', '#99aebc', '#536e78'], outline: '#000000' },
+  rare: { stops: ['#8b723c', '#d2bb7b', '#ebd491', '#d2bb7b', '#8b723c'], outline: '#000000' },
+  mythic: { stops: ['#bf331c', '#d3641c', '#f6b91d', '#d3641c', '#bf331c'], outline: '#000000' },
+  special: { stops: ['#4b2063', '#8a5aa8', '#d7b8ea', '#8a5aa8', '#4b2063'], outline: '#000000' },
+};
+
+// A black set-symbol silhouette coloured for its rarity with a contrasting outline, like the
+// printed symbol (visible on dark type bars such as M15Extended's). Built at 4x so it stays
+// sharp in high-DPI exports; draw it at (x - pad, y - pad, w + 2 pad, h + 2 pad).
+function styledSetSymbol(img, dw, dh, rarity) {
+  const r = String(rarity || 'common').toLowerCase();
+  const style = RARITY_SYMBOL_STYLE[r === 'bonus' ? 'special' : r] || RARITY_SYMBOL_STYLE.common;
+  const k = 4;
+  const pad = Math.max(2, Math.round(Math.min(dw, dh) * 0.07));
+  const w = dw * k;
+  const h = dh * k;
+  const p = pad * k;
+  const layer = (paint) => {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const x = c.getContext('2d');
+    x.drawImage(img, 0, 0, w, h);
+    x.globalCompositeOperation = 'source-in';
+    x.fillStyle = paint(x);
+    x.fillRect(0, 0, w, h);
+    return c;
+  };
+  const outline = layer(() => style.outline);
+  const fill = layer((x) => {
+    if (style.stops.length === 1) return style.stops[0];
+    const g = x.createLinearGradient(0, 0, w, 0);
+    style.stops.forEach((col, i) => g.addColorStop(i / (style.stops.length - 1), col));
+    return g;
+  });
+  const out = document.createElement('canvas');
+  out.width = w + 2 * p;
+  out.height = h + 2 * p;
+  const ox = out.getContext('2d');
+  for (let i = 0; i < 32; i += 1) {
+    const a = (i / 32) * Math.PI * 2;
+    ox.drawImage(outline, p + Math.cos(a) * p, p + Math.sin(a) * p);
+  }
+  ox.drawImage(fill, p, p);
+  return { canvas: out, pad };
+}
+
 export function resolveSetSymbolUrl(setCode, rarity = 'common') {
   const cat = getSymbolsCatalog();
   const sets = cat.sets || {};
@@ -2412,9 +2472,14 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
   const rarity = (card?.rarity || colInfo.rarity || 'common').toLowerCase();
   const origSet = (colInfo.set || '').toLowerCase();
   const customSetChosen = card?.set && origSet && card.set.toLowerCase() !== origSet;
+  // Prefer the set's own rarity-coloured symbol from _shared/set_symbols; Scryfall's is a plain
+  // black silhouette, which gets the rarity colours and outline applied (styledSetSymbol).
+  const localRaritySymbol = exactSetSymbolUrl(setCode, rarity);
+  const scryfallSymbol = face?.set_symbol?.url || opts?.set_symbol?.url || '';
   const symUrl = customSetChosen
-    ? (resolveSetSymbolUrl(setCode, rarity) || face?.set_symbol?.url || opts?.set_symbol?.url)
-    : (face?.set_symbol?.url || opts?.set_symbol?.url || resolveSetSymbolUrl(setCode, rarity));
+    ? (resolveSetSymbolUrl(setCode, rarity) || scryfallSymbol)
+    : (localRaritySymbol || scryfallSymbol || resolveSetSymbolUrl(setCode, rarity));
+  const symIsSilhouette = Boolean(symUrl && symUrl === scryfallSymbol);
   const symBounds = L?.set_symbol
     ? {
         x: Math.round(Number(L.set_symbol.x || 692) * sx),
@@ -2435,7 +2500,12 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
       const ry = Number(symBounds.y) || 1241;
       const dx = rx > 1100 ? rx - dw : rx;
       const dy = ry - Math.round(dh / 2);
-      ctx.drawImage(symImg, Math.max(0, dx), Math.max(0, dy), dw, dh);
+      if (symIsSilhouette) {
+        const styled = styledSetSymbol(symImg, dw, dh, rarity);
+        ctx.drawImage(styled.canvas, Math.max(0, dx) - styled.pad, Math.max(0, dy) - styled.pad, dw + 2 * styled.pad, dh + 2 * styled.pad);
+      } else {
+        ctx.drawImage(symImg, Math.max(0, dx), Math.max(0, dy), dw, dh);
+      }
       result.layers += 1;
     }
   }

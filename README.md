@@ -77,7 +77,16 @@ Launcher options (`run.py`):
 - `--no-browser` (starts the server without opening a browser tab)
 
 ### Assets (frames, fonts, mana & set symbols)
-- Download [Templates](https://drive.google.com/drive/folders/1TsvefQ6QlSJNmvgfCxoEI61KzS1reWYn?usp=sharing) (updated: 22-11-2026) and extract it into the root folder of this project. 
+
+The assets now live in this repository under `assets/`, so there is nothing to download separately: cloning the repo gives you everything the app needs. You no longer need the Google Drive download.
+
+The assets folder is large (about 1.9 GB, roughly 5,800 files), so the first clone takes a while. If you don't need the project history, a shallow clone is much faster:
+
+```bash
+git clone --depth 1 https://github.com/crisdonoli/deckgen.git
+```
+
+If you previously extracted the Google Drive download into `assets/`, delete that folder before you pull, so git can check out the versions tracked in the repository.
 
 Your directory tree should look like:
 
@@ -94,6 +103,7 @@ Your directory tree should look like:
 │   │   │   ├── fonts           # Beleren, MPlantin, Matrix, ...
 │   │   │   ├── mana_symbols    # one SVG per symbol code ({W}, {2}, {+1}, ...)
 │   │   │   └── set_symbols     # one SVG per set/rarity (e.g. 10e-c.svg)
+│   │   ├── assets.db           # asset index (used by scripts/validate_assets_integrity.py)
 │   │   └── manifest.json
 │   ├── scryfall-map.json       # rules that map Scryfall card data to frame taxonomy
 │   ├── taxonomy.json
@@ -116,7 +126,7 @@ Your directory tree should look like:
 └── run.py
 ```
 
-If `assets/resources` is missing, the app still starts but logs a warning, `/assets` is not mounted and the frame catalog is empty.
+If `assets/resources` is missing (for example, a checkout without the `assets/` folder), the app still starts but logs a warning, `/assets` is not mounted and the frame catalog is empty.
 
 ### Frames
 
@@ -126,7 +136,8 @@ Frames are no longer picked from fixed template styles. When a card is imported 
 - The Frame Components picker is ordered by `gui/data/frame_catalog.json`. Any new file you drop into `assets/resources/frames/<folder>/` appears automatically under **Local Folders (Added)**.
 - Text and art positions per template live in `gui/data/frame_layouts.json` (defaults in `gui/core/card_layouts.py`).
 - Each imported card is stored as a card project (`gui/data/cache/projects/<id>.json`) and referenced from the workspace `state.json`.
-- Cards are exported server-side as **1500×2100 PNG** (`gui/core/recipe_renderer.py`). SVG symbols are rasterized with the first available of `cairosvg`, `rsvg-convert`, `inkscape` or ImageMagick `convert`.
+- Cards are exported server-side (`gui/core/recipe_renderer.py`) as PNG or PDF, matching the Card Builder preview. The selected DPI sets the real resolution: 600 DPI is 1500×2100 px, 1200 DPI is 3000×4200 px and 2400 DPI is 6000×8400 px. PDF exports are one 63.5×88.9 mm page per card, written to `cards/fronts/`. For double-faced cards (transform, modal DFC), the second face goes to `cards/backs/` with the same file name, and the Deck Generator pairs it with its front automatically. PNG exports go to `cards/png/`.
+- SVG symbols are rasterized with the first available of `cairosvg`, `rsvg-convert`, `inkscape` or ImageMagick `convert`.
 
 Projects saved with the older `Templates/<style>` layout are **not** migrated; re-import those cards.
 
