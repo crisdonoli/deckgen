@@ -7,9 +7,24 @@ import {
   saveActiveWorkspaceState,
   setGlobalLoading,
   showToast,
-} from './modules/workspace_client.js?v=21';
-import { CropMaskModal, loadImageElement } from './modules/crop_masks.js?v=2';
-import { LayerManager, renderProjectFace } from './modules/layer_manager.js?v=28';
+} from './modules/workspace_client.js?v=23';
+import { CropMaskModal, loadImageElement } from './modules/crop_masks.js?v=3';
+import {
+  DEFAULT_LAYER_ORDER,
+  LayerManager,
+  applyPopOutOrder,
+  applyTemplateLayoutToFace,
+  buildLayoutFromProjectFace,
+  ensureSymbolsCatalog,
+  getSymbolsCatalog,
+  normalizeManaCode,
+  renderProjectFace,
+  resetCardToOriginalFace,
+  resolveManaSymbolUrl,
+  resolveSetSymbolUrl,
+  syncCardWithProjectFace,
+  syncProjectFaceFromCard,
+} from './modules/layer_manager.js?v=44';
 
 initThemeAndNavbar('card-builder');
 
@@ -59,7 +74,7 @@ function ensureCardBuilderState() {
     workspaceState = {
       project_name: 'Temporal',
       root_dir: getActiveRootDir(),
-      card_builder: { cards: [], ready_ids: [], global_frame_style: 'Templates/normal' },
+      card_builder: { cards: [], ready_ids: [], global_frame_style: 'M15Regular' },
       deck_generator: {},
     };
   }
@@ -220,7 +235,7 @@ const DEFAULT_LAYOUT = {
   oracle_box: { x: 56, y: 663, w: 638, h: 303, font_size: 30, color: '#111111' },
   pt_text: { x: 648, y: 970, font_size: 38, color: '#111111' },
   artist: { x: 47, y: 1022, font_size: 18, color: '#ffffff' },
-  // Adventure spell (card.adventure): left page of the Templates/adventure textbox.
+  // Adventure spell (card.adventure): left page of the adventure textbox.
   adventure_title: { x: 60, y: 694, max_w: 240, font_size: 28, color: '#111111' },
   adventure_mana_cost: { x: 362, y: 692, size: 26 },
   adventure_type_line: { x: 60, y: 742, max_w: 290, font_size: 25, color: '#ffffff' },
@@ -244,8 +259,7 @@ function ensureCardLayout(card) {
   return card.layout;
 }
 
-// Applies the per-style layout returned by /api/card-builder/auto-frame
-// (see STYLE_LAYOUT_OVERRIDES in gui/core/card_layouts.py).
+// Applies a per-style layout patch to a card.
 function applyStyleLayoutPatch(card, data) {
   if (!card || !data) return;
   const L = ensureCardLayout(card);
@@ -729,6 +743,23 @@ function drawManaCost(targetCtx, manaStr, rightX, baselineY, size) {
 
   for (let i = tokens.length - 1; i >= 0; i--) {
     const sym = tokens[i];
+    const svgUrl = resolveManaSymbolUrl(sym);
+    const cachedImg = svgUrl ? imgCache.get(svgUrl) : null;
+    if (svgUrl && !cachedImg) {
+      loadCachedImage(svgUrl);
+    }
+    if (cachedImg) {
+      targetCtx.save();
+      targetCtx.beginPath();
+      targetCtx.arc(curX - 1, baselineY - size * 0.32 + 2, size * 0.48, 0, Math.PI * 2);
+      targetCtx.fillStyle = 'rgba(0,0,0,0.55)';
+      targetCtx.fill();
+      targetCtx.drawImage(cachedImg, curX - size / 2, baselineY - size * 0.82, size, size);
+      targetCtx.restore();
+      curX -= step;
+      continue;
+    }
+
     targetCtx.save();
     targetCtx.beginPath();
     targetCtx.arc(curX, baselineY - size * 0.32, size * 0.54, 0, Math.PI * 2);
@@ -740,27 +771,32 @@ function drawManaCost(targetCtx, manaStr, rightX, baselineY, size) {
     targetCtx.fill();
     targetCtx.restore();
 
-    const cls = symbolToManaClass(sym);
-    const glyph = getIconGlyph(cls, manaGlyphCache);
     targetCtx.save();
     targetCtx.fillStyle = '#111111';
     targetCtx.textAlign = 'center';
     targetCtx.textBaseline = 'middle';
-    if (glyph.char) {
-      targetCtx.font = `${Math.round(size * 0.76)}px ${glyph.fontFamily || 'Mana'}`;
-      targetCtx.fillText(glyph.char, curX, baselineY - size * 0.3);
-    } else {
-      targetCtx.font = `bold ${Math.round(size * 0.65)}px sans-serif`;
-      targetCtx.fillText(sym.replace(/[{}]/g, ''), curX, baselineY - size * 0.3);
-    }
+    targetCtx.font = `bold ${Math.round(size * 0.65)}px "BelerenLocal", sans-serif`;
+    targetCtx.fillText(sym.replace(/[{}]/g, ''), curX, baselineY - size * 0.3);
     targetCtx.restore();
     curX -= step;
   }
 }
 
 function drawSetSymbol(targetCtx, setCode, rarity, rightX, centerY, size) {
-  const cls = `ss ss-${(setCode || 'mtg').toLowerCase()}`;
-  const glyph = getIconGlyph(cls, keyruneGlyphCache);
+  const symUrl = resolveSetSymbolUrl(setCode, rarity);
+  const cachedImg = symUrl ? imgCache.get(symUrl) : null;
+  if (symUrl && !cachedImg) {
+    loadCachedImage(symUrl);
+  }
+  if (cachedImg) {
+    const iw = cachedImg.naturalWidth || cachedImg.width || size;
+    const ih = cachedImg.naturalHeight || cachedImg.height || size;
+    const scale = Math.min((size * 1.4) / iw, size / ih);
+    const dw = Math.round(iw * scale);
+    const dh = Math.round(ih * scale);
+    targetCtx.drawImage(cachedImg, rightX - dw, centerY - Math.round(dh / 2), dw, dh);
+    return;
+  }
   const rarityColors = {
     common: '#111111',
     uncommon: '#8da2b0',
@@ -775,14 +811,8 @@ function drawSetSymbol(targetCtx, setCode, rarity, rightX, centerY, size) {
   targetCtx.lineJoin = 'round';
   targetCtx.textAlign = 'right';
   targetCtx.textBaseline = 'middle';
-  if (glyph.char) {
-    targetCtx.font = `${size}px ${glyph.fontFamily || 'Keyrune'}`;
-    targetCtx.strokeText(glyph.char, rightX, centerY);
-    targetCtx.fillText(glyph.char, rightX, centerY);
-  } else {
-    targetCtx.font = `bold ${Math.round(size * 0.6)}px "BelerenLocal", serif`;
-    targetCtx.fillText((setCode || 'MTG').toUpperCase(), rightX, centerY);
-  }
+  targetCtx.font = `bold ${Math.round(size * 0.6)}px "BelerenLocal", serif`;
+  targetCtx.fillText((setCode || 'MTG').toUpperCase(), rightX, centerY);
   targetCtx.restore();
 }
 
@@ -1253,8 +1283,59 @@ function renderTextOverlayDataUrl(card, requestedScale = 4) {
   return '';
 }
 
+const _projectCleanCanvas = document.createElement('canvas');
+_projectCleanCanvas.width = 1500;
+_projectCleanCanvas.height = 2100;
+let _projectCleanReady = false;
+
+function paintProjectWithOverlays(projectCanvas, card) {
+  if (!projectCanvas) return;
+  const pCtx = projectCanvas.getContext('2d');
+  if (_projectCleanReady) {
+    pCtx.clearRect(0, 0, projectCanvas.width, projectCanvas.height);
+    pCtx.drawImage(_projectCleanCanvas, 0, 0, projectCanvas.width, projectCanvas.height);
+  }
+  pCtx.save();
+  pCtx.scale(projectCanvas.width / 750, projectCanvas.height / 1050);
+  if (draftShape) {
+    drawSingleShape(pCtx, draftShape);
+    pCtx.save();
+    pCtx.strokeStyle = '#38bdf8';
+    pCtx.lineWidth = 2;
+    pCtx.setLineDash([6, 4]);
+    pCtx.strokeRect(draftShape.x, draftShape.y, draftShape.w, draftShape.h);
+    pCtx.restore();
+  }
+  drawInteractiveOverlays(pCtx, card);
+  pCtx.restore();
+}
+
 async function renderCardCanvas(card) {
   if (!card) return;
+  const legacyWrap = document.getElementById('cb-legacy-wrap');
+  const projectWrap = document.getElementById('cb-project-wrap');
+  const projectCanvas = document.getElementById('cb-project-canvas');
+  if (state.project && currentProjectFace() && projectCanvas) {
+    const seq = ++renderSeq;
+    const face = currentProjectFace();
+    syncProjectFaceFromCard(card, face);
+    if (legacyWrap) legacyWrap.style.display = 'none';
+    if (projectWrap) projectWrap.style.display = 'flex';
+    await renderProjectFace(face, _projectCleanCanvas, {
+      card,
+      set_symbol: state.project?.set_symbol,
+    });
+    if (seq !== renderSeq) return;
+    projectCanvas.width = _projectCleanCanvas.width;
+    projectCanvas.height = _projectCleanCanvas.height;
+    projectCanvas.style.maxWidth = '100%';
+    projectCanvas.style.height = 'auto';
+    _projectCleanReady = true;
+    paintProjectWithOverlays(projectCanvas, card);
+    return;
+  }
+  if (projectWrap) projectWrap.style.display = 'none';
+  if (legacyWrap) legacyWrap.style.display = 'flex';
   const seq = ++renderSeq;
   const W = 750;
   const H = 1050;
@@ -1322,22 +1403,6 @@ async function renderCardCanvas(card) {
         _tintCtx.globalCompositeOperation = 'source-over';
         drawSrc = _tintCanvas;
       } else if (key === 'background' && order.indexOf('art') < order.indexOf('background')) {
-        // Art-below-frame styles (e.g. token-textless): the background has transparent holes
-        // for the art. JPGs have no alpha, so draw the PDF rendered server-side with its alpha.
-        const bgPng = await loadCachedImage(`/api/card-builder/layer-png?rel_path=${encodeURIComponent(fc[key])}`);
-        if (seq !== renderSeq) return;
-        if (bgPng) {
-          _baseCtx.save();
-          if (clipYRange) {
-            _baseCtx.beginPath();
-            _baseCtx.rect(0, clipYRange[0], W, clipYRange[1] - clipYRange[0]);
-            _baseCtx.clip();
-          }
-          _baseCtx.globalAlpha = op;
-          _baseCtx.drawImage(bgPng, 0, 0, W, H);
-          _baseCtx.restore();
-          return;
-        }
         drawSrc = await loadTransparentLayer(fc[key], key);
         if (seq !== renderSeq || !drawSrc) return;
       } else if (key === 'background') {
@@ -1422,36 +1487,26 @@ async function renderCardCanvas(card) {
       drawSingleShape(_baseCtx, shape, op);
     };
 
-    if (card.art_over_top) {
-      const splitY = 587;
-      const artPos = order.indexOf('art');
-      for (let i = 0; i < order.length; i++) {
-        const key = order[i];
-        if (key === 'art' || key === 'pt_box') continue;
-        if (key.startsWith('shape:')) {
-          if (artPos !== -1 && i < artPos) drawShapeComp(key);
-        } else if (key === 'pinlines' || key === 'border') {
-          await drawFrameComp(key, [0, splitY]);
-        } else {
-          await drawFrameComp(key);
-        }
-      }
-      await drawArtComp(true);
-      for (let i = 0; i < order.length; i++) {
-        const key = order[i];
-        if (key === 'pinlines' || key === 'border') await drawFrameComp(key, [splitY, H]);
-        else if (key === 'pt_box') await drawFrameComp(key);
-        else if (key.startsWith('shape:') && (artPos === -1 || i > artPos)) drawShapeComp(key);
-      }
-    } else {
-      const artIdx = order.indexOf('art');
-      const nameIdx = order.indexOf('name_box');
-      const popOutByOrder = artIdx > nameIdx && nameIdx !== -1;
-      for (const key of order) {
-        if (key === 'art') await drawArtComp(popOutByOrder);
-        else if (key.startsWith('shape:')) drawShapeComp(key);
-        else await drawFrameComp(key);
-      }
+    const splitY = 584;
+    const rawOrder = Array.isArray(order) ? [...order] : [...DEFAULT_LAYER_ORDER];
+    if (!rawOrder.includes('textbox')) {
+      const cIdx = rawOrder.indexOf('crown');
+      const bIdx = rawOrder.indexOf('background');
+      const ins = Math.max(cIdx, bIdx);
+      rawOrder.splice(ins >= 0 ? ins + 1 : rawOrder.length, 0, 'textbox');
+    }
+    const artIdx = rawOrder.indexOf('art');
+    const bgIdx = rawOrder.indexOf('background');
+    const crownIdx = rawOrder.indexOf('crown');
+    const popOutByOrder = artIdx >= 0 && ((bgIdx >= 0 && artIdx > bgIdx) || (crownIdx >= 0 && artIdx > crownIdx));
+    for (const key of rawOrder) {
+      if (key === 'art') await drawArtComp(popOutByOrder);
+      else if (key.startsWith('shape:')) drawShapeComp(key);
+      else if (key === 'background') await drawFrameComp('background', [0, splitY]);
+      else if (key === 'textbox') {
+        const tbKey = fc.textbox ? 'textbox' : 'background';
+        await drawFrameComp(tbKey, [splitY, H]);
+      } else await drawFrameComp(key);
     }
     if (seq !== renderSeq) return;
     _baseCacheKey = baseKey;
@@ -1748,12 +1803,14 @@ function hideFrameHoverPreview() {
 function renderFrameSelectors(card) {
   const container = document.getElementById('cb-frame-selectors');
   if (!container) return;
-  const styleKey = card.frame_components?.style || 'Templates/normal';
-  const styleCat = catalog[styleKey] || {};
+  const styleKey = card.frame_components?.style || 'M15Regular';
+  const symCat = getSymbolsCatalog();
+  const roleFrames = symCat.frames_by_role || {};
+  const styleCat = catalog[styleKey] || roleFrames;
   const keys = [
     ['background', 'Frame'],
     ['pinlines', 'Pinlines / Textbox'],
-    ['name_box', 'Name Box'],
+    ['name_box', 'Holo Stamp / Badge'],
     ['crown', 'Crown'],
     ['border', 'Border'],
     ['pt_box', 'PT Box'],
@@ -1761,20 +1818,13 @@ function renderFrameSelectors(card) {
   container.innerHTML = '';
 
   keys.forEach(([k, title]) => {
-    const items = styleCat[k] || [];
+    const items = (styleCat[k] && styleCat[k].length ? styleCat[k] : roleFrames[k]) || [];
     let currentVal = card.frame_components?.[k] || '';
-    // Migrate legacy auto-picked white/silver border when border layer was left hidden
-    if (k === 'border' && card.hidden_layers?.border && /\(white\)|\(silver\)/i.test(currentVal)) {
-      const isLeg = (card.type_line || '').toLowerCase().includes('legendary');
-      const blackFallback = items.find((it) => !/\(white\)|\(silver\)|\(gold\)|crop/i.test(it.label) && (isLeg ? /legendary/i.test(it.label) : /normal/i.test(it.label)))
-        || items.find((it) => !/\(white\)|\(silver\)|\(gold\)|crop/i.test(it.label));
-      if (blackFallback) {
-        card.frame_components = card.frame_components || {};
-        card.frame_components.border = blackFallback.rel_path;
-        currentVal = blackFallback.rel_path;
-      }
+    let currentItem = items.find((it) => it.rel_path === currentVal || it.url === currentVal);
+    if (!currentItem && currentVal) {
+      const baseName = currentVal.split('/').pop();
+      currentItem = { label: baseName, rel_path: currentVal, url: currentVal };
     }
-    const currentItem = items.find((it) => it.rel_path === currentVal);
 
     const wrap = document.createElement('div');
     wrap.style.cssText = 'position:relative; margin-bottom:8px;';
@@ -1867,14 +1917,69 @@ function renderFrameSelectors(card) {
   });
 }
 
-function openDetail(cardId) {
+async function openDetail(cardId) {
   activeCardId = cardId;
   const card = getActiveCard();
   if (!card) return;
   listsView.style.display = 'none';
   detailView.style.display = 'flex';
+  await ensureSymbolsCatalog();
+
+  if (!card.project_id && (card.official_name || card.original_name || card.name)) {
+    try {
+      const impResp = await fetch('/api/card-builder/import-scryfall', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: card.official_name || card.original_name || card.name,
+          set: card.set || '',
+          root_dir: getActiveRootDir(),
+        }),
+      });
+      if (impResp.ok) {
+        const proj = await impResp.json();
+        card.project_id = proj.project_id;
+        state.project = proj;
+        state.faceIndex = proj.faces?.[0]?.face_index ?? 0;
+        syncProjectFaceSelect();
+        await showProjectFace(state.faceIndex);
+        persistState(true);
+        return;
+      }
+    } catch {}
+  }
+
+  if (card.project_id) {
+    try {
+      const resp = await fetch(`/api/card-builder/project/${encodeURIComponent(card.project_id)}`);
+      if (resp.ok) {
+        const project = await resp.json();
+        state.project = project;
+        state.faceIndex = project.faces?.[0]?.face_index ?? 0;
+        syncProjectFaceSelect();
+        await showProjectFace(state.faceIndex);
+        return;
+      }
+    } catch {}
+  }
+
+  state.project = null;
   populateDetailControls(card);
   renderCardCanvas(card);
+}
+
+function updateSetPreviewIcon(setCode, rarity) {
+  const setIcon = document.getElementById('cb-set-preview-icon');
+  if (!setIcon) return;
+  const face = currentProjectFace();
+  const symUrl = resolveSetSymbolUrl(setCode, rarity) || face?.set_symbol?.url || state.project?.set_symbol?.url;
+  if (symUrl) {
+    setIcon.className = '';
+    setIcon.innerHTML = `<img src="${symUrl}" alt="${setCode}" style="height:22px; width:auto; vertical-align:middle;">`;
+  } else {
+    setIcon.innerHTML = '';
+    setIcon.textContent = String(setCode || 'MTG').toUpperCase();
+  }
 }
 
 function populateDetailControls(card) {
@@ -1889,10 +1994,9 @@ function populateDetailControls(card) {
   document.getElementById('cb-field-artist').value = card.artist || '';
   const setIn = document.getElementById('cb-field-set');
   const rarSel = document.getElementById('cb-field-rarity');
-  const setIcon = document.getElementById('cb-set-preview-icon');
   if (setIn) setIn.value = (card.set || 'mtg').toLowerCase();
   if (rarSel) rarSel.value = (card.rarity || 'common').toLowerCase();
-  if (setIcon) setIcon.className = `ss ss-${(card.set || 'mtg').toLowerCase()} ss-${(card.rarity || 'common').toLowerCase()} ss-2x`;
+  updateSetPreviewIcon(card.set || 'mtg', card.rarity || 'common');
   document.getElementById('cb-color-title').value = card.layout?.title?.color || '#111111';
   document.getElementById('cb-color-official').value = card.layout?.official_title?.color || '#111111';
   document.getElementById('cb-color-type').value = card.layout?.type_line?.color || '#111111';
@@ -1927,16 +2031,49 @@ function populateDetailControls(card) {
   document.getElementById('cb-bg-color-text').value = bgVal;
 
   const styleSel = document.getElementById('cb-detail-style-select');
-  if (card.frame_components?.style) styleSel.value = card.frame_components.style;
+  if (styleSel && card.frame_components?.style) styleSel.value = card.frame_components.style;
 
+  populateTaxonomyAndLayoutControls(card);
   renderFrameSelectors(card);
   renderShapesList(card);
   layerManager.render(card);
 }
 
-// "Templates/ixalan" -> "ixalan" (display only; the full key stays as the value)
+function populateTaxonomyAndLayoutControls(card) {
+  const cat = getSymbolsCatalog();
+  const layoutSel = document.getElementById('cb-layout-select');
+  const templates = cat.templates || {};
+  const tplKeys = Object.keys(templates).sort();
+  if (layoutSel && tplKeys.length && layoutSel.options.length !== tplKeys.length) {
+    layoutSel.innerHTML = tplKeys.map((k) => `<option value="${k}">${k}</option>`).join('');
+  }
+  const face = currentProjectFace();
+  const activeLayout = face?.template || card?.frame_components?.style || 'M15Regular';
+  if (layoutSel && tplKeys.includes(activeLayout)) {
+    layoutSel.value = activeLayout;
+  }
+
+  const taxOpts = cat.taxonomy_options || {};
+  const fillTax = (id, allLabel, list) => {
+    const el = document.getElementById(id);
+    if (!el || !Array.isArray(list)) return;
+    if (el.options.length === list.length + 1) return;
+    const prev = el.value;
+    el.innerHTML = `<option value="">${allLabel}</option>` + list.map((o) => `<option value="${o.value}">${o.label}</option>`).join('');
+    el.value = prev;
+  };
+  fillTax('cb-tax-era', 'Era: Todas', taxOpts.frame_era);
+  fillTax('cb-tax-layout', 'Tipo: Todos', [
+    ...(taxOpts.layout || []),
+    ...(taxOpts.structural || []),
+  ]);
+  fillTax('cb-tax-material', 'Material: Todos', taxOpts.material);
+  fillTax('cb-tax-showcase', 'Showcase: Todos', taxOpts.showcase_style);
+}
+
+// Normalize template profile key for display
 function styleDisplayName(styleKey) {
-  return String(styleKey || '').replace(/^((Automated|Manual) )?Templates\//i, '');
+  return String(styleKey || '');
 }
 
 function bindDetailEvents() {
@@ -1975,7 +2112,8 @@ function bindDetailEvents() {
     const card = getActiveCard();
     if (!card) return;
     pushUndoState(card);
-    card.art_over_top = e.target.checked;
+    applyPopOutOrder(card, e.target.checked);
+    layerManager?.render(card);
     renderCardCanvas(card);
     persistState(true);
   });
@@ -1997,33 +2135,19 @@ function bindDetailEvents() {
     const card = getActiveCard();
     if (!card || !styleKey) return;
     pushUndoState(card);
-    try {
-      const resp = await fetch('/api/card-builder/auto-frame', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ card, style_key: styleKey }),
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        card.frame_components = data.frame_components;
-        applyStyleLayoutPatch(card, data);
-        card.hidden_layers = card.hidden_layers || {};
-        ['background', 'pinlines', 'name_box', 'crown', 'pt_box'].forEach((k) => {
-          if (!card.frame_components?.[k]) card.hidden_layers[k] = true;
-          else delete card.hidden_layers[k];
-        });
-        card.hidden_layers.border = true;
-        const sel = document.getElementById('cb-detail-style-select');
-        if (sel) sel.value = styleKey;
-        layerManager.render(card);
-        renderFrameSelectors(card);
-        renderCardCanvas(card);
-        persistState(true);
-      }
-    } catch {}
+    card.frame_components = card.frame_components || {};
+    card.frame_components.style = styleKey;
+    const face = currentProjectFace();
+    if (face) applyTemplateLayoutToFace(card, face, styleKey);
+    const sel = document.getElementById('cb-detail-style-select');
+    if (sel) sel.value = styleKey;
+    layerManager.render(card);
+    renderFrameSelectors(card);
+    renderCardCanvas(card);
+    persistState(true);
   }
 
-  document.getElementById('cb-detail-style-select').addEventListener('change', (e) => {
+  document.getElementById('cb-detail-style-select')?.addEventListener('change', (e) => {
     applyTemplateStyleToActiveCard(e.target.value);
   });
 
@@ -2049,9 +2173,7 @@ function bindDetailEvents() {
       btn.type = 'button';
       btn.className = 'cb-tpl-card' + (styleKey === activeStyle ? ' active' : '');
       const shortName = styleDisplayName(styleKey);
-      const previewUrl = `/api/card-builder/template-preview?style=${encodeURIComponent(styleKey)}`;
       btn.innerHTML = `
-        <img src="${previewUrl}" alt="${shortName}" loading="lazy">
         <span class="cb-tpl-name" title="${styleKey}">${shortName}</span>
       `;
       btn.addEventListener('click', async () => {
@@ -2109,16 +2231,14 @@ function bindDetailEvents() {
   syncField('cb-field-set', (c, v) => {
     const code = (v || 'mtg').trim().toLowerCase() || 'mtg';
     c.set = code;
-    const icon = document.getElementById('cb-set-preview-icon');
-    if (icon) icon.className = `ss ss-${code} ss-${(c.rarity || 'common').toLowerCase()} ss-2x`;
+    updateSetPreviewIcon(code, c.rarity || 'common');
   });
   document.getElementById('cb-field-rarity')?.addEventListener('change', (e) => {
     const c = getActiveCard();
     if (!c) return;
     pushUndoState(c);
     c.rarity = (e.target.value || 'common').toLowerCase();
-    const icon = document.getElementById('cb-set-preview-icon');
-    if (icon) icon.className = `ss ss-${(c.set || 'mtg').toLowerCase()} ss-${c.rarity} ss-2x`;
+    updateSetPreviewIcon(c.set || 'mtg', c.rarity);
     renderCardCanvas(c);
     persistState(true);
   });
@@ -2224,84 +2344,76 @@ function bindDetailEvents() {
     if (card) renderCardCanvas(card);
   });
 
-  document.getElementById('cb-reset-layout-btn')?.addEventListener('click', () => {
-    const card = getActiveCard();
-    if (!card) return;
-    pushUndoState(card);
-    const prevColors = {
-      title: card.layout?.title?.color || '#111111',
-      official_title: card.layout?.official_title?.color || '#111111',
-      type_line: card.layout?.type_line?.color || '#111111',
-      oracle_box: card.layout?.oracle_box?.color || '#111111',
-      pt_text: card.layout?.pt_text?.color || '#111111',
-      artist: card.layout?.artist?.color || '#ffffff',
-    };
-    const prevAdvColors = Object.fromEntries(ADVENTURE_KEYS.map((k) => [k, card.layout?.[k]?.color]));
-    card.layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
-    ADVENTURE_KEYS.forEach((k) => { if (prevAdvColors[k]) card.layout[k].color = prevAdvColors[k]; });
-    card.layout.title.color = prevColors.title;
-    card.layout.official_title.color = prevColors.official_title;
-    card.layout.type_line.color = prevColors.type_line;
-    card.layout.oracle_box.color = prevColors.oracle_box;
-    card.layout.pt_text.color = prevColors.pt_text;
-    card.layout.artist.color = prevColors.artist;
-    populateDetailControls(card);
-    renderCardCanvas(card);
-    persistState(true);
-    showToast('Positions reset');
-  });
-
   document.getElementById('cb-reset-all-btn')?.addEventListener('click', async () => {
     const card = getActiveCard();
     if (!card) return;
     pushUndoState(card);
-    card.layout = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
+    const face = currentProjectFace();
+    if (face && face._original_ui_state) {
+      resetCardToOriginalFace(card, face);
+    } else {
+      card.layout = face ? buildLayoutFromProjectFace(face) : JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
+      card.layer_order = [...DEFAULT_LAYER_ORDER];
+      card.layer_opacities = {};
+      card.layer_colors = {};
+      card.hidden_layers = { border: true };
+      if (card.scryfall_art_url) {
+        card.custom_art_data = null;
+        card.art_crop_url = card.scryfall_art_url;
+      }
+    }
     card.brightness = 1.0;
     card.bg_color = '';
-    card.layer_colors = {};
     card.art_over_top = false;
     card.hide_card_text = false;
     card.crop_mask = 'free';
     card.frame_opacity = 1.0;
-    card.layer_order = ['background', 'art', 'pinlines', 'name_box', 'crown', 'border', 'pt_box'];
-    card.layer_opacities = {};
-    card.hidden_layers = { border: true };
     card.shapes = [];
-    if (card.scryfall_art_url) {
-      card.custom_art_data = null;
-      card.art_crop_url = card.scryfall_art_url;
-    }
-    try {
-      const resp = await fetch('/api/card-builder/auto-frame', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ card, style_key: 'Templates/normal' }),
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        card.frame_components = data.frame_components;
-        applyStyleLayoutPatch(card, data);
-        ['background', 'pinlines', 'name_box', 'crown', 'pt_box'].forEach((k) => {
-          if (!card.frame_components?.[k]) card.hidden_layers[k] = true;
-          else delete card.hidden_layers[k];
-        });
-        card.hidden_layers.border = true;
-      }
-    } catch {}
     selectedElementKey = null;
     populateDetailControls(card);
     layerManager.render(card);
     renderFrameSelectors(card);
     renderCardCanvas(card);
     persistState(true);
-    showToast('Card reset to defaults.');
+    showToast('Card reset to original state.');
   });
 
+  // Independent Layout selector (changes text/art geometry & filters component submenus to this template)
+  document.getElementById('cb-layout-select')?.addEventListener('change', (e) => {
+    const card = getActiveCard();
+    const tplName = e.target.value;
+    if (!card || !tplName) return;
+    pushUndoState(card);
+    const face = currentProjectFace();
+    if (face) {
+      applyTemplateLayoutToFace(card, face, tplName);
+    } else {
+      card.frame_components = card.frame_components || {};
+      card.frame_components.style = tplName;
+    }
+    layerManager?.setLayoutFilter(tplName, card);
+    populateDetailControls(card);
+    renderCardCanvas(card);
+    persistState(true);
+    showToast(`Layout applied: ${tplName}`);
+  });
+
+  function getActiveStageCanvas() {
+    const projectWrap = document.getElementById('cb-project-wrap');
+    const projectCanvas = document.getElementById('cb-project-canvas');
+    if (projectWrap && projectWrap.style.display !== 'none' && projectCanvas) {
+      return projectCanvas;
+    }
+    return canvas;
+  }
+
   function getCanvasMouseCoords(evt) {
-    const rect = canvas.getBoundingClientRect();
+    const activeCanvas = getActiveStageCanvas();
+    const rect = activeCanvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return { x: 0, y: 0 };
     return {
-      x: (evt.clientX - rect.left) * (canvas.width / rect.width),
-      y: (evt.clientY - rect.top) * (canvas.height / rect.height),
+      x: (evt.clientX - rect.left) * (750 / rect.width),
+      y: (evt.clientY - rect.top) * (1050 / rect.height),
     };
   }
 
@@ -2309,7 +2421,13 @@ function bindDetailEvents() {
     const fc = card.frame_components || {};
     const relPath = fc[layerKey];
     if (!relPath) return false;
-    if (layerKey === 'background') return true;
+    if (layerKey === 'background') {
+      // Let clicks inside the artwork window pass through the transparent RGBA frame cutout to Artwork
+      const L = ensureCardLayout(card);
+      const a = L.art;
+      if (a && mx >= a.x && mx <= a.x + a.w && my >= a.y && my <= a.y + a.h) return false;
+      return true;
+    }
     const cacheKey = `${layerKey}::${relPath}`;
     const off = transparentLayerCache.get(cacheKey);
     if (!off) return false;
@@ -2379,7 +2497,10 @@ function bindDetailEvents() {
     document.querySelectorAll('#cb-ps-toolbox .cb-tool-btn').forEach((btn) => {
       btn.classList.toggle('active', btn.dataset.tool === activeTool);
     });
-    canvas.style.cursor = activeTool === 'select' ? 'default' : 'crosshair';
+    const cur = activeTool === 'select' ? 'default' : 'crosshair';
+    canvas.style.cursor = cur;
+    const pc = document.getElementById('cb-project-canvas');
+    if (pc) pc.style.cursor = cur;
   }
 
   document.querySelectorAll('#cb-ps-toolbox .cb-tool-btn[data-tool]').forEach((btn) => {
@@ -2557,7 +2678,7 @@ function bindDetailEvents() {
     if (oyEl) oyEl.value = Math.round(L.art.offset_y ?? 0);
   }
 
-  canvas.addEventListener('mousedown', (evt) => {
+  const handleStageMouseDown = (evt) => {
     const card = getActiveCard();
     if (!interactiveCheck?.checked || !card) return;
     const { x: mx, y: my } = getCanvasMouseCoords(evt);
@@ -2624,7 +2745,10 @@ function bindDetailEvents() {
       dragState = { mode: 'move', key: hit.key, startX: mx, startY: my, initialLayout, initialShapes, changed: false, preDragSnap };
     }
     renderCardCanvas(card);
-  });
+  };
+
+  canvas.addEventListener('mousedown', handleStageMouseDown);
+  document.getElementById('cb-project-canvas')?.addEventListener('mousedown', handleStageMouseDown);
 
   window.addEventListener('mousemove', (evt) => {
     const card = getActiveCard();
@@ -2632,19 +2756,26 @@ function bindDetailEvents() {
     const { x: mx, y: my } = getCanvasMouseCoords(evt);
 
     if (!dragState) {
+      const activeStage = getActiveStageCanvas();
       if (!interactiveCheck?.checked) {
-        canvas.style.cursor = 'default';
+        activeStage.style.cursor = 'default';
         return;
       }
       if (activeTool !== 'select') {
-        canvas.style.cursor = 'crosshair';
+        activeStage.style.cursor = 'crosshair';
         return;
       }
       const hit = findHitTarget(mx, my, card);
       const prevHover = hoveredElementKey;
       hoveredElementKey = hit ? hit.key : null;
-      canvas.style.cursor = hit ? hit.cursor : 'default';
-      if (prevHover !== hoveredElementKey) scheduleRender(card);
+      activeStage.style.cursor = hit ? hit.cursor : 'default';
+      if (prevHover !== hoveredElementKey) {
+        if (state.project && currentProjectFace() && _projectCleanReady) {
+          paintProjectWithOverlays(document.getElementById('cb-project-canvas'), card);
+        } else {
+          scheduleRender(card);
+        }
+      }
       return;
     }
 
@@ -2807,7 +2938,7 @@ function bindDetailEvents() {
       card.shapes.push(s);
       const key = `shape:${s.id}`;
       if (!Array.isArray(card.layer_order)) {
-        card.layer_order = ['background', 'art', 'pinlines', 'name_box', 'crown', 'border', 'pt_box'];
+        card.layer_order = [...DEFAULT_LAYER_ORDER];
       }
       card.layer_order.push(key);
       card.layer_opacities = card.layer_opacities || {};
@@ -2833,165 +2964,32 @@ async function exportCardsBatch(cards, face, format, dpi, singleCard = false) {
   const rootDir = getActiveRootDir();
   if (!rootDir) return showToast('Create or load a project on Home first.');
 
-  if (singleCard && cards.length === 1) {
-    const c = cards[0];
-    const payload = {
-      root_dir: rootDir,
-      cards: [{
-        card: c,
-        text_overlay_data_url: face === 'fronts' ? renderTextOverlayDataUrl(c, 4) : '',
-      }],
-      face,
-      export_format: format,
-      export_dpi: dpi,
-      single_card: true,
-      collision_mode: 'check',
-    };
-    setGlobalLoading(true, `Exporting ${c.name || 'card'}...`);
-    try {
-      let resp = await fetch('/api/card-builder/export-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      let data = await resp.json();
-      if (data.status === 'collision') {
-        setGlobalLoading(false);
-        const choice = await promptCollisionResolution(data.collision);
-        if (!choice) return;
-        payload.collision_mode = choice;
-        setGlobalLoading(true, `Exporting ${c.name || 'card'}...`);
-        resp = await fetch('/api/card-builder/export-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        data = await resp.json();
-      }
-      if (!resp.ok) return showToast(data.detail || 'Error exporting cards');
-      showToast(`Exported ${c.name || 'card'} to ${data.dest_dir}`);
-    } finally {
-      setGlobalLoading(false);
-    }
-    return;
+  const projectIds = cards
+    .map((c) => c.project_id || c.id || state.project?.project_id)
+    .filter(Boolean);
+  if (!projectIds.length) {
+    if (state.project) return exportCard();
+    return showToast('No project cards available for export.');
   }
 
-  // Batch export with live progress bar
-  const modal = document.getElementById('cb-import-progress-modal');
-  const txtEl = document.getElementById('cb-import-progress-text');
-  const barEl = document.getElementById('cb-import-progress-bar');
-  const subEl = document.getElementById('cb-import-progress-sub');
-
-  const firstCard = cards[0];
-  const firstPayload = {
-    root_dir: rootDir,
-    cards: [{
-      card: firstCard,
-      text_overlay_data_url: face === 'fronts' ? renderTextOverlayDataUrl(firstCard, 4) : '',
-    }],
-    face,
-    export_format: format,
-    export_dpi: dpi,
-    collision_mode: 'check',
-  };
-
-  setGlobalLoading(true, 'Preparing export...');
-  let firstResp = await fetch('/api/card-builder/export-batch', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(firstPayload),
-  });
-  let firstData = await firstResp.json();
-  setGlobalLoading(false);
-
-  if (firstData.status === 'collision') {
-    const choice = await promptCollisionResolution(firstData.collision);
-    if (!choice) return;
-    firstPayload.collision_mode = choice;
-    setGlobalLoading(true, `Exporting 1 / ${cards.length}: ${firstCard.name}...`);
-    firstResp = await fetch('/api/card-builder/export-batch', {
+  setGlobalLoading(true, `Exporting ${projectIds.length} card(s)...`);
+  try {
+    const resp = await fetch('/api/card-builder/export-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(firstPayload),
+      body: JSON.stringify({
+        root_dir: rootDir,
+        project_ids: projectIds,
+        face,
+        export_format: format,
+        export_dpi: dpi,
+      }),
     });
-    firstData = await firstResp.json();
-    setGlobalLoading(false);
-  }
-  if (!firstResp.ok) return showToast(firstData.detail || 'Error exporting cards');
-
-  const targetDir = firstData.dest_dir;
-  if (cards.length === 1) {
-    return showToast(`Exported 1 card to ${targetDir}`);
-  }
-
-  const titleEl = document.getElementById('cb-import-progress-title');
-  const cancelBtn = document.getElementById('cb-import-progress-cancel');
-  if (titleEl) titleEl.textContent = '📤 Exporting Cards';
-
-  const controller = new AbortController();
-  let cancelled = false;
-  if (cancelBtn) {
-    cancelBtn.style.display = 'inline-flex';
-    cancelBtn.disabled = false;
-    cancelBtn.textContent = '✕ Cancel';
-    cancelBtn.onclick = () => {
-      cancelled = true;
-      cancelBtn.disabled = true;
-      cancelBtn.textContent = 'Cancelling...';
-      controller.abort();
-    };
-  }
-
-  modal.classList.add('open');
-  let exportedCount = 1;
-  try {
-    for (let i = 1; i < cards.length; i++) {
-      if (cancelled) break;
-      const c = cards[i];
-      txtEl.textContent = `Exporting: ${c.name || 'Card'}...`;
-      const pct = Math.round((i / cards.length) * 100);
-      barEl.style.width = `${pct}%`;
-      subEl.textContent = `${i} / ${cards.length} (${pct}%)`;
-      try {
-        const r = await fetch('/api/card-builder/export-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            root_dir: rootDir,
-            target_dir: targetDir,
-            cards: [{
-              card: c,
-              text_overlay_data_url: face === 'fronts' ? renderTextOverlayDataUrl(c, 4) : '',
-            }],
-            face,
-            export_format: format,
-            export_dpi: dpi,
-            collision_mode: 'overwrite',
-          }),
-        });
-        if (r.ok) exportedCount++;
-      } catch (err) {
-        if (err && err.name === 'AbortError') {
-          cancelled = true;
-          break;
-        }
-      }
-    }
-    if (cancelled) {
-      showToast(`Export cancelled (${exportedCount} / ${cards.length} exported to ${targetDir})`);
-    } else {
-      barEl.style.width = '100%';
-      subEl.textContent = `${cards.length} / ${cards.length} (100%)`;
-      showToast(`Exported ${exportedCount} cards to ${targetDir}`);
-    }
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) return showToast(data.detail || 'Error exporting cards');
+    showToast(`Exported ${data.exported_count || projectIds.length} card(s) to ${data.dest_dir}`);
   } finally {
-    if (cancelBtn) {
-      cancelBtn.style.display = 'none';
-      cancelBtn.onclick = null;
-    }
-    if (titleEl) titleEl.textContent = '⏳ Loading Cards';
-    modal.classList.remove('open');
+    setGlobalLoading(false);
   }
 }
 
@@ -3251,7 +3249,7 @@ const PROJECT_TEXT_FIELDS = {
 
 function currentProjectFace() {
   const faces = state.project?.faces || [];
-  return faces.find((f) => f.face_index === state.faceIndex) || faces[0] || null;
+  return faces.find((f, idx) => (f.face_index ?? idx) === state.faceIndex) || faces[0] || null;
 }
 
 function projectFaceEntry(face, key) {
@@ -3296,29 +3294,74 @@ function populateProjectTextPanels(face) {
 }
 
 function syncProjectFaceSelect() {
-  const sel = document.getElementById('cb-sf-face');
-  if (!sel) return;
   const faces = state.project?.faces || [];
-  sel.innerHTML = faces
-    .map((f) => `<option value="${f.face_index}">Cara ${(f.face_index ?? 0) + 1}${f.face_ref ? ` — ${f.face_ref}` : ''}</option>`)
-    .join('');
-  sel.value = String(state.faceIndex);
+  ['cb-sf-face', 'cb-stage-face-select'].forEach((id) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    sel.innerHTML = faces.length
+      ? faces.map((f, idx) => {
+        const val = f.face_index ?? idx;
+        return `<option value="${val}">Cara ${idx + 1}${f.face_ref ? ` — ${f.face_ref}` : ''}</option>`;
+      }).join('')
+      : '<option value="0">Cara 1</option>';
+    sel.value = String(state.faceIndex ?? 0);
+  });
 }
 
 async function showProjectFace(faceIndex) {
+  await ensureSymbolsCatalog();
   state.faceIndex = faceIndex;
   const face = currentProjectFace();
-  populateProjectTextPanels(face);
-  const sel = document.getElementById('cb-sf-face');
-  if (sel) sel.value = String(state.faceIndex);
+  ['cb-sf-face', 'cb-stage-face-select'].forEach((id) => {
+    const sel = document.getElementById(id);
+    if (sel) sel.value = String(state.faceIndex);
+  });
   if (!face) return;
+
+  let card = getActiveCard();
+  if (!card && state.project) {
+    card = {
+      id: state.project.project_id,
+      project_id: state.project.project_id,
+      name: state.project.name || face.face_ref || 'Untitled',
+      set: state.project.set || 'mtg',
+      count: 1,
+    };
+    getCards().push(card);
+    activeCardId = card.id;
+  }
+
+  if (card) {
+    syncCardWithProjectFace(card, face, state.project);
+    populateDetailControls(card);
+  } else {
+    populateProjectTextPanels(face);
+  }
+
+  const legacyWrap = document.getElementById('cb-legacy-wrap');
+  const projectWrap = document.getElementById('cb-project-wrap');
+  if (legacyWrap) legacyWrap.style.display = 'none';
+  if (projectWrap) projectWrap.style.display = 'flex';
   const canvasEl = document.getElementById('cb-project-canvas');
-  if (canvasEl) await renderProjectFace(face, canvasEl);
+  if (canvasEl) {
+    await renderProjectFace(face, _projectCleanCanvas, {
+      card,
+      set_symbol: state.project?.set_symbol,
+    });
+    canvasEl.width = _projectCleanCanvas.width;
+    canvasEl.height = _projectCleanCanvas.height;
+    canvasEl.style.maxWidth = '100%';
+    canvasEl.style.height = 'auto';
+    _projectCleanReady = true;
+    paintProjectWithOverlays(canvasEl, card);
+  }
 }
 
 function rememberProjectFaceEdits() {
   const face = currentProjectFace();
   if (!face) return;
+  const card = getActiveCard();
+  if (card) syncProjectFaceFromCard(card, face);
   readProjectTextPanels(face);
   state.faces[face.face_index ?? 0] = face.text_layers;
   state.dirty = true;
@@ -3336,15 +3379,17 @@ async function importFromScryfall() {
   const errorEl = document.getElementById('cb-sf-error');
   if (errorEl) errorEl.style.display = 'none';
   if (statusEl) statusEl.textContent = 'Importing from Scryfall...';
-  const faceIndex = Number(document.getElementById('cb-sf-face')?.value || 0);
+  const faceIndexRaw = document.getElementById('cb-sf-face')?.value;
+  const faceIndex = faceIndexRaw !== undefined && faceIndexRaw !== '' ? Number(faceIndexRaw) : null;
   const rawJson = (document.getElementById('cb-sf-json')?.value || '').trim();
   const payload = {
     card: rawJson ? JSON.parse(rawJson) : null,
     url: (document.getElementById('cb-sf-url')?.value || '').trim(),
     name: (document.getElementById('cb-sf-name')?.value || '').trim(),
     set: (document.getElementById('cb-sf-set')?.value || '').trim(),
-    face_index: faceIndex,
+    face_index: null,
     showcase_style_override: (document.getElementById('cb-sf-showcase')?.value || '').trim(),
+    root_dir: getActiveRootDir(),
   };
   let resp;
   try {
@@ -3378,9 +3423,28 @@ async function importFromScryfall() {
     }
     state.faces[face.face_index ?? 0] = face.text_layers;
   });
-  state.faceIndex = (project.faces || []).some((f) => f.face_index === faceIndex) ? faceIndex : (project.faces?.[0]?.face_index ?? 0);
+  state.faceIndex = (faceIndex !== null && (project.faces || []).some((f) => f.face_index === faceIndex))
+    ? faceIndex
+    : (project.faces?.[0]?.face_index ?? 0);
   state.dirty = false;
+
+  let existingCard = getCards().find((c) => c.project_id === project.project_id || c.id === project.project_id);
+  if (!existingCard) {
+    existingCard = {
+      id: project.project_id,
+      project_id: project.project_id,
+      name: project.name || project.faces?.[0]?.face_ref || 'Untitled',
+      set: project.set || 'mtg',
+      art_crop_url: project.faces?.[0]?.art_layer?.url || '',
+      count: 1,
+    };
+    getCards().push(existingCard);
+  }
+  activeCardId = existingCard.id;
+
   syncProjectFaceSelect();
+  listsView.style.display = 'none';
+  detailView.style.display = 'flex';
   await showProjectFace(state.faceIndex);
   const warnings = [...(project.warnings || []), ...(project.faces || []).flatMap((f) => f.warnings || [])];
   if (statusEl) statusEl.textContent = warnings.length ? `Imported. Warnings: ${warnings.join(', ')}` : 'Imported.';
@@ -3390,10 +3454,21 @@ async function importFromScryfall() {
 async function exportCard() {
   const errorEl = document.getElementById('cb-sf-error');
   if (!state.project) return;
+  const face = currentProjectFace();
+  const card = getActiveCard();
+  if (card && face) syncProjectFaceFromCard(card, face);
+  const payload = {
+    project_id: state.project.project_id,
+    face_index: state.faceIndex,
+    text_layers: face?.text_layers || null,
+  };
+  if (face?.art_layer?.url?.startsWith('data:image/')) {
+    payload.art_override_dataurl = face.art_layer.url;
+  }
   const resp = await fetch('/api/card-builder/export', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project_id: state.project.project_id, face_index: state.faceIndex }),
+    body: JSON.stringify(payload),
   });
   if (resp.status !== 200) {
     const detail = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
@@ -3412,9 +3487,14 @@ async function applyProjectArt(url) {
   const face = currentProjectFace();
   if (!face || !url) return;
   face.art_layer = { ...(face.art_layer || {}), url };
+  const card = getActiveCard();
+  if (card) {
+    if (url.startsWith('data:')) card.custom_art_data = url;
+    else { card.custom_art_data = ''; card.art_crop_url = url; }
+  }
   state.dirty = true;
   const canvasEl = document.getElementById('cb-project-canvas');
-  if (canvasEl) await renderProjectFace(face, canvasEl);
+  if (canvasEl) await renderProjectFace(face, canvasEl, { card, set_symbol: state.project?.set_symbol });
 }
 
 async function upscaleDataUrl(dataUrl, factor) {
@@ -3487,8 +3567,15 @@ function bindProjectPanels() {
     syncProjectFaceSelect();
     document.getElementById('cb-sf-import-modal')?.classList.add('open');
   });
+  document.getElementById('cb-sf-close')?.addEventListener('click', () => {
+    document.getElementById('cb-sf-import-modal')?.classList.remove('open');
+  });
+  document.getElementById('cb-sf-cancel')?.addEventListener('click', () => {
+    document.getElementById('cb-sf-import-modal')?.classList.remove('open');
+  });
   document.getElementById('cb-sf-import')?.addEventListener('click', importFromScryfall);
   document.getElementById('cb-sf-face')?.addEventListener('change', (e) => switchProjectFace(e.target.value));
+  document.getElementById('cb-stage-face-select')?.addEventListener('change', (e) => switchProjectFace(e.target.value));
   document.getElementById('cb-export-single-png-btn')?.addEventListener('click', exportCard);
   document.getElementById('cb-replace-art-btn')?.addEventListener('click', openArtMenu);
 }
@@ -3496,8 +3583,6 @@ function bindProjectPanels() {
 (async function init() {
   if (document.fonts && document.fonts.ready) {
     await Promise.allSettled([
-      document.fonts.load('24px Mana'),
-      document.fonts.load('24px Keyrune'),
       document.fonts.load('bold 24px "BelerenLocal"'),
       document.fonts.load('24px "MPlantinLocal"'),
       document.fonts.ready,
@@ -3508,11 +3593,13 @@ function bindProjectPanels() {
     });
   }
   workspaceState = await loadActiveWorkspaceState();
-  try {
-    const tResp = await fetch('/api/card-builder/templates');
-    const tData = await tResp.json();
-    catalog = tData.catalog || {};
-  } catch { catalog = {}; }
+  const symCat = await ensureSymbolsCatalog();
+  catalog = {};
+  const tplNames = Object.keys(symCat.templates || {});
+  const roleFrames = symCat.frames_by_role || {};
+  (tplNames.length ? tplNames : ['M15Regular']).forEach((k) => {
+    catalog[k] = roleFrames;
+  });
 
   const styleKeys = Object.keys(catalog);
   ['cb-detail-style-select'].forEach((id) => {
@@ -3520,14 +3607,19 @@ function bindProjectPanels() {
     if (!sel) return;
     sel.innerHTML = styleKeys.length
       ? styleKeys.map((k) => `<option value="${k}" title="${k}">${styleDisplayName(k)}</option>`).join('')
-      : '<option value="Templates/normal">normal</option>';
+      : '<option value="M15Regular">M15Regular</option>';
   });
 
   layerManager = new LayerManager(
     document.getElementById('cb-layer-list'),
     (changedCard) => {
       const card = changedCard || getActiveCard();
-      if (card) { renderCardCanvas(card); persistState(true); }
+      if (card) {
+        const popEl = document.getElementById('cb-art-over-top');
+        if (popEl) popEl.checked = Boolean(card.art_over_top);
+        renderCardCanvas(card);
+        persistState(true);
+      }
     },
     (selectedKey, changedCard) => {
       selectedElementKey = selectedKey || null;
@@ -3579,33 +3671,114 @@ function bindProjectPanels() {
     persistState(true);
   });
 
-  // A /search response holds one card, or both faces of a double-faced card (front, back).
-  function addSearchedCards(data, count) {
-    const cards = data?.cards?.length ? data.cards : (data?.card ? [data.card] : []);
-    cards.forEach((c) => {
-      if (count) c.count = count;
-      getCards().push(c);
-    });
-    return cards;
+  // A /search response holds results / cards array from Scryfall search.
+  async function addSearchedCards(data, count) {
+    const rawList = data?.cards?.length ? data.cards : (data?.results?.length ? data.results : (data?.card ? [data.card] : []));
+    if (!rawList.length) return [];
+    const target = rawList[0];
+    try {
+      const impResp = await fetch('/api/card-builder/import-scryfall', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: target.name,
+          set: target.set,
+          root_dir: getActiveRootDir(),
+        }),
+      });
+      if (impResp.ok) {
+        const project = await impResp.json();
+        const cardItem = {
+          ...target,
+          id: project.project_id,
+          project_id: project.project_id,
+          art_crop_url: project.faces?.[0]?.art_layer?.url || target.art_crop_url || target.art_crop || '',
+          count: count || 1,
+        };
+        getCards().push(cardItem);
+        return [cardItem];
+      }
+    } catch {}
+    if (count) target.count = count;
+    getCards().push(target);
+    return [target];
   }
 
-  document.getElementById('cb-search-btn').addEventListener('click', async () => {
+  const searchPickerModal = document.getElementById('cb-search-picker-modal');
+  const searchPickerClose = document.getElementById('cb-search-picker-close');
+  const searchPickerGrid = document.getElementById('cb-search-picker-grid');
+  const searchPickerSub = document.getElementById('cb-search-picker-sub');
+  searchPickerClose?.addEventListener('click', () => searchPickerModal?.classList.remove('open'));
+  searchPickerModal?.addEventListener('click', (e) => {
+    if (e.target === searchPickerModal) searchPickerModal.classList.remove('open');
+  });
+
+  function openSearchPickerModal(query, results) {
+    if (!searchPickerModal || !searchPickerGrid) return;
+    if (searchPickerSub) {
+      searchPickerSub.textContent = `Found ${results.length} matches for "${query}". Click the card you want to add:`;
+    }
+    searchPickerGrid.innerHTML = '';
+    results.forEach((item) => {
+      const tile = document.createElement('div');
+      tile.className = 'art-result-card';
+      tile.style.cursor = 'pointer';
+      const imgUrl = toSameOriginUrl(item.image || item.art_crop || '');
+      tile.innerHTML = `
+        <img src="${imgUrl}" loading="lazy" alt="${item.name || ''}" style="width:100%; aspect-ratio:5/7; object-fit:cover; border-radius:4px; background:#111;">
+        <div style="font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${item.name || ''}">${item.name || ''}</div>
+        <div style="font-size:10px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${(item.set || '').toUpperCase()} · ${item.type_line || ''}</div>
+      `;
+      tile.addEventListener('click', async () => {
+        searchPickerModal.classList.remove('open');
+        setGlobalLoading(true, `Importing ${item.name}...`);
+        try {
+          const added = await addSearchedCards({ results: [item] });
+          renderLists();
+          persistState(true);
+          showToast(`Added: ${added.map((c) => c.name).join(' + ')}`);
+        } finally {
+          setGlobalLoading(false);
+        }
+      });
+      searchPickerGrid.appendChild(tile);
+    });
+    searchPickerModal.classList.add('open');
+  }
+
+  async function runBoardCardSearch() {
     const q = document.getElementById('cb-search-input').value.trim();
     if (!q) return;
     setGlobalLoading(true, `Searching ${q}...`);
     try {
-    const resp = await fetch('/api/card-builder/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q, root_dir: getActiveRootDir() }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) return showToast(data.detail || 'Card not found');
-    const added = addSearchedCards(data);
-    renderLists();
-    persistState(true);
-    showToast(`Added: ${added.map((c) => c.name).join(' + ')}`);
-    } finally { setGlobalLoading(false); }
+      const resp = await fetch('/api/card-builder/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q, root_dir: getActiveRootDir() }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) return showToast(data.detail || 'Card not found');
+      const results = Array.isArray(data.results) ? data.results : [];
+      if (!results.length && !data.card) {
+        return showToast(`No cards found for "${q}"`);
+      }
+      if (results.length > 1) {
+        setGlobalLoading(false);
+        openSearchPickerModal(q, results);
+        return;
+      }
+      const added = await addSearchedCards(data);
+      renderLists();
+      persistState(true);
+      showToast(`Added: ${added.map((c) => c.name).join(' + ')}`);
+    } finally {
+      setGlobalLoading(false);
+    }
+  }
+
+  document.getElementById('cb-search-btn').addEventListener('click', runBoardCardSearch);
+  document.getElementById('cb-search-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') runBoardCardSearch();
   });
 
   function parseMtgoLines(text) {
@@ -3650,7 +3823,7 @@ function bindProjectPanels() {
     subEl.textContent = `0 / ${entries.length}`;
 
     let imported = 0;
-    const styleKey = ensureCardBuilderState().global_frame_style || 'Templates/normal';
+    const styleKey = ensureCardBuilderState().global_frame_style || 'M15Regular';
 
     try {
       for (let i = 0; i < entries.length; i++) {
@@ -3664,7 +3837,7 @@ function bindProjectPanels() {
           });
           if (resp.ok) {
             const data = await resp.json();
-            if (addSearchedCards(data, entry.count).length) imported++;
+            if ((await addSearchedCards(data, entry.count)).length) imported++;
           }
         } catch {}
         const pct = Math.round(((i + 1) / entries.length) * 100);
@@ -3678,37 +3851,6 @@ function bindProjectPanels() {
       txtBtn.disabled = false;
       modal.classList.remove('open');
     }
-  });
-
-  const pngInput = document.getElementById('cb-import-png-input');
-  document.getElementById('cb-import-png-btn').addEventListener('click', () => pngInput.click());
-  pngInput.addEventListener('change', async () => {
-    if (!pngInput.files?.length) return;
-    const fd = new FormData();
-    for (const f of pngInput.files) fd.append('files', f);
-    const resp = await fetch('/api/card-builder/import-pngs', { method: 'POST', body: fd });
-    const data = await resp.json();
-    if (!resp.ok) return showToast('Error importing PNGs');
-    getCards().push(...data.cards);
-    renderLists();
-    persistState(true);
-    showToast(`Imported ${data.count} images`);
-  });
-
-  document.getElementById('cb-import-dir-btn').addEventListener('click', async () => {
-    const dir = await pickFolder();
-    if (!dir) return;
-    const resp = await fetch('/api/card-builder/import-png-dir', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ dir_path: dir }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) return showToast(data.detail || 'Error importing folder');
-    getCards().push(...data.cards);
-    renderLists();
-    persistState(true);
-    showToast(`Imported ${data.count} images desde carpeta`);
   });
 
   document.querySelectorAll('#cb-view-switcher .cb-view-btn').forEach((btn) => {
@@ -3737,7 +3879,7 @@ function bindProjectPanels() {
   const txtCheckClose = document.getElementById('cb-txt-check-close');
 
   async function retryFetchCardFromTxt(entry) {
-    const styleKey = ensureCardBuilderState().global_frame_style || 'Templates/normal';
+    const styleKey = ensureCardBuilderState().global_frame_style || 'M15Regular';
     const resp = await fetch('/api/card-builder/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3745,7 +3887,7 @@ function bindProjectPanels() {
     });
     if (!resp.ok) return false;
     const data = await resp.json();
-    return addSearchedCards(data, entry.count || 1).length > 0;
+    return (await addSearchedCards(data, entry.count || 1)).length > 0;
   }
 
   function renderTxtCheckModal() {

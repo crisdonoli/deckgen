@@ -8,7 +8,7 @@ import sys
 import tempfile
 from typing import Any, Dict, Optional
 
-from config import DEFAULT_STYLE_KEY
+from config import DEFAULT_FRAME_PROFILE
 
 STATE_FILENAME = "state.json"
 
@@ -45,7 +45,7 @@ def default_project_state(root_dir: str, project_name: Optional[str] = None) -> 
             "cards": [],
             "ready_ids": [],
             "active_card_id": None,
-            "global_frame_style": DEFAULT_STYLE_KEY,
+            "global_frame_style": DEFAULT_FRAME_PROFILE,
             "export_dpi": 1200,
             "export_format": "pdf",
         },
@@ -214,16 +214,43 @@ def resolve_collision_target(parent_dir: str, base_name: str, collision_mode: st
 
 
 def pick_native_directory(initial_dir: Optional[str] = None) -> Dict[str, Any]:
-    """Attempt native OS folder picker via tkinter in a subprocess; gracefully report unsupported if headless."""
-    if sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
-        return {"supported": False, "path": None, "reason": "No GUI display detected"}
+    """Attempt native OS folder picker. On Linux, prefer zenity/kdialog (true OS picker); avoid Tk's small X11 dialog."""
+    start_dir = initial_dir or os.path.expanduser("~")
+    if sys.platform.startswith("linux"):
+        if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            return {"supported": False, "path": None, "reason": "No GUI display detected"}
+        zenity = shutil.which("zenity")
+        if zenity:
+            try:
+                proc = subprocess.run(
+                    [zenity, "--file-selection", "--directory", "--title=Select Project Folder", f"--filename={start_dir.rstrip('/')}/"],
+                    capture_output=True, text=True, timeout=120,
+                )
+                chosen = proc.stdout.strip()
+                return {"supported": True, "path": chosen or None}
+            except Exception:
+                pass
+        kdialog = shutil.which("kdialog")
+        if kdialog:
+            try:
+                proc = subprocess.run(
+                    [kdialog, "--getexistingdirectory", start_dir, "--title", "Select Project Folder"],
+                    capture_output=True, text=True, timeout=120,
+                )
+                chosen = proc.stdout.strip()
+                return {"supported": True, "path": chosen or None}
+            except Exception:
+                pass
+        # Do not fall back to tkinter on Linux: Tk's X11 askdirectory is tiny and returns the parent folder when a subfolder is highlighted.
+        return {"supported": False, "path": None, "reason": "No native GTK/Qt dialog available; use web folder browser"}
+
     script = (
         "import tkinter as tk\n"
         "from tkinter import filedialog\n"
         "root = tk.Tk()\n"
         "root.withdraw()\n"
         "root.attributes('-topmost', True)\n"
-        f"p = filedialog.askdirectory(initialdir={repr(initial_dir or os.path.expanduser('~'))})\n"
+        f"p = filedialog.askdirectory(initialdir={repr(start_dir)})\n"
         "print(p or '')\n"
     )
     try:

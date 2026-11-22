@@ -1,21 +1,22 @@
-"""Resolve a Scryfall card into a frame recipe backed by assets/resources/assets.db."""
+"""Resolve a Scryfall card into a frame recipe backed directly by assets/resources/frames/ folders."""
 import argparse
 import json
 import re
-import sqlite3
 import sys
 from copy import deepcopy
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[2]
-_MAP_PATH = _ROOT / "assets" / "scryfall-map.json"
-_DEFAULT_DB = _ROOT / "assets" / "resources" / "assets.db"
-
 try:
+    from ..config import SCRYFALL_MAP_PATH
+    from .asset_catalog import scan_frames_from_folders
     from .card_layouts import DEFAULT_LAYOUT, get_template_layout
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from config import SCRYFALL_MAP_PATH
+    from core.asset_catalog import scan_frames_from_folders
     from core.card_layouts import DEFAULT_LAYOUT, get_template_layout
+
+_MAP_PATH = Path(SCRYFALL_MAP_PATH)
 
 CANVAS = {"width": 1500, "height": 2100}
 _LAYOUT_BASE = {"w": DEFAULT_LAYOUT["canvas"]["w"], "h": DEFAULT_LAYOUT["canvas"]["h"]}
@@ -73,7 +74,17 @@ def _eval(cond, ctx):
 def _eval_material(expr, ctx):
     if not isinstance(expr, str) or (" if " not in expr and " else " not in expr):
         return expr
-    scope = {"__builtins__": {}, "len": len, "any": any, "all": all, "bool": bool, "set": set, "sorted": sorted}
+    scope = {
+        "__builtins__": {},
+        "len": len,
+        "any": any,
+        "all": all,
+        "bool": bool,
+        "set": set,
+        "sorted": sorted,
+        "artifact_brown_retro": "artifact_brown_retro",
+        "artifact_steel_modern": "artifact_steel_modern",
+    }
     return eval(expr, scope, ctx)
 
 
@@ -139,9 +150,14 @@ def resolve_faces(card):
             out.append(merged)
         return out
     merged = dict(card)
+    if card.get("layout") == "adventure" and len(faces) >= 2:
+        merged.update(faces[0])
+        merged["_adventure_face"] = dict(faces[1])
+    elif faces and not merged.get("type_line"):
+        merged.update(faces[0])
     merged["_face_index"] = None
-    merged["_face_ref"] = card.get("name")
-    merged["_art_crop"] = _art_crop(card, None)
+    merged["_face_ref"] = merged.get("name") or card.get("name")
+    merged["_art_crop"] = _art_crop(card, faces[0] if faces else None)
     merged["_notes"] = []
     if not merged["_art_crop"]:
         merged["_notes"].append("no_art_crop")
@@ -323,7 +339,7 @@ def infer_taxonomy(card, face=None):
 
     border_rules = m["border_color_mapping"]["rules"]
     border = ctx["border_color"]
-    if border in border_rules and border != "borderless":
+    if border in border_rules:
         tax["border_color"] = border
     else:
         tax["border_color"] = "black"
@@ -506,7 +522,9 @@ def _ranked(rows, tax, face_index=None):
     if strict:
         strict.sort(
             key=lambda item: (
+                -int("frame_texture_material" in item["matched"]),
                 -int(item["overlap"]),
+                -len(item["matched"]),
                 -item["score"],
                 -item["face"],
                 item["asset"]["original_path"].count("/"),
@@ -516,8 +534,10 @@ def _ranked(rows, tax, face_index=None):
         return strict
     scored.sort(
         key=lambda item: (
+            -int("frame_texture_material" in item["matched"]),
             -int(item["overlap"]),
             len(item["unmatched"]),
+            -len(item["matched"]),
             -item["score"],
             -item["face"],
             item["asset"]["original_path"].count("/"),
@@ -527,18 +547,18 @@ def _ranked(rows, tax, face_index=None):
     return scored
 
 
-def _rows(conn, roles, extra="", prefixes=None):
-    marks = ",".join("?" for _ in roles)
-    params = list(roles)
-    sql = _ROLE_SQL + " WHERE asset_role IN (%s)" % marks
-    if prefixes:
-        sql += " AND (" + " OR ".join("original_path LIKE ?" for _ in prefixes) + ")"
-        params += [p + "%" for p in prefixes]
-    if extra:
-        sql += " AND " + extra
-    cursor = conn.execute(sql, params)
-    keys = [d[0] for d in cursor.description]
-    return [dict(zip(keys, row)) for row in cursor]
+def _rows(all_rows, roles, extra="", prefixes=None):
+    role_set = set(roles)
+    out = []
+    for row in all_rows:
+        if row.get("asset_role") not in role_set:
+            continue
+        if prefixes:
+            op = str(row.get("original_path") or "")
+            if not any(op.startswith(p) for p in prefixes):
+                continue
+        out.append(row)
+    return out
 
 
 def _official(rows, notes):
@@ -574,8 +594,14 @@ def _fork_dirs(trace, section):
 def _frame_dir_set(trace, tax):
     layout = _fork_dirs(trace, "layout")
     structural = _fork_dirs(trace, "structural_type_override")
+    box_variant = _fork_dirs(trace, "box_variant") if tax.get("box_variant") not in (None, "regular") else []
+    fx = _fork_dirs(trace, "frame_effects") if tax.get("frame_effects") else []
     showcase = _fork_dirs(trace, "showcase_style") if tax.get("showcase_style") not in (None, "none") else []
-    candidates = [lst for lst in (showcase, structural, layout) if lst]
+    if tax.get("structural_type_override") == "planeswalker" and box_variant:
+        return box_variant, None
+    if not showcase and "inverted" in (tax.get("frame_effects") or []) and fx:
+        return fx, None
+    candidates = [lst for lst in (showcase, box_variant, structural, fx, layout) if lst]
     if not candidates:
         return [], None
     base = max(candidates, key=lambda lst: max(len(p) for p in lst))
@@ -583,7 +609,7 @@ def _frame_dir_set(trace, tax):
     compatible = [
         p
         for p in base
-        if any(_common_segments(p, q) >= 3 for q in frame + structural)
+        if any(_common_segments(p, q) >= 3 for q in frame + structural + box_variant + fx)
     ]
     if compatible:
         return compatible, None
@@ -727,7 +753,7 @@ def select_layers(tax, face, conn):
     else:
         notes.append("no_mask_in_%s" % (mask_scope[0] if mask_scope else "no_scope"))
 
-    if tax.get("crown_style") != "none":
+    if tax.get("crown_style") != "none" and tax.get("structural_type_override") != "planeswalker":
         crown_rows = _rows(conn, ("crown",), prefixes=dir_set) if dir_set else _rows(conn, ("crown",))
         if not crown_rows:
             crown_rows = _rows(conn, ("crown",), prefixes=["img/frames/m15/crowns/"])
@@ -747,6 +773,8 @@ def select_layers(tax, face, conn):
 
     if face.get("power") is not None or face.get("toughness") is not None:
         rows = _rows(conn, ("pt_box",), prefixes=dir_set) if dir_set else _rows(conn, ("pt_box",))
+        if not rows:
+            rows = _rows(conn, ("pt_box",), prefixes=["img/frames/m15/regular/", "img/frames/m15/"])
         ranked = _select(rows, tax, notes)
         if ranked:
             layers.append(_layer(40, ranked[0]["asset"], ranked[0]))
@@ -754,9 +782,13 @@ def select_layers(tax, face, conn):
             notes.append("no_pt_box_in_%s" % scope)
 
     if tax.get("frame") == "2015" and face.get("rarity") in ("rare", "mythic"):
-        rows = _rows(conn, ("stamp",), prefixes=dir_set) if dir_set else _rows(conn, ("stamp",))
+        rows = _rows(conn, ("stamp",), prefixes=dir_set) if dir_set else []
         if not rows:
-            rows = _rows(conn, ("stamp",), prefixes=["img/frames/m15/"])
+            rows = _rows(conn, ("stamp",), prefixes=["img/frames/m15/holoStamps/", "img/frames/m15/ub/regular/stamp/"])
+        rows = [
+            r for r in rows
+            if not any(x in str(r.get("original_path") or "") for x in ("acorn.png", "alchemy.png"))
+        ] or rows
         ranked = _select(rows, tax, notes)
         if ranked:
             layers.append(_layer(50, ranked[0]["asset"], ranked[0]))
@@ -764,7 +796,9 @@ def select_layers(tax, face, conn):
             notes.append("no_stamp")
 
     border_rule = m["border_color_mapping"]["rules"].get(tax.get("border_color")) or {}
-    rows = _rows(conn, ("border",), prefixes=dir_set) if dir_set else _rows(conn, ("border",))
+    rows = _rows(conn, ("border",), prefixes=dir_set) if dir_set else []
+    if not rows:
+        rows = _rows(conn, ("border",), prefixes=["img/frames/m15/new/", "img/frames/m15/"])
     if not rows:
         rows = _rows(conn, ("border",), prefixes=["img/frames/margins/", "img/frames/bleedEdge/"])
     ranked = _select(rows, tax, notes)
@@ -781,27 +815,6 @@ def select_layers(tax, face, conn):
         )
     else:
         notes.append("no_border_in_%s" % scope)
-
-    corner_rule = m["corner_cut_mapping"]["rules"].get(tax.get("corner_cut")) or {}
-    corner_rows = [
-        row
-        for row in _rows(conn, ("border", "other"))
-        if row.get("corner_cut") is not None
-    ]
-    ranked = _ranked(_official(corner_rows, notes), tax)
-    if ranked:
-        layers.append(_layer(70, ranked[0]["asset"], ranked[0]))
-    elif corner_rule.get("procedural_fallback"):
-        layers.append(
-            {
-                "z_index": 70,
-                "type": "procedural",
-                "operation": corner_rule["procedural_fallback"],
-                "id": None,
-            }
-        )
-    else:
-        notes.append("no_corner_cut")
 
     if pinline_rows:
         ranked = _ranked(pinline_rows, tax, face_index)
@@ -821,14 +834,68 @@ def _scaled(field):
     return out
 
 
-def _art_layer(face):
-    art = DEFAULT_LAYOUT["art"]
-    bounds = {
-        "x": int(round(art["x"] * _SCALE)),
-        "y": int(round(art["y"] * _SCALE)),
-        "w": int(round(art["w"] * _SCALE)),
-        "h": int(round(art["h"] * _SCALE)),
-    }
+def _infer_template_name(tax: dict, layers: list | None = None) -> str:
+    if tax.get("structural_type_override") == "planeswalker":
+        base_paths = [str(l.get("original_path") or "").lower() for l in (layers or []) if l.get("asset_role") == "base_frame"]
+        if any("/tall/" in p or "planeswalkertall" in p for p in base_paths):
+            return "PlaneswalkerTall"
+        if any("/regular/" in p or "planeswalkerframe" in p for p in base_paths):
+            return "PlaneswalkerRegular"
+        return "PlaneswalkerTall" if tax.get("box_variant") == "tall" else "PlaneswalkerRegular"
+    layout = tax.get("layout")
+    if layout == "saga":
+        return "SagaRegular"
+    if layout == "class":
+        return "Class"
+    if layout == "modal_dfc":
+        if tax.get("box_variant") == "short" and any(
+            "modal/short/" in str(l.get("original_path") or "") for l in (layers or []) if l.get("asset_role") == "base_frame"
+        ):
+            return "ModalShort"
+        return "ModalRegular"
+    if layout == "transform":
+        return "TransformRegular"
+    if layout == "split":
+        return "Split"
+    if layout == "battle":
+        return "Battle"
+    if layout == "adventure":
+        return "Adventure"
+    if layout == "token":
+        return "TokenTextless" if tax.get("box_variant") == "textless" else "TokenRegular"
+    frame = tax.get("frame")
+    if frame == "1997":
+        return "Seventh"
+    if frame == "2003":
+        return "Eighth"
+    if frame == "future":
+        return "Future"
+    effects = set(tax.get("frame_effects") or [])
+    if "inverted" in effects or tax.get("border_color") == "borderless":
+        return "M15Borderless"
+    if "extendedart" in effects:
+        return "M15Extended"
+    return "M15Regular"
+
+
+def _art_layer(face, template_name=None):
+    tpl = get_template_layout(template_name) if template_name else {}
+    ab = tpl.get("art_bounds")
+    if ab and ab.get("width") and ab.get("height"):
+        bounds = {
+            "x": int(ab.get("x", 0)),
+            "y": int(ab.get("y", 0)),
+            "w": int(ab["width"]),
+            "h": int(ab["height"]),
+        }
+    else:
+        art = DEFAULT_LAYOUT["art"]
+        bounds = {
+            "x": int(round(art["x"] * _SCALE)),
+            "y": int(round(art["y"] * _SCALE)),
+            "w": int(round(art["w"] * _SCALE)),
+            "h": int(round(art["h"] * _SCALE)),
+        }
     return {
         "source": face.get("_art_crop"),
         "transform": {"x": bounds["x"], "y": bounds["y"], "scale": 1.0, "rotation": 0},
@@ -849,30 +916,33 @@ def _text(value):
     return value or None
 
 
-def _text_layers(face):
-    template = face.get("template")
+def _text_layers(face, template_name=None):
+    template = face.get("template") or template_name
     text_bounds = (get_template_layout(template).get("text_bounds") or {}) if template else {}
 
     def bounds(key, fallback=None):
         value = text_bounds.get(key)
         if value:
-            return dict(value)
+            out = dict(value)
+            if "width" in out and "w" not in out:
+                out["w"] = out["width"]
+            if "height" in out and "h" not in out:
+                out["h"] = out["height"]
+            return out
         fallback = fallback or key
         return _scaled(DEFAULT_LAYOUT[fallback]) if fallback in DEFAULT_LAYOUT else None
 
     title = _text(re.split(r"\s*//\s*", str(face.get("name") or ""), maxsplit=1)[0])
-    collector_parts = (
-        face.get("set"),
-        face.get("collector_number"),
-        face.get("rarity"),
-        face.get("artist"),
-    )
-    collector_text = " \u00b7 ".join(str(part) for part in collector_parts if part)
+    collector_text = _text(face.get("artist")) or ""
     rules_bounds = bounds("rules", "oracle_box")
+    if template == "PlaneswalkerTall" and not text_bounds.get("rules"):
+        rules_bounds = {"x": 150, "y": 1175, "w": 1220, "width": 1220, "h": 700, "height": 700, "size": 50}
+    elif template == "PlaneswalkerRegular" and not text_bounds.get("rules"):
+        rules_bounds = {"x": 150, "y": 1310, "w": 1220, "width": 1220, "h": 565, "height": 565, "size": 52}
     return {
         "title": {"text": title, "bounds": bounds("title")},
-        "mana_cost": {"text": _text(face.get("mana_cost")), "bounds": bounds("mana")},
-        "type_line": {"text": _text(face.get("type_line")), "bounds": bounds("type")},
+        "mana_cost": {"text": _text(face.get("mana_cost")), "bounds": bounds("mana", "mana_cost")},
+        "type_line": {"text": _text(face.get("type_line")), "bounds": bounds("type", "type_line")},
         "oracle_text": {"text": _text(face.get("oracle_text")), "bounds": rules_bounds},
         "flavor_text": {
             "text": _text(face.get("flavor_text")),
@@ -892,43 +962,64 @@ def _text_layers(face):
             "rarity": face.get("rarity"),
             "artist": face.get("artist"),
             "lang": face.get("lang"),
-            "bounds": bounds("collector", "artist"),
+            "bounds": bounds("collector_info", "artist"),
         },
-    }
+    } | (
+        {
+            "adventure_title": {
+                "text": _text(face["_adventure_face"].get("name")),
+                "bounds": bounds("adventure_title"),
+            },
+            "adventure_mana_cost": {
+                "text": _text(face["_adventure_face"].get("mana_cost")),
+                "bounds": bounds("adventure_mana"),
+            },
+            "adventure_type_line": {
+                "text": _text(face["_adventure_face"].get("type_line")),
+                "bounds": bounds("adventure_type"),
+            },
+            "adventure_oracle_text": {
+                "text": _text(face["_adventure_face"].get("oracle_text")),
+                "bounds": bounds("adventure_rules"),
+            },
+        }
+        if isinstance(face.get("_adventure_face"), dict)
+        else {}
+    )
 
 
 def build_recipe(card, *, db_path=None):
-    db_path = str(db_path or _DEFAULT_DB)
-    conn = sqlite3.connect(db_path)
-    try:
-        recipes = []
-        meta_notes = []
-        for face in resolve_faces(card):
-            tax = infer_taxonomy(card, face)
-            layers, layer_notes = select_layers(tax, face, conn)
-            warnings = list(face.get("_notes") or []) + list(tax.get("_notes") or []) + layer_notes
-            recipes.append(
-                {
-                    "face_index": face.get("_face_index"),
-                    "face_ref": face.get("_face_ref"),
-                    "taxonomy": {k: v for k, v in deepcopy(tax).items() if not k.startswith("_")}
-                    | {"_trace": tax.get("_trace")},
-                    "texture_pair": tax.get("_texture_pair"),
-                    "layers": layers,
-                    "art_layer": _art_layer(face),
-                    "text_layers": _text_layers(face),
-                    "warnings": warnings,
-                }
-            )
-    finally:
-        conn.close()
+    all_rows = scan_frames_from_folders()
+    recipes = []
+    meta_notes = []
+    for face in resolve_faces(card):
+        tax = infer_taxonomy(card, face)
+        layers, layer_notes = select_layers(tax, face, all_rows)
+        template_name = face.get("template") or _infer_template_name(tax, layers)
+        tpl_layout = get_template_layout(template_name)
+        warnings = list(face.get("_notes") or []) + list(tax.get("_notes") or []) + layer_notes
+        recipes.append(
+            {
+                "face_index": face.get("_face_index"),
+                "face_ref": face.get("_face_ref"),
+                "template": template_name,
+                "taxonomy": {k: v for k, v in deepcopy(tax).items() if not k.startswith("_")}
+                | {"_trace": tax.get("_trace")},
+                "texture_pair": tax.get("_texture_pair"),
+                "layers": layers,
+                "art_layer": _art_layer(face, template_name),
+                "text_layers": _text_layers(face, template_name),
+                "set_symbol_bounds": tpl_layout.get("set_symbol_bounds"),
+                "warnings": warnings,
+            }
+        )
 
     return {
         "meta": {
             "canvas": dict(CANVAS),
             "geometry_source": "card_layouts",
-            "db_path": db_path,
-            "resolver": "frame_resolver/v1",
+            "source": "folders",
+            "resolver": "frame_resolver/v2-folders",
             "notes": meta_notes,
         },
         "recipes": recipes,

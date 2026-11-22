@@ -1,11 +1,17 @@
 import os
 from string import Template
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 router = APIRouter()
 _GUI_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _TEMPLATES_DIR = os.path.join(_GUI_DIR, "templates")
+_FAVICON_PATH = os.path.join(_GUI_DIR, "static", "images", "card-builder.svg")
+
+
+@router.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(_FAVICON_PATH, media_type="image/svg+xml")
 
 
 def _render_page(template_name: str, active_nav: str) -> HTMLResponse:

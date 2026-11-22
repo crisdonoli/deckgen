@@ -51,7 +51,7 @@ async def api_art_mpcfill(q: str = Query(...), limit: int = Query(default=36, ge
         raise HTTPException(status_code=400, detail="Query requerida.")
     headers = {"User-Agent": _UA, "Accept": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, transport=httpx.AsyncHTTPTransport(local_address="0.0.0.0", retries=2)) as client:
             if not _MPCFILL_SOURCES_CACHE:
                 rs = await client.get("https://mpcfill.com/2/sources/", headers=headers)
                 if rs.status_code == 200:
@@ -136,7 +136,7 @@ async def api_art_wikimedia(q: str = Query(...), limit: int = Query(default=30, 
     }
     headers = {"User-Agent": _UA, "Accept": "application/json"}
     try:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, transport=httpx.AsyncHTTPTransport(local_address="0.0.0.0", retries=2)) as client:
             resp = await client.get("https://commons.wikimedia.org/w/api.php", params=params, headers=headers)
         if resp.status_code != 200:
             return {"query": query, "results": [], "count": 0}
@@ -227,7 +227,7 @@ async def api_art_proxy(
             )
 
     try:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, transport=httpx.AsyncHTTPTransport(local_address="0.0.0.0", retries=2)) as client:
             resp = await client.get(
                 url,
                 headers={

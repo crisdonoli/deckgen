@@ -4,33 +4,120 @@
   <meta charset="utf-8">
   <title>Card Builder - DeckGen Studio</title>
   <link rel="stylesheet" href="/static/css/main.css?v=32">
-  <link rel="stylesheet" href="/assets/mana-master/css/mana.min.css">
-  <link rel="stylesheet" href="/assets/keyrune-master/css/keyrune.min.css">
   <style>
     @font-face {
       font-family: "BelerenLocal";
-      src: url("/assets/mana-master/docs/fonts/beleren.woff") format("woff"),
-           url("/assets/mana-master/docs/fonts/beleren.ttf") format("truetype");
+      src: url("/assets/resources/_shared/fonts/beleren-b.ttf") format("truetype");
       font-weight: normal;
       font-style: normal;
     }
     @font-face {
       font-family: "MPlantinLocal";
-      src: url("/assets/mana-master/docs/fonts/mplantin.woff") format("woff"),
-           url("/assets/mana-master/docs/fonts/mplantin.ttf") format("truetype");
+      src: url("/assets/resources/_shared/fonts/mplantin.ttf") format("truetype");
       font-weight: normal;
       font-style: normal;
     }
-    #cb-project-wrap { display:none; position:relative; overflow:hidden; }
-    #cb-project-canvas { width:1500px; height:2100px; transform-origin:top left; display:block; }
+    @font-face {
+      font-family: "MPlantinLocal";
+      src: url("/assets/resources/_shared/fonts/mplantin-i.ttf") format("truetype");
+      font-weight: normal;
+      font-style: italic;
+    }
+    #cb-project-wrap { display:none; position:relative; }
+    #cb-project-canvas {
+      max-height: 74vh;
+      max-width: 100%;
+      width: auto;
+      height: auto;
+      border-radius: 10px;
+      box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+      background: #000;
+      display: block;
+    }
+    .layer-item-wrap { display:flex; flex-direction:column; gap:0; }
+    .layer-nav-btn {
+      padding: 1px 4px !important;
+      min-width: 18px;
+      font-size: 12px;
+      line-height: 1;
+      opacity: 0.78;
+    }
+    .layer-nav-btn:hover { opacity: 1; }
+    .layer-carousel {
+      margin: 4px 0 6px;
+      padding: 6px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .layer-carousel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      font-size: 10.5px;
+      color: var(--text-muted);
+    }
+    .layer-carousel-track-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .layer-carousel-track {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      scroll-behavior: smooth;
+      padding: 2px 1px 4px;
+      flex: 1;
+      min-width: 0;
+    }
+    .layer-carousel-card {
+      flex: 0 0 74px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .layer-carousel-card:hover { border-color: var(--accent); }
+    .layer-carousel-card.is-active {
+      border-color: var(--accent);
+      background: var(--accent-soft, rgba(59,130,246,0.14));
+      box-shadow: 0 0 0 1px var(--accent);
+    }
+    .layer-carousel-card img {
+      width: 58px;
+      height: 58px;
+      object-fit: contain;
+      border-radius: 3px;
+      background: rgba(0,0,0,0.25);
+    }
+    .layer-carousel-card span {
+      font-size: 9.5px;
+      line-height: 1.15;
+      color: var(--text);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      word-break: break-word;
+    }
   </style>
-  <script type="module" src="/static/js/card_builder.js?v=53"></script>
+  <script type="module" src="/static/js/card_builder.js?v=64"></script>
 </head>
 <body>
   $navbar
   <div aria-hidden="true" style="position:fixed; left:-9999px; top:-9999px; opacity:0; pointer-events:none;">
-    <i class="ms ms-w"></i>
-    <i class="ss ss-mtg"></i>
     <span style="font-family:'BelerenLocal';">A</span>
     <span style="font-family:'MPlantinLocal';">A</span>
   </div>
@@ -49,14 +136,11 @@
             </div>
           </div>
           <div>
-            <label class="label" style="margin-top:0;">Import Deck / Images</label>
+            <label class="label" style="margin-top:0;">Import Deck (.txt)</label>
             <div class="row">
               <button type="button" id="cb-import-txt-btn" class="btn"><i data-ico="file-text"></i> MTGO .txt</button>
               <input type="file" id="cb-import-txt-input" accept=".txt,text/plain" hidden>
               <button type="button" id="cb-check-txt-btn" class="btn" title="Check detected vs missing cards from your .txt list"><i data-ico="clipboard"></i> Check .txt</button>
-              <button type="button" id="cb-import-png-btn" class="btn"><i data-ico="image"></i> Single .png</button>
-              <input type="file" id="cb-import-png-input" accept=".png,.jpg,.jpeg,.webp" multiple hidden>
-              <button type="button" id="cb-import-dir-btn" class="btn"><i data-ico="folder"></i> .png Folder</button>
             </div>
           </div>
         </div>
@@ -127,7 +211,6 @@
           <div class="cb-rail-sep"></div>
           <button type="button" class="cb-rail-btn" data-rail-sec="art" title="Art & Adjustments"><i data-ico="image" data-ico-size="15"></i></button>
           <button type="button" class="cb-rail-btn" data-rail-sec="layers" title="Layer Manager"><i data-ico="layers" data-ico-size="15"></i></button>
-          <button type="button" class="cb-rail-btn" data-rail-sec="frame" title="Frame Template & Components"><i data-ico="frame" data-ico-size="15"></i></button>
         </div>
 
         <!-- Expanded sidebar content -->
@@ -149,7 +232,6 @@
             <div class="accordion-body">
               <div class="row" style="margin-bottom:6px;">
                 <button type="button" id="cb-change-art-btn" class="btn btn-sm btn-primary" style="flex:1;"><i data-ico="palette" data-ico-size="13"></i> Change Art</button>
-                <button type="button" id="cb-replace-art-btn" class="btn btn-sm" style="flex:1;"><i data-ico="image" data-ico-size="13"></i> Reemplazar arte</button>
                 <button type="button" id="cb-crop-art-btn" class="btn btn-sm" style="flex:1;"><i data-ico="crop" data-ico-size="13"></i> Crop Art</button>
               </div>
               <label class="row" style="font-size:11px; cursor:pointer; margin-bottom:6px; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:var(--radius-sm);">
@@ -173,23 +255,19 @@
             </div>
           </details>
 
-          <details class="dg-accordion" data-section="layers" open>
-            <summary><i data-ico="layers" data-ico-size="13"></i> Layer Manager</summary>
+          <details class="dg-accordion" data-section="taxonomy" open>
+            <summary><i data-ico="frame" data-ico-size="13"></i> Layout (Geometry)</summary>
             <div class="accordion-body">
-              <p style="margin:0 0 6px; font-size:10.5px; color:var(--text-muted);">Drag to reorder. Click canvas to select; Shift+Click cycles layers behind. Color swatches tint frame layers.</p>
-              <ul id="cb-layer-list" class="layer-list"></ul>
+              <label class="label" style="margin-top:0;">Text &amp; Art Layout</label>
+              <select id="cb-layout-select" class="select" style="width:100%;" title="Changes text and art geometry and filters component submenus to this template"></select>
             </div>
           </details>
 
-          <details class="dg-accordion" data-section="frame">
-            <summary><i data-ico="frame" data-ico-size="13"></i> Frame Template & Components</summary>
+          <details class="dg-accordion" data-section="layers" open>
+            <summary><i data-ico="layers" data-ico-size="13"></i> Layer Manager</summary>
             <div class="accordion-body">
-              <label class="label" style="margin-top:0;">Template Style</label>
-              <div class="row" style="gap:6px; margin-bottom:8px;">
-                <select id="cb-detail-style-select" class="select" style="flex:1; min-width:0;"></select>
-                <button type="button" id="cb-browse-templates-btn" class="btn btn-sm btn-primary" title="Browse visual template previews"><i data-ico="grid" data-ico-size="13"></i> Preview</button>
-              </div>
-              <div id="cb-frame-selectors"></div>
+              <p style="margin:0 0 6px; font-size:10.5px; color:var(--text-muted);">Click a layer to browse its components. Use ‹ › to step or drag to reorder.</p>
+              <ul id="cb-layer-list" class="layer-list"></ul>
             </div>
           </details>
         </div>
@@ -411,7 +489,7 @@
             </div>
           </div>
 
-          <div class="cb-canvas-wrap">
+          <div id="cb-legacy-wrap" class="cb-canvas-wrap">
             <canvas id="card-canvas" width="750" height="1050"></canvas>
           </div>
           <div id="cb-project-wrap" class="cb-canvas-wrap">
@@ -425,15 +503,29 @@
           </label>
           <button type="button" id="cb-undo-btn" class="btn btn-sm" title="Undo (Ctrl+Z)" disabled><i data-ico="undo" data-ico-size="13"></i> Undo</button>
           <button type="button" id="cb-redo-btn" class="btn btn-sm" title="Redo (Ctrl+Y)" disabled><i data-ico="redo" data-ico-size="13"></i> Redo</button>
-          <button type="button" id="cb-reset-layout-btn" class="btn btn-sm" title="Reset default positions"><i data-ico="rotate-ccw" data-ico-size="13"></i> Reset Positions</button>
-          <button type="button" id="cb-reset-all-btn" class="btn btn-sm" title="Reset all card edits"><i data-ico="refresh-cw" data-ico-size="13"></i> Reset All</button>
+          <button type="button" id="cb-reset-all-btn" class="btn btn-sm" title="Reset card to original state (frame, components, layout &amp; text)"><i data-ico="rotate-ccw" data-ico-size="13"></i> Reset</button>
           <button type="button" id="cb-save-single-btn" class="btn btn-sm"><i data-ico="save" data-ico-size="13"></i> Save Card</button>
+          <select id="cb-stage-face-select" class="select" style="width:auto; min-width:120px;" title="Select card face"><option value="0">Face 1</option></select>
           <button type="button" id="cb-export-single-pdf-btn" class="btn btn-sm btn-primary"><i data-ico="upload" data-ico-size="13"></i> Export Card (PDF)</button>
           <button type="button" id="cb-export-single-png-btn" class="btn btn-sm btn-primary"><i data-ico="download" data-ico-size="13"></i> Export PNG 1500×2100</button>
         </div>
       </div>
     </section>
   </main>
+
+  <!-- MODAL: Search Card Picker (multiple matches) -->
+  <div id="cb-search-picker-modal" class="modal-overlay">
+    <div class="modal-content" style="width: 860px; max-width: 95vw; max-height: 86vh; display:flex; flex-direction:column;">
+      <div class="modal-header">
+        <span id="cb-search-picker-title"><i data-ico="search" data-ico-size="14"></i> Select Card</span>
+        <button type="button" class="modal-close" id="cb-search-picker-close">&times;</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:10px; overflow:hidden; flex:1;">
+        <div id="cb-search-picker-sub" style="font-size:12px; color:var(--text-muted);">Multiple cards matched your search. Click the one you want to add.</div>
+        <div id="cb-search-picker-grid" class="art-results-grid" style="overflow-y:auto; flex:1; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); padding-right:4px;"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- MODAL: .txt Deck Checklist (Detected vs Missing) -->
   <div id="cb-txt-check-modal" class="modal-overlay">

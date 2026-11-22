@@ -4,7 +4,7 @@
       "w": 1500,
       "h": 2100
     },
-    "source": "assets/cardconjurer/js/frames/pack*.js",
+    "source": "frame_packs",
     "canvas_source": "2010x2814",
     "templates_total": 18,
     "templates_mapped": 18,
@@ -735,11 +735,45 @@
           "oneLine": true
         },
         "rules": {
-          "x": 128,
-          "y": 1545,
-          "width": 592,
-          "height": 315,
-          "size": 74
+          "x": 756,
+          "y": 1332,
+          "width": 616,
+          "height": 590,
+          "size": 58
+        },
+        "adventure_title": {
+          "x": 120,
+          "y": 1330,
+          "width": 470,
+          "height": 84,
+          "size": 54,
+          "font": "belerenb",
+          "oneLine": true
+        },
+        "adventure_mana": {
+          "x": 0,
+          "y": 1340,
+          "width": 724,
+          "height": 64,
+          "size": 52,
+          "align": "right",
+          "oneLine": true
+        },
+        "adventure_type": {
+          "x": 120,
+          "y": 1424,
+          "width": 584,
+          "height": 74,
+          "size": 46,
+          "font": "belerenb",
+          "oneLine": true
+        },
+        "adventure_rules": {
+          "x": 118,
+          "y": 1516,
+          "width": 602,
+          "height": 400,
+          "size": 52
         },
         "pt": {
           "x": 1189,

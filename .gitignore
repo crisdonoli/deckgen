@@ -6,8 +6,8 @@ assets
 assets.zip
 psd
 decks_json
-
 *.zip
+gui/data/cache/
 
 .venv
 .DS_Store

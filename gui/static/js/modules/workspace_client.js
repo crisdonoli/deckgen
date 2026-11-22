@@ -150,23 +150,30 @@ export function openFolderBrowserModal(initialPath = '') {
       overlay.id = 'dg-folder-browser-modal';
       overlay.className = 'modal-overlay';
       overlay.innerHTML = `
-        <div class="modal-content" style="width: 560px; max-width: 94vw;">
+        <div class="modal-content" style="width: 720px; max-width: 95vw;">
           <div class="modal-header">
-            <span>📁 Select Folder</span>
+            <span>📁 Select Project Folder</span>
             <button type="button" class="modal-close" data-act="close">&times;</button>
           </div>
           <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
-            <div class="row">
-              <button type="button" class="btn btn-sm" data-act="up">⬆ Subir</button>
-              <input type="text" class="input" data-el="current" readonly style="font-family:monospace;">
+            <div class="row" style="gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn btn-sm" data-act="up">⬆ Up</button>
+              <button type="button" class="btn btn-sm" data-act="home">🏠 Home</button>
+              <input type="text" class="input" data-el="current" style="font-family:monospace; flex:1; min-width:220px;" placeholder="/path/to/folder">
+              <button type="button" class="btn btn-sm" data-act="go">Go</button>
             </div>
-            <div class="row">
-              <input type="text" class="input" data-el="new-name" placeholder="Nueva carpeta...">
-              <button type="button" class="btn btn-sm" data-act="mkdir">+ Crear</button>
+            <div class="row" style="gap:6px;">
+              <input type="text" class="input" data-el="new-name" placeholder="Create new subfolder inside current folder..." style="flex:1;">
+              <button type="button" class="btn btn-sm" data-act="mkdir">+ Create &amp; Open</button>
             </div>
-            <div data-el="list" style="max-height:260px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; padding:4px;"></div>
+            <div style="font-size:11px; color:var(--text-muted);">Click to select a folder · Double-click to open it.</div>
+            <div data-el="list" style="max-height:340px; min-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; padding:4px; background:var(--surface-2);"></div>
             <div data-el="err" style="color:var(--danger); font-size:12px; display:none;"></div>
-            <div class="row" style="justify-content:flex-end;">
+            <div style="padding:7px 10px; border-radius:6px; background:var(--surface-2); border:1px solid var(--border); font-size:11.5px;">
+              <span style="color:var(--text-muted);">Target folder: </span>
+              <strong data-el="target-preview" style="font-family:monospace; color:var(--text); word-break:break-all;"></strong>
+            </div>
+            <div class="row" style="justify-content:flex-end; gap:8px;">
               <button type="button" class="btn" data-act="cancel">Cancel</button>
               <button type="button" class="btn btn-primary" data-act="select">Select this folder</button>
             </div>
@@ -179,36 +186,55 @@ export function openFolderBrowserModal(initialPath = '') {
     const newInput = overlay.querySelector('[data-el="new-name"]');
     const listEl = overlay.querySelector('[data-el="list"]');
     const errEl = overlay.querySelector('[data-el="err"]');
+    const targetPreview = overlay.querySelector('[data-el="target-preview"]');
     let currentDir = initialPath || '';
+    let selectedDir = initialPath || '';
     let parentDir = null;
+
+    function updateTargetPreview() {
+      const target = selectedDir || currentDir;
+      if (targetPreview) targetPreview.textContent = target;
+    }
 
     async function browse(path) {
       errEl.style.display = 'none';
       const resp = await fetch(`/api/fs/browse?path=${encodeURIComponent(path || '')}`);
       const data = await resp.json();
       if (!resp.ok) {
-        errEl.textContent = data.detail || 'Error listando carpeta';
+        errEl.textContent = data.detail || 'Error listing folder';
         errEl.style.display = 'block';
         return;
       }
       currentDir = data.current;
+      selectedDir = data.current;
       parentDir = data.parent;
       curInput.value = currentDir;
+      updateTargetPreview();
       listEl.innerHTML = '';
       if (data.dirs.length === 0) {
         const empty = document.createElement('div');
         empty.style.padding = '12px';
         empty.style.color = 'var(--text-muted)';
-        empty.textContent = 'Carpeta vacía' + (data.has_state_json ? ' (contiene state.json)' : '');
+        empty.textContent = 'Empty folder' + (data.has_state_json ? ' (contains state.json)' : '');
         listEl.appendChild(empty);
       } else {
         data.dirs.forEach((d) => {
+          const fullSub = `${currentDir.replace(/\/$/, '')}/${d}`;
           const item = document.createElement('div');
-          item.style.cssText = 'padding:6px 10px; cursor:pointer; border-radius:4px; display:flex; align-items:center; gap:6px;';
-          item.textContent = `📁 ${d}`;
-          item.addEventListener('mouseenter', () => { item.style.background = 'var(--surface-hover)'; });
-          item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
-          item.addEventListener('click', () => browse(`${currentDir.replace(/\/$/, '')}/${d}`));
+          item.style.cssText = 'padding:7px 10px; cursor:pointer; border-radius:4px; display:flex; align-items:center; justify-content:space-between; gap:8px; user-select:none;';
+          item.innerHTML = `<span>📁 ${d}</span><span style="font-size:10px; color:var(--text-muted); opacity:0.75;">double-click to open</span>`;
+          item.addEventListener('click', () => {
+            selectedDir = fullSub;
+            listEl.querySelectorAll('[data-folder-row]').forEach((el) => {
+              el.style.background = 'transparent';
+              el.style.outline = 'none';
+            });
+            item.style.background = 'var(--surface-hover)';
+            item.style.outline = '1px solid var(--accent)';
+            updateTargetPreview();
+          });
+          item.addEventListener('dblclick', () => browse(fullSub));
+          item.setAttribute('data-folder-row', '1');
           listEl.appendChild(item);
         });
       }
@@ -217,14 +243,25 @@ export function openFolderBrowserModal(initialPath = '') {
     function cleanup(val) {
       overlay.classList.remove('open');
       overlay.onclick = null;
+      curInput.onkeydown = null;
+      newInput.onkeydown = null;
       resolve(val);
     }
+
+    curInput.onkeydown = (e) => {
+      if (e.key === 'Enter') browse(curInput.value.trim());
+    };
+    newInput.onkeydown = (e) => {
+      if (e.key === 'Enter') overlay.querySelector('[data-act="mkdir"]')?.click();
+    };
 
     overlay.onclick = async (e) => {
       const act = e.target?.getAttribute?.('data-act');
       if (act === 'close' || act === 'cancel') return cleanup(null);
-      if (act === 'select') return cleanup(currentDir);
+      if (act === 'select') return cleanup(selectedDir || currentDir);
       if (act === 'up' && parentDir) return browse(parentDir);
+      if (act === 'home') return browse('');
+      if (act === 'go') return browse(curInput.value.trim());
       if (act === 'mkdir') {
         const name = newInput.value.trim();
         if (!name) return;
