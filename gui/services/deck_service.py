@@ -141,6 +141,7 @@ def build_deck_sheets(
     custom_backs: Optional[Dict[str, str]] = None,
     dfc_pairs: Optional[Dict[str, str]] = None,
     dfc_as_backs: bool = False,
+    paired_backs_dir: Optional[str] = None,
     progress_cb: Optional[Callable[[int, int, str], None]] = None,
 ) -> Tuple[List[Image.Image], Dict[str, Any]]:
     if paper not in PAPER_SIZES:
@@ -174,6 +175,24 @@ def build_deck_sheets(
                 dfc_back_for[front_stem] = by_stem[back_stem]
         dfc_back_files = set(dfc_back_for.values())
         front_pdfs = [f for f in front_pdfs if f not in dfc_back_files]
+    # Card Builder exports the back face of a double-faced card to cards/backs/<front stem>.pdf,
+    # so a same-named file there is that front's back (after custom backs, before the generic one).
+    def _paired_back(stem: str) -> Optional[str]:
+        if not paired_backs_dir or not os.path.isdir(paired_backs_dir):
+            return None
+        for ext in (".pdf",) + IMAGE_EXTS:
+            cand = os.path.join(paired_backs_dir, stem + ext)
+            if os.path.isfile(cand):
+                return cand
+        return None
+
+    paired_back_for: Dict[str, str] = {}
+    for f in front_pdfs:
+        stem = os.path.splitext(os.path.basename(f))[0]
+        found = _paired_back(stem)
+        if found and os.path.abspath(found) != os.path.abspath(f):
+            paired_back_for[stem] = found
+
     g_back = generic_back_path if (generic_back_path and os.path.isfile(generic_back_path)) else find_generic_back_file(source_dir)
 
     if face == "fronts":
@@ -186,7 +205,7 @@ def build_deck_sheets(
             for f in front_pdfs:
                 base = os.path.basename(f)
                 stem = os.path.splitext(base)[0]
-                cb = custom_map.get(base) or custom_map.get(stem) or dfc_back_for.get(stem)
+                cb = custom_map.get(base) or custom_map.get(stem) or dfc_back_for.get(stem) or paired_back_for.get(stem)
                 if cb and os.path.isfile(cb):
                     files_list.append(cb)
                 elif g_back:
@@ -263,10 +282,14 @@ def build_deck_sheets(
                 return {"role": "front", "other": dfc_pairs[stem], "back_on_reverse": stem in dfc_back_for}
             if stem in front_of:
                 return {"role": "back", "other": front_of[stem], "back_on_reverse": False}
+            if stem in paired_back_for:
+                return {"role": "front", "other": stem, "back_on_reverse": True}
             return None
         if abs_idx < len(front_pdfs):
             stem = os.path.splitext(os.path.basename(front_pdfs[abs_idx]))[0]
             if stem in dfc_back_for and files_list[abs_idx] == dfc_back_for[stem]:
+                return {"role": "back", "other": stem, "back_on_reverse": True}
+            if stem in paired_back_for and files_list[abs_idx] == paired_back_for[stem]:
                 return {"role": "back", "other": stem, "back_on_reverse": True}
         return None
 

@@ -32,6 +32,22 @@ def image_to_standard_pdf(image_bytes: bytes, dest_path: str, dpi: int = DPI) ->
     return dest_path
 
 
+CARD_W_MM = 63.5
+CARD_H_MM = 88.9
+
+
+def card_image_to_pdf(image_bytes: bytes, dest_path: str, jpeg_quality: int = 95) -> str:
+    """One-page PDF of exactly one card (63.5 x 88.9 mm) holding the image at its native
+    resolution (no resampling; a 1500x2100 render lands at 600 DPI). Pillow stores RGB pages
+    as JPEG, so use high quality and no chroma subsampling to keep print detail."""
+    with Image.open(io.BytesIO(image_bytes)) as raw:
+        image = raw.convert("RGB")
+    dpi = image.width / (CARD_W_MM / 25.4)
+    os.makedirs(os.path.dirname(os.path.abspath(dest_path)), exist_ok=True)
+    image.save(dest_path, format="PDF", resolution=dpi, quality=jpeg_quality, subsampling=0)
+    return dest_path
+
+
 def convert_images_folder_to_pdfs(
     source_dir: str,
     dest_pdf_dir: str,

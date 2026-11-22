@@ -4,20 +4,25 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 
 import httpx
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 
 try:
     from ..config import FRAMES_DIR as _CFG_FRAMES_DIR, SHARED_DIR as _CFG_SHARED_DIR
     from .asset_catalog import scan_shared_folder
+    from .canvas_replay import replay_canvas_ops
+    from .asset_paths import FRAMES_URL_PREFIX, SHARED_URL_PREFIX, find_resource_file, frame_file_path, shared_file_path
     from .card_layouts import DEFAULT_LAYOUT, get_template_layout
     from .svg_raster import backend as svg_backend, rasterize_svg
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from config import FRAMES_DIR as _CFG_FRAMES_DIR, SHARED_DIR as _CFG_SHARED_DIR
     from core.asset_catalog import scan_shared_folder
+    from core.canvas_replay import replay_canvas_ops
+    from core.asset_paths import FRAMES_URL_PREFIX, SHARED_URL_PREFIX, find_resource_file, frame_file_path, shared_file_path
     from core.card_layouts import DEFAULT_LAYOUT, get_template_layout
     from core.svg_raster import backend as svg_backend, rasterize_svg
 
@@ -36,6 +41,7 @@ FONT_PREFS = {
     "pt": ("beleren-b", "beleren-bsc", "matrix-b", "matrix"),
 }
 _MANA_TOKEN = re.compile(r"\{([^{}]+)\}")
+_HTTP_USER_AGENT = "DeckGenStudio/2.0 (https://github.com/cridonoso/deckgen)"
 _ART_CACHE = {}
 _FONT_CACHE = {}
 _SYMBOL_CACHE = {}
@@ -83,7 +89,9 @@ def _fetch_remote(url: str):
     if cached is not None:
         return cached.copy()
     try:
-        with httpx.Client(timeout=15.0, follow_redirects=True, transport=httpx.HTTPTransport(local_address="0.0.0.0", retries=2)) as client:
+        # Scryfall's image CDN rejects requests without a User-Agent (HTTP 400).
+        headers = {"User-Agent": _HTTP_USER_AGENT, "Accept": "image/*,*/*;q=0.8"}
+        with httpx.Client(timeout=15.0, follow_redirects=True, headers=headers, transport=httpx.HTTPTransport(local_address="0.0.0.0", retries=2)) as client:
             response = client.get(url)
     except httpx.HTTPError:
         return None
@@ -190,8 +198,11 @@ def _place_component(canvas: Image.Image, img: Image.Image, role: str) -> None:
     if abs(aspect - card_aspect) <= 0.04:
         canvas.alpha_composite(img.resize((cw, ch), Image.LANCZOS))
         return
+    # Thresholds below are in base (1500 px wide) canvas units; `base` keeps small
+    # components proportional when exporting at a higher DPI.
+    base = cw / float(DEFAULT_CANVAS[0])
     if role == "crown":
-        scale = cw / 2010.0 if iw > cw else 1.0
+        scale = cw / 2010.0 if iw > DEFAULT_CANVAS[0] else base
         tw = max(1, int(round(iw * scale)))
         th = max(1, int(round(ih * scale)))
         resized = img.resize((tw, th), Image.LANCZOS) if scale != 1.0 else img
@@ -200,12 +211,20 @@ def _place_component(canvas: Image.Image, img: Image.Image, role: str) -> None:
         canvas.alpha_composite(resized, (max(0, x), max(0, y)))
         return
     if role == "pt_box":
-        scale = (cw / 2010.0) if iw > 320 else 1.0
+        scale = (cw / 2010.0) if iw > 320 else base
         tw = max(1, int(round(iw * scale)))
         th = max(1, int(round(ih * scale)))
         resized = img.resize((tw, th), Image.LANCZOS) if scale != 1.0 else img
         x = int(round(1152 * (cw / 1500.0)))
         y = int(round(1862 * (ch / 2100.0)))
+        canvas.alpha_composite(resized, (max(0, x), max(0, y)))
+        return
+    if role in ("stamp", "name_box") and iw < DEFAULT_CANVAS[0] * 0.4:
+        tw = max(1, int(round(iw * (cw / 1500.0))))
+        th = max(1, int(round(ih * (ch / 2100.0))))
+        resized = img.resize((tw, th), Image.LANCZOS) if (tw, th) != (iw, ih) else img
+        x = (cw - tw) // 2
+        y = int(round(1885 * (ch / 2100.0)))
         canvas.alpha_composite(resized, (max(0, x), max(0, y)))
         return
     canvas.alpha_composite(ImageOps.fit(img, (cw, ch), method=Image.LANCZOS))
@@ -243,6 +262,216 @@ def draw_layers(canvas: Image.Image, layers: list, warnings: list) -> int:
         drawn += 1
     if masks_skipped:
         warnings.append("mask_layers_skipped")
+    return drawn
+
+
+def _resolve_frame_ref(ref: str):
+    """Map a frame URL from the Card Builder (/assets/resources/...) to a file on disk."""
+    raw = str(ref or "").strip()
+    if not raw or raw.startswith("data:"):
+        return None
+    path = urllib.parse.unquote(urllib.parse.urlsplit(raw).path)
+    if path.startswith(FRAMES_URL_PREFIX):
+        candidate = frame_file_path(path[len(FRAMES_URL_PREFIX):])
+    elif path.startswith(SHARED_URL_PREFIX):
+        candidate = shared_file_path(path[len(SHARED_URL_PREFIX):])
+    elif raw.startswith(("http://", "https://")) or path.startswith("/"):
+        return None
+    else:
+        candidate = find_resource_file(path)
+    return candidate if candidate is not None and Path(candidate).is_file() else None
+
+
+def _tinted(img: Image.Image, tint: str) -> Image.Image:
+    # Same as the browser's source-atop fill: keep the alpha, replace every colour.
+    solid = Image.new("RGBA", img.size, _hex_rgba(tint))
+    solid.putalpha(img.getchannel("A"))
+    return solid
+
+
+def _with_opacity(img: Image.Image, opacity) -> Image.Image:
+    try:
+        opacity = max(0.0, min(1.0, float(opacity)))
+    except (TypeError, ValueError):
+        return img
+    if opacity < 1.0:
+        img.putalpha(img.getchannel("A").point(lambda a: int(round(a * opacity))))
+    return img
+
+
+def _clip_rows(img: Image.Image, y0: int, y1: int) -> Image.Image:
+    band = Image.new("L", img.size, 0)
+    band.paste(255, (0, max(0, y0), img.width, max(0, y1)))
+    img.putalpha(ImageChops.multiply(img.getchannel("A"), band))
+    return img
+
+
+def _spec_split_y(face: dict, spec: dict, canvas_h: int, scale_y: float) -> int:
+    """Same rule as layer_manager.computeFrameSplitY: just above the type line."""
+    if not spec.get("split_y_from_face"):
+        bounds = ((face.get("text_layers") or {}).get("type_line") or {}).get("bounds") or {}
+        try:
+            type_y = float(bounds.get("y"))
+        except (TypeError, ValueError):
+            type_y = None
+        if type_y is not None and 400 < type_y < 1950:
+            return int(round(max(0.0, type_y - 22) * canvas_h / 2100.0))
+    try:
+        return int(round(float(spec.get("split_y")) * scale_y))
+    except (TypeError, ValueError):
+        return int(round(1167 * canvas_h / 2100.0))
+
+
+def _fallback_art_placement(face: dict) -> dict:
+    art = face.get("art_layer") or {}
+    bounds = art.get("bounds") or {}
+    bounds = {
+        "x": bounds.get("x", 115),
+        "y": bounds.get("y", 237),
+        "w": bounds.get("w") or bounds.get("width") or 1271,
+        "h": bounds.get("h") or bounds.get("height") or 930,
+    }
+    transform = dict(art.get("transform") or {})
+    tx = float(transform.get("x") or 0)
+    ty = float(transform.get("y") or 0)
+    transform["x"] = 0 if tx == float(bounds["x"] or 0) else tx
+    transform["y"] = 0 if ty == float(bounds["y"] or 0) else ty
+    transform["scale"] = float(transform.get("scale") or 1.0)
+    return {"bounds": bounds, "transform": transform}
+
+
+def _draw_spec_art(canvas: Image.Image, face: dict, layer: dict, art_override, scale_x: float, scale_y: float, warnings: list) -> int:
+    """Port of crop_masks.drawArtInto: cover-fit the art into its zone, then offset, zoom and rotate."""
+    source = layer.get("source")
+    if source is None:
+        source = art_override
+    if source is None:
+        art = face.get("art_layer") or {}
+        source = art.get("local_path") or art.get("source")
+    img = load_art(source, warnings) if source is not None else None
+    if img is None:
+        warnings.append("art_unavailable")
+        return 0
+    placement = layer.get("placement") or _fallback_art_placement(face)
+    bounds = placement.get("bounds") or {}
+    transform = placement.get("transform") or {}
+    zx = float(bounds.get("x") or 0) * scale_x
+    zy = float(bounds.get("y") or 0) * scale_y
+    zw = float(bounds.get("w") or 0) * scale_x
+    zh = float(bounds.get("h") or 0) * scale_y
+    if zw <= 0 or zh <= 0:
+        return 0
+    zoom = float(transform.get("scale") or 1.0)
+    fit = max(zw / img.width, zh / img.height) * zoom
+    dw, dh = max(1, int(round(img.width * fit))), max(1, int(round(img.height * fit)))
+    art = img.resize((dw, dh), Image.LANCZOS)
+    brightness = float(layer.get("brightness") or 1.0)
+    if abs(brightness - 1.0) > 0.01:
+        alpha = art.getchannel("A")
+        art = ImageEnhance.Brightness(art.convert("RGB")).enhance(brightness).convert("RGBA")
+        art.putalpha(alpha)
+    ox = float(transform.get("x") or 0) * scale_x
+    oy = float(transform.get("y") or 0) * scale_y
+    rotation = float(transform.get("rotation") or 0)
+    if rotation:
+        art = art.rotate(-rotation, resample=Image.BICUBIC, expand=True)
+        px = zx + zw / 2 + ox - art.width / 2
+        py = zy + zh / 2 + oy - art.height / 2
+    else:
+        px = zx + (zw - dw) / 2 + ox
+        py = zy + (zh - dh) / 2 + oy
+    piece = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    piece.paste(art, (int(round(px)), int(round(py))), art)
+    if not layer.get("unclipped"):
+        zone = Image.new("L", canvas.size, 0)
+        zone.paste(255, (int(round(zx)), int(round(zy)), int(round(zx + zw)), int(round(zy + zh))))
+        piece.putalpha(ImageChops.multiply(piece.getchannel("A"), zone))
+    canvas.alpha_composite(_with_opacity(piece, layer.get("opacity", 1.0)))
+    return 1
+
+
+def _draw_spec_shape(canvas: Image.Image, layer: dict, scale_x: float, scale_y: float) -> int:
+    try:
+        opacity = max(0.0, min(1.0, float(layer.get("opacity", 0.55))))
+        x = float(layer.get("x") or 0) * scale_x
+        y = float(layer.get("y") or 0) * scale_y
+        w = float(layer.get("w") or 0) * scale_x
+        h = float(layer.get("h") or 0) * scale_y
+        radius = float(layer.get("radius") or 0) * scale_x
+    except (TypeError, ValueError):
+        return 0
+    if opacity <= 0.001 or w <= 0 or h <= 0:
+        return 0
+    overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    fill = _hex_rgba(layer.get("color") or "#000000", int(round(255 * opacity)))
+    box = [x, y, x + w, y + h]
+    kind = layer.get("type")
+    if kind == "circle":
+        draw.ellipse(box, fill=fill)
+    elif kind == "rounded":
+        draw.rounded_rectangle(box, radius=max(0.0, min(radius, w / 2, h / 2)), fill=fill)
+    else:
+        draw.rectangle(box, fill=fill)
+    canvas.alpha_composite(overlay)
+    return 1
+
+
+def draw_frame_spec(canvas: Image.Image, face: dict, spec: dict, art_override, warnings: list) -> int:
+    """Draw the card as laid out in the Card Builder (layer_manager.buildFrameExportSpec).
+
+    Covers what the preview controls: layer order, frame images, opacity, tint, shapes,
+    the art's position/zoom/rotation/opacity/brightness and, for pop-out cards, the frame
+    split at the type line (Top half and Bottom/textbox half can use different images).
+    """
+    cw, ch = canvas.size
+    scale_x = cw / float(spec.get("canvas_width") or cw)
+    scale_y = ch / float(spec.get("canvas_height") or ch)
+    split_y = _spec_split_y(face, spec, ch, scale_y)
+    drawn = 0
+    for layer in spec.get("layers") or []:
+        if not isinstance(layer, dict):
+            continue
+        key = layer.get("key")
+        if key == "art":
+            drawn += _draw_spec_art(canvas, face, layer, art_override, scale_x, scale_y, warnings)
+            continue
+        if key == "shape":
+            drawn += _draw_spec_shape(canvas, layer, scale_x, scale_y)
+            continue
+        if key == "pw_backdrop":
+            if isinstance(layer.get("ops"), list):
+                replay_canvas_ops(canvas, layer["ops"], warnings, scale=scale_x)
+            else:
+                _draw_planeswalker_backdrop(canvas, face)
+            continue
+        path = _resolve_frame_ref(layer.get("url"))
+        if path is None:
+            warnings.append("frame_missing:%s" % layer.get("url"))
+            continue
+        img = _open_rgba(path)
+        tint = str(layer.get("tint") or "")
+        if re.fullmatch(r"#[0-9a-fA-F]{6}", tint):
+            img = _tinted(img, tint)
+        clip = layer.get("clip")
+        opacity = layer.get("opacity", 1.0)
+        try:
+            opaque = float(opacity) >= 1.0
+        except (TypeError, ValueError):
+            opaque = True
+        if clip not in ("top", "bottom") and opaque:
+            # Common case: draw straight onto the card (saves a full-size layer at high DPI).
+            _place_component(canvas, img, str(layer.get("role") or ""))
+            drawn += 1
+            continue
+        piece = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+        _place_component(piece, img, str(layer.get("role") or ""))
+        if clip == "top":
+            _clip_rows(piece, 0, split_y)
+        elif clip == "bottom":
+            _clip_rows(piece, split_y, ch)
+        canvas.alpha_composite(_with_opacity(piece, opacity))
+        drawn += 1
     return drawn
 
 
@@ -903,12 +1132,13 @@ def _draw_planeswalker_backdrop(canvas: Image.Image, recipe: dict) -> None:
     if tax.get("structural_type_override") != "planeswalker":
         return
     is_tall = tax.get("box_variant") == "tall" or recipe.get("template") == "PlaneswalkerTall"
-    y0 = 1148 if is_tall else 1285
-    y1 = 1906
-    x0, x1 = 112, 1388
+    s = canvas.width / 1500.0
+    y0 = (1148 if is_tall else 1285) * s
+    y1 = 1906 * s
+    x0, x1 = 112 * s, 1388 * s
     overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     odraw = ImageDraw.Draw(overlay)
-    odraw.rounded_rectangle([x0, y0, x1, y1], radius=22, fill=(235, 238, 244, 210))
+    odraw.rounded_rectangle([x0, y0, x1, y1], radius=22 * s, fill=(235, 238, 244, 210))
     # Subtle alternating ability bands
     bands = 4 if is_tall else 3
     band_h = (y1 - y0) / float(bands)
@@ -916,30 +1146,56 @@ def _draw_planeswalker_backdrop(canvas: Image.Image, recipe: dict) -> None:
         if idx % 2 == 1:
             by0 = int(round(y0 + idx * band_h))
             by1 = int(round(y0 + (idx + 1) * band_h))
-            odraw.rectangle([x0 + 6, by0, x1 - 6, min(y1 - 6, by1)], fill=(210, 216, 226, 110))
+            odraw.rectangle([x0 + 6 * s, by0, x1 - 6 * s, min(y1 - 6 * s, by1)], fill=(210, 216, 226, 110))
     canvas.alpha_composite(overlay)
 
 
-def render_recipe(recipe: dict, art_override=None, canvas: tuple = DEFAULT_CANVAS) -> dict:
+def render_recipe(recipe: dict, art_override=None, canvas: tuple = DEFAULT_CANVAS, scale: float = 1.0) -> dict:
+    """Render the first face. `scale` multiplies the 1500x2100 canvas (2.0 = 3000x4200).
+
+    With a Card Builder frame_spec everything is drawn at the target size (frames and art are
+    resampled once from their sources; text, SVG symbols and shapes are drawn natively), so a
+    higher scale adds real detail. The legacy recipe path is drawn at 1x and upscaled.
+    """
     face, meta = _pick_recipe(recipe)
     declared = meta.get("canvas") or {}
-    width = int(declared.get("width") or canvas[0])
-    height = int(declared.get("height") or canvas[1])
+    base_w = int(declared.get("width") or canvas[0])
+    base_h = int(declared.get("height") or canvas[1])
+    scale = max(0.25, min(4.0, float(scale or 1.0)))
+    out_w, out_h = int(round(base_w * scale)), int(round(base_h * scale))
     warnings = []
-    image = Image.new("RGBA", (width, height), (17, 17, 17, 255))
-    draw_art(image, face.get("art_layer") or {}, art_override, warnings)
-    _draw_planeswalker_backdrop(image, face)
-    draw_layers(image, face.get("layers") or [], warnings)
+    frame_spec = face.get("frame_spec")
+    use_spec = isinstance(frame_spec, dict) and bool(frame_spec.get("layers"))
+    background = _hex_rgba(frame_spec.get("bg_color") or "#111111") if use_spec else (17, 17, 17, 255)
+    width, height = (out_w, out_h) if use_spec else (base_w, base_h)
+    image = Image.new("RGBA", (width, height), background)
+    if use_spec:
+        draw_frame_spec(image, face, frame_spec, art_override, warnings)
+    else:
+        draw_art(image, face.get("art_layer") or {}, art_override, warnings)
+        _draw_planeswalker_backdrop(image, face)
+        draw_layers(image, face.get("layers") or [], warnings)
     layout = get_template_layout(face.get("template") or "")
-    draw_set_symbol(image, face, layout, warnings)
-    draw_text(image, face, layout, warnings)
+    text_ops = frame_spec.get("text_ops") if use_spec else None
+    if isinstance(text_ops, list):
+        # Set symbol and text exactly as the Card Builder preview drew them.
+        spec_w = float(frame_spec.get("canvas_width") or base_w)
+        replay_canvas_ops(image, text_ops, warnings, scale=width / spec_w)
+    else:
+        draw_set_symbol(image, face, layout, warnings)
+        if not (use_spec and frame_spec.get("hide_text")):
+            draw_text(image, face, layout, warnings)
+    if image.size != (out_w, out_h):
+        image = image.resize((out_w, out_h), Image.LANCZOS)
     buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return {"png": buffer.getvalue(), "width": width, "height": height, "warnings": warnings}
+    # Physical size metadata: the 1500 px wide card is 2.5 in, i.e. 600 DPI at scale 1.
+    dpi = 600.0 * out_w / float(base_w)
+    image.save(buffer, format="PNG", dpi=(dpi, dpi))
+    return {"png": buffer.getvalue(), "width": out_w, "height": out_h, "warnings": warnings}
 
 
-def save_recipe_png(recipe: dict, out_path: str, art_override=None) -> str:
-    result = render_recipe(recipe, art_override=art_override)
+def save_recipe_png(recipe: dict, out_path: str, art_override=None, scale: float = 1.0) -> str:
+    result = render_recipe(recipe, art_override=art_override, scale=scale)
     with open(out_path, "wb") as handle:
         handle.write(result["png"])
     return out_path

@@ -17,7 +17,8 @@ from config import DATA_DIR, FRAMES_DIR, SHARED_DIR
 from core.asset_catalog import build_folder_frame_catalog, scan_frames_from_folders, scan_shared_folder
 from core.asset_paths import frame_file_path, frame_url, shared_file_path, shared_url
 from core.card_layouts import load_frame_layouts
-from core.card_renderer import save_recipe_png
+from core.card_renderer import clamp_export_dpi, render_recipe, save_recipe_png
+from core.pdf_build import card_image_to_pdf
 from core.frame_resolver import build_recipe
 from core.workspace import ensure_workspace_subdirs
 from services.card_project import (
@@ -517,14 +518,17 @@ async def api_cb_search(payload: Dict[str, Any] = Body(...)):
     page = int(payload.get("page") or 1)
     page_size = int(payload.get("page_size") or 20)
     unique = payload.get("unique") if payload.get("unique") in ("cards", "prints") else "cards"
+    tokens = bool(payload.get("tokens"))
+    # Scryfall's /cards/search hides tokens unless the query targets them explicitly.
+    scryfall_query = f"({query}) t:token" if tokens else query
 
-    key = (query.lower(), page, unique, page_size)
+    key = (query.lower(), page, unique, page_size, tokens)
     cached = _search_cache_get(key)
     if cached is not None:
         return cached
 
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    params = {"q": query, "page": page, "unique": unique, "order": "name"}
+    params = {"q": scryfall_query, "page": page, "unique": unique, "order": "name"}
     await asyncio.get_running_loop().run_in_executor(None, _throttle_scryfall)
     try:
         async with httpx.AsyncClient(headers=headers, timeout=20.0, transport=httpx.AsyncHTTPTransport(local_address="0.0.0.0", retries=2)) as client:
@@ -567,6 +571,7 @@ async def api_cb_import_scryfall(payload: Dict[str, Any] = Body(...)):
     try:
         card = resolve_card(
             card=payload.get("card"),
+            scryfall_id=(payload.get("scryfall_id") or "").strip() or None,
             url=(payload.get("url") or "").strip() or None,
             name=(payload.get("name") or "").strip() or None,
             set_code=(payload.get("set") or "").strip() or None,
@@ -609,30 +614,185 @@ async def api_cb_asset(key: str):
     return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
+_ASSET_URL_PREFIX = "/api/card-builder/asset/"
+_ART_PROXY_PATH = "/api/art/proxy"
+
+
+def _decode_data_url(data_url: str) -> bytes:
+    header, _, encoded = data_url.partition(",")
+    if not header.startswith("data:image/") or not encoded:
+        raise HTTPException(status_code=400, detail="dataURL inválida.")
+    try:
+        return base64.b64decode(encoded, validate=True)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="dataURL inválida.")
+
+
+def _resolve_art_ref(ref):
+    """Turn the art URL the Card Builder shows into something the renderer can load:
+    image bytes (data URL), a cached local file, or a remote http(s) URL."""
+    raw = str(ref or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("data:"):
+        return _decode_data_url(raw)
+    parsed = urllib.parse.urlsplit(raw)
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        return raw
+    if parsed.path.startswith(_ASSET_URL_PREFIX):
+        path = cache_path_for_key(urllib.parse.unquote(parsed.path[len(_ASSET_URL_PREFIX):]))
+        return path if path and os.path.isfile(path) else None
+    if parsed.path == _ART_PROXY_PATH:
+        target = (urllib.parse.parse_qs(parsed.query).get("url") or [""])[0]
+        return target if urllib.parse.urlsplit(target).scheme in ("http", "https") else None
+    return None
+
+
+def _prepare_frame_spec(frame_spec):
+    """Validate the client's frame spec and resolve its art URL server-side."""
+    if not isinstance(frame_spec, dict) or not isinstance(frame_spec.get("layers"), list):
+        return None
+    spec = dict(frame_spec)
+    layers = []
+    for layer in spec["layers"]:
+        if not isinstance(layer, dict):
+            continue
+        if layer.get("key") == "art":
+            layer = {**layer, "source": _resolve_art_ref(layer.get("url"))}
+        elif isinstance(layer.get("ops"), list):
+            layer = {**layer, "ops": [_prepare_canvas_op(op) for op in layer["ops"] if isinstance(op, dict)]}
+        layers.append(layer)
+    spec["layers"] = layers
+    text_ops = spec.get("text_ops")
+    if isinstance(text_ops, list):
+        spec["text_ops"] = [_prepare_canvas_op(op) for op in text_ops if isinstance(op, dict)]
+    else:
+        spec.pop("text_ops", None)
+    return spec
+
+
+def _prepare_canvas_op(op: dict) -> dict:
+    """Images the replay cannot resolve by URL alone (card-project cache assets such as the
+    set symbol) get a server-side local_path; a client-sent local_path is never trusted."""
+    op = {k: v for k, v in op.items() if k != "local_path"}
+    if op.get("op") == "drawImage":
+        path = urllib.parse.urlsplit(str(op.get("src") or "")).path
+        if path.startswith(_ASSET_URL_PREFIX):
+            local = cache_path_for_key(urllib.parse.unquote(path[len(_ASSET_URL_PREFIX):]))
+            if local and os.path.isfile(local):
+                op["local_path"] = local
+    return op
+
+
+_NATIVE_EXPORT_DPI = 600  # the 1500x2100 render on a 2.5x3.5 in card
+
+
+def _export_scale(payload: dict) -> tuple:
+    """(dpi, render scale) for the requested export DPI; default is the native 600 DPI."""
+    raw = payload.get("export_dpi")
+    dpi = clamp_export_dpi(raw) if raw not in (None, "") else _NATIVE_EXPORT_DPI
+    return dpi, dpi / float(_NATIVE_EXPORT_DPI)
+
+
+def _with_frame_spec(recipe: dict, frame_spec) -> dict:
+    """Attach the Card Builder's frame layers to the face the renderer will draw (the first one)."""
+    spec = _prepare_frame_spec(frame_spec)
+    if spec is None or not recipe.get("recipes"):
+        return recipe
+    recipe = dict(recipe)
+    recipe["recipes"] = [{**recipe["recipes"][0], "frame_spec": spec}, *recipe["recipes"][1:]]
+    return recipe
+
+
+def _face_recipe(recipe: dict, face_index: int, frame_spec) -> dict:
+    """The recipe reduced to one face (render_recipe draws the first), with its frame spec."""
+    recipes = recipe.get("recipes") or []
+    chosen = [r for r in recipes if (r.get("face_index") or 0) == face_index] or recipes[:1]
+    return _with_frame_spec({**recipe, "recipes": chosen}, frame_spec)
+
+
+def _face_specs(raw) -> Dict[int, Any]:
+    """frame_specs[project_id] is either one spec (face 0, older clients) or {face_index: spec}."""
+    if not isinstance(raw, dict):
+        return {}
+    if isinstance(raw.get("layers"), list):
+        return {0: raw}
+    out = {}
+    for key, spec in raw.items():
+        try:
+            out[int(key)] = spec
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 @router.post("/export-batch")
 async def api_cb_export_batch(payload: Dict[str, Any] = Body(...)):
+    """Render each project to PNG or PDF.
+
+    PDF goes where the Deck Generator reads it: the front face to cards/fronts/<name>.pdf and,
+    for double-faced cards (transform, modal_dfc, reversible_card, double_faced_token: the
+    layouts with one recipe per face), the second face to cards/backs/<name>.pdf, which the
+    Deck Generator pairs with the same-named front. PNG goes to cards/png/<name>.png
+    (+ <name>_back.png). A target_dir puts everything there, backs with a _back suffix.
+    """
     root_dir = (payload.get("root_dir") or "").strip()
     project_ids = payload.get("project_ids") or []
     target_dir = (payload.get("target_dir") or "").strip()
+    frame_specs = payload.get("frame_specs") if isinstance(payload.get("frame_specs"), dict) else {}
+    export_format = str(payload.get("export_format") or "png").lower()
+    if export_format not in ("png", "pdf"):
+        raise HTTPException(status_code=400, detail="Unsupported export format: %s" % export_format)
 
     if not root_dir or not os.path.isdir(root_dir):
         raise HTTPException(status_code=400, detail="Invalid active project.")
     if not project_ids:
         raise HTTPException(status_code=400, detail="No projects selected for export.")
 
-    dest_dir = target_dir or os.path.join(ensure_workspace_subdirs(root_dir)["cards"], "png")
-    os.makedirs(dest_dir, exist_ok=True)
+    dpi, scale = _export_scale(payload)
+    paths = ensure_workspace_subdirs(root_dir)
+    if target_dir:
+        front_dir = back_dir = target_dir
+        back_suffix = "_back"
+    elif export_format == "pdf":
+        front_dir, back_dir, back_suffix = paths["fronts"], paths["backs"], ""
+    else:
+        front_dir = back_dir = os.path.join(paths["cards"], "png")
+        back_suffix = "_back"
+    os.makedirs(front_dir, exist_ok=True)
+    os.makedirs(back_dir, exist_ok=True)
 
-    files = []
+    files, backs = [], []
     for project_id in project_ids:
         project = load_project_file(project_id)
         if project is None or not project.get("recipe"):
             raise HTTPException(status_code=404, detail="Proyecto no encontrado.")
-        out_path = os.path.join(dest_dir, f"{safe_card_filename(project.get('name') or project_id)}.png")
-        save_recipe_png(project["recipe"], out_path)
-        files.append(out_path)
+        stem = safe_card_filename(project.get("name") or project_id)
+        specs = _face_specs(frame_specs.get(project_id))
+        face_indexes = sorted({(r.get("face_index") or 0) for r in project["recipe"].get("recipes") or []}) or [0]
+        double_faced = len(face_indexes) >= 2
+        for face_index in face_indexes[:2] if double_faced else face_indexes[:1]:
+            is_back = double_faced and face_index == face_indexes[1]
+            out_dir, suffix = (back_dir, back_suffix) if is_back else (front_dir, "")
+            out_path = os.path.join(out_dir, f"{stem}{suffix}.{export_format}")
+            recipe = _face_recipe(project["recipe"], face_index, specs.get(face_index))
+            if export_format == "pdf":
+                card_image_to_pdf(render_recipe(recipe, scale=scale)["png"], out_path)
+            else:
+                save_recipe_png(recipe, out_path, scale=scale)
+            (backs if is_back else files).append(out_path)
 
-    return {"status": "ok", "dest_dir": dest_dir, "exported_count": len(files), "files": files}
+    return {
+        "status": "ok",
+        "format": export_format,
+        "dpi": dpi,
+        "dest_dir": front_dir,
+        "backs_dir": back_dir,
+        "exported_count": len(files),
+        "back_count": len(backs),
+        "files": files,
+        "back_files": backs,
+    }
 
 
 @router.post("/export")
@@ -654,23 +814,20 @@ async def api_cb_export(payload: Dict[str, Any] = Body(...)):
                 if isinstance(v, dict):
                     merged_tl[k] = {**(merged_tl.get(k) or {}), **v}
             target_face["text_layers"] = merged_tl
+        spec = _prepare_frame_spec(payload.get("frame_spec"))
+        if spec is not None:
+            target_face["frame_spec"] = spec
         recipe["recipes"] = [target_face]
 
     art_override = None
     data_url = payload.get("art_override_dataurl")
     if data_url:
-        header, _, encoded = data_url.partition(",")
-        if not header.startswith("data:image/") or not encoded:
-            raise HTTPException(status_code=400, detail="dataURL inválida.")
-        try:
-            art_override = base64.b64decode(encoded, validate=True)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="dataURL inválida.")
+        art_override = _decode_data_url(data_url)
 
     fd, out_path = tempfile.mkstemp(suffix=".png")
     os.close(fd)
     try:
-        save_recipe_png(recipe, out_path, art_override=art_override)
+        save_recipe_png(recipe, out_path, art_override=art_override, scale=_export_scale(payload)[1])
         with open(out_path, "rb") as handle:
             png_bytes = handle.read()
     except Exception as exc:

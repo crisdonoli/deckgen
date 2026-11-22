@@ -112,6 +112,7 @@ async def api_deck_preview(payload: Dict[str, Any] = Body(...)):
                 custom_backs=custom_backs,
                 dfc_pairs=dfc_pairs,
                 dfc_as_backs=dfc_as_backs,
+                paired_backs_dir=os.path.join(root_dir, "cards", "backs") if root_dir else None,
             ),
         )
     except Exception as exc:
@@ -187,6 +188,7 @@ async def api_deck_generate(payload: Dict[str, Any] = Body(...)):
                 custom_backs=custom_backs,
                 dfc_pairs=dfc_pairs,
                 dfc_as_backs=dfc_as_backs,
+                paired_backs_dir=os.path.join(root_dir, "cards", "backs") if root_dir else None,
                 progress_cb=_set_progress,
             ),
         )

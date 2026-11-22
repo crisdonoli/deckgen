@@ -13,6 +13,7 @@ import {
   DEFAULT_LAYER_ORDER,
   LayerManager,
   applyPopOutOrder,
+  buildCardExportSpec,
   applyTemplateLayoutToFace,
   buildLayoutFromProjectFace,
   ensureSymbolsCatalog,
@@ -24,7 +25,7 @@ import {
   resolveSetSymbolUrl,
   syncCardWithProjectFace,
   syncProjectFaceFromCard,
-} from './modules/layer_manager.js?v=44';
+} from './modules/layer_manager.js?v=52';
 
 initThemeAndNavbar('card-builder');
 
@@ -49,6 +50,25 @@ const readyList = document.getElementById('cb-ready-list');
 const loadedCountEl = document.getElementById('cb-loaded-count');
 const readyCountEl = document.getElementById('cb-ready-count');
 const filterInput = document.getElementById('cb-filter-input');
+const readyFilterSel = document.getElementById('cb-ready-filter');
+const READY_FILTER_KEY = 'deckgen-cb-ready-filter';
+try {
+  const saved = localStorage.getItem(READY_FILTER_KEY);
+  if (readyFilterSel && ['all', 'not_ready', 'ready'].includes(saved)) readyFilterSel.value = saved;
+} catch {}
+
+// Board cards matching the text filter and the Ready filter (All / Not ready / Ready only).
+function visibleBoardCards() {
+  const readySet = getReadyIds();
+  const q = (filterInput?.value || '').trim().toLowerCase();
+  const mode = readyFilterSel?.value || 'all';
+  return getCards().filter((c) => {
+    if (q && !cardDisplayName(c).toLowerCase().includes(q)) return false;
+    if (mode === 'not_ready') return !readySet.has(c.id);
+    if (mode === 'ready') return readySet.has(c.id);
+    return true;
+  });
+}
 const canvas = document.getElementById('card-canvas');
 const ctx = canvas.getContext('2d');
 
@@ -122,6 +142,57 @@ function cloneCardSnapshot(card) {
   }));
 }
 
+// Per-face edits of a project card, persisted in state.json as card.faces_ui[faceIndex]
+// (the card's top-level fields only hold the face currently shown, and showing a face rebuilds
+// them from the project defaults). Captured on every save and face switch, restored when the
+// face is shown again, and used by the export so each face keeps its own design.
+function faceEditsSnapshot(card, face) {
+  const snap = cloneCardSnapshot(card);
+  snap.adventure = card.adventure ? JSON.parse(JSON.stringify(card.adventure)) : null;
+  snap.loyalty = card.loyalty ?? null;
+  snap.template = face?.template || null;
+  snap._official_manually_edited = Boolean(card._official_manually_edited);
+  return snap;
+}
+
+function applyFaceSnapshot(target, snap, face) {
+  if (!target || !snap) return false;
+  const { template, ...fields } = JSON.parse(JSON.stringify(snap));
+  Object.assign(target, fields);
+  if (face && template) face.template = template;
+  if (face) syncProjectFaceFromCard(target, face);
+  return true;
+}
+
+// "Face 1 // Face 2" for double-faced cards (card.face_names, kept in state.json), else the
+// card's name. card.name itself is the title drawn on the face currently shown.
+function cardDisplayName(card) {
+  const names = Array.isArray(card?.face_names) ? card.face_names.filter((n) => String(n || '').trim()) : [];
+  if (names.length >= 2) return names.join(' // ');
+  return card?.name || 'Untitled';
+}
+
+function updateFaceNames(card) {
+  const faces = state.project?.faces || [];
+  if (!card || faces.length < 2 || (card.project_id || card.id) !== state.project.project_id) return;
+  const current = currentProjectFace();
+  card.face_names = faces.map((f, pos) => {
+    const idx = String(f.face_index ?? pos);
+    if (f === current) return card.name || '';
+    return card.faces_ui?.[idx]?.name || f.text_layers?.title?.text || card.face_names?.[pos] || '';
+  });
+}
+
+function captureActiveFaceEdits() {
+  const card = getActiveCard();
+  const face = currentProjectFace();
+  if (!card || !face || !state.project) return;
+  if ((card.project_id || card.id) !== state.project.project_id) return;
+  card.faces_ui = card.faces_ui || {};
+  card.faces_ui[String(face.face_index ?? state.faceIndex ?? 0)] = faceEditsSnapshot(card, face);
+  updateFaceNames(card);
+}
+
 function getCardHistory(cardId) {
   if (!historyStacks.has(cardId)) historyStacks.set(cardId, { undo: [], redo: [] });
   return historyStacks.get(cardId);
@@ -193,6 +264,7 @@ async function _flushPersist(silent = true) {
 
 async function persistState(silent = true) {
   if (!workspaceState?.root_dir) return;
+  captureActiveFaceEdits();
   if (!silent) {
     if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
     return _flushPersist(false);
@@ -1536,15 +1608,16 @@ async function renderCardCanvas(card) {
 function renderLists() {
   const cards = getCards();
   const readySet = getReadyIds();
-  const q = (filterInput?.value || '').trim().toLowerCase();
-
-  const filtered = cards.filter((c) => !q || (c.name || '').toLowerCase().includes(q));
-  loadedCountEl.textContent = String(cards.length);
+  const filtered = visibleBoardCards();
+  loadedCountEl.textContent = filtered.length === cards.length ? String(cards.length) : `${filtered.length} / ${cards.length}`;
   loadedGrid.className = 'cb-card-grid' + (boardViewMode === 'list' ? ' view-list' : (boardViewMode === 'large' ? ' view-large' : ''));
   loadedGrid.innerHTML = '';
 
   if (filtered.length === 0) {
-    loadedGrid.innerHTML = '<p style="color:var(--text-muted); grid-column:1/-1;">No cards loaded. Search or import a .txt / .png to get started.</p>';
+    const emptyMsg = cards.length
+      ? ((readyFilterSel?.value || 'all') === 'not_ready' ? 'All cards are marked Ready.' : 'No cards match the current filter.')
+      : 'No cards loaded. Search or import a .txt / .png to get started.';
+    loadedGrid.innerHTML = `<p style="color:var(--text-muted); grid-column:1/-1;">${emptyMsg}</p>`;
   } else if (boardViewMode === 'list') {
     filtered.forEach((card) => {
       const isReady = readySet.has(card.id);
@@ -1554,7 +1627,7 @@ function renderLists() {
       row.innerHTML = `
         <img class="cb-list-thumb" src="${thumbSrc}" alt="${card.name || ''}">
         <div style="flex:1; min-width:0;">
-          <div style="font-weight:600; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dfcBadgeHtml(card)}${card.name || 'Untitled'}</div>
+          <div style="font-weight:600; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dfcBadgeHtml(card)}${cardDisplayName(card)}</div>
           <div style="font-size:10.5px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${card.type_line || ''}</div>
         </div>
         <span style="font-size:11px; color:var(--text-muted);">×${card.count || 1}</span>
@@ -1590,7 +1663,7 @@ function renderLists() {
         <img class="cb-large-thumb" src="${thumbSrc}" alt="${card.name || ''}" title="Click to edit card">
         <div class="row-between" style="gap:8px;">
           <div style="min-width:0;">
-            <div style="font-weight:700; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dfcBadgeHtml(card)}${card.name || 'Untitled'}</div>
+            <div style="font-weight:700; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dfcBadgeHtml(card)}${cardDisplayName(card)}</div>
             <div style="font-size:11px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${card.type_line || ''} · ×${card.count || 1}</div>
           </div>
           <label class="row" style="gap:4px; cursor:pointer; font-size:12px; flex-shrink:0;">
@@ -1630,7 +1703,7 @@ function renderLists() {
       item.innerHTML = `
         <button type="button" class="cb-grid-del-btn" title="Remove card from board" aria-label="Remove card">✕</button>
         <img class="cb-grid-thumb" src="${thumbSrc}" alt="${card.name || ''}">
-        <div style="font-weight:600; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dfcBadgeHtml(card)}${card.name || 'Untitled'}</div>
+        <div style="font-weight:600; font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${dfcBadgeHtml(card)}${cardDisplayName(card)}</div>
         <div class="row-between" style="font-size:11px; color:var(--text-muted);">
           <span>×${card.count || 1}</span>
           <label class="row" style="gap:4px; cursor:pointer;" data-stop="1">
@@ -1697,7 +1770,7 @@ function computeTxtCheckStatus() {
   const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const cardNormIndex = new Map();
   cards.forEach((c) => {
-    [c.name, c.official_name, c.original_name, c.dfc?.full_name].forEach((n) => {
+    [c.name, c.official_name, c.original_name, c.dfc?.full_name, cardDisplayName(c), ...(c.face_names || [])].forEach((n) => {
       const k = norm(n);
       if (k && !cardNormIndex.has(k)) cardNormIndex.set(k, c);
     });
@@ -2335,7 +2408,7 @@ function bindDetailEvents() {
   document.getElementById('cb-export-single-pdf-btn').addEventListener('click', async () => {
     const card = getActiveCard();
     if (!card) return;
-    await exportCardsBatch([card], 'fronts', 'pdf', 1200, true);
+    await exportCardsBatch([card], 'fronts', 'pdf', SINGLE_PDF_EXPORT_DPI, true);
   });
 
   const interactiveCheck = document.getElementById('cb-interactive-mode');
@@ -2391,11 +2464,14 @@ function bindDetailEvents() {
       card.frame_components = card.frame_components || {};
       card.frame_components.style = tplName;
     }
-    layerManager?.setLayoutFilter(tplName, card);
+    layerManager?.setLayoutFilter(tplName, card, { backFace: (state.project?.faces || []).indexOf(face) === 1 });
+    // Swap the frame components to the new layout's pack so the art matches the geometry.
+    const framesChanged = layerManager?.applyLayoutPackFrames(card) || 0;
+    if (framesChanged) layerManager?.render(card);
     populateDetailControls(card);
     renderCardCanvas(card);
     persistState(true);
-    showToast(`Layout applied: ${tplName}`);
+    showToast(framesChanged ? `Layout applied: ${tplName} (frames updated)` : `Layout applied: ${tplName}`);
   });
 
   function getActiveStageCanvas() {
@@ -2974,12 +3050,51 @@ async function exportCardsBatch(cards, face, format, dpi, singleCard = false) {
 
   setGlobalLoading(true, `Exporting ${projectIds.length} card(s)...`);
   try {
+    captureActiveFaceEdits();
+    // Describe each face as the preview draws it (frames, art, shapes and text). Double-faced
+    // cards send both faces: the server writes face 2 to cards/backs for the Deck Generator.
+    const frameSpecs = {};
+    for (const c of cards) {
+      const pid = c.project_id || c.id || state.project?.project_id;
+      if (!pid || frameSpecs[pid]) continue;
+      try {
+        const isOpen = pid === state.project?.project_id;
+        let project = isOpen ? state.project : null;
+        if (!project) {
+          const pr = await fetch(`/api/card-builder/project/${encodeURIComponent(pid)}`);
+          if (pr.ok) project = await pr.json();
+        }
+        const faces = project?.faces || [];
+        const specs = {};
+        for (const [pos, f] of faces.slice(0, 2).entries()) {
+          const idx = f.face_index ?? pos;
+          let faceCard;
+          if (isOpen && idx === state.faceIndex) {
+            // The face on screen: the live card object.
+            faceCard = c;
+          } else if (!c.faces_ui && !isOpen && pos === 0) {
+            // Card saved before per-face edits existed: its fields are face 1's.
+            faceCard = c;
+          } else {
+            // Project defaults for this face, then the edits saved for it (if any).
+            faceCard = { id: pid, project_id: pid, set: project.set || c.set, count: c.count };
+            syncCardWithProjectFace(faceCard, f, project);
+            applyFaceSnapshot(faceCard, c.faces_ui?.[String(idx)], f);
+          }
+          syncProjectFaceFromCard(faceCard, f);
+          const spec = await buildCardExportSpec(faceCard, f, { set_symbol: project.set_symbol });
+          if (spec) specs[idx] = spec;
+        }
+        if (Object.keys(specs).length) frameSpecs[pid] = specs;
+      } catch {}
+    }
     const resp = await fetch('/api/card-builder/export-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         root_dir: rootDir,
         project_ids: projectIds,
+        frame_specs: frameSpecs,
         face,
         export_format: format,
         export_dpi: dpi,
@@ -2987,7 +3102,8 @@ async function exportCardsBatch(cards, face, format, dpi, singleCard = false) {
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) return showToast(data.detail || 'Error exporting cards');
-    showToast(`Exported ${data.exported_count || projectIds.length} card(s) to ${data.dest_dir}`);
+    const backsNote = data.back_count ? ` + ${data.back_count} back face(s) to ${data.backs_dir}` : '';
+    showToast(`Exported ${data.exported_count || projectIds.length} card(s) to ${data.dest_dir}${backsNote}`);
   } finally {
     setGlobalLoading(false);
   }
@@ -3332,8 +3448,27 @@ async function showProjectFace(faceIndex) {
   }
 
   if (card) {
+    // Cards saved before per-face edits existed keep their edits as face 1's.
+    const firstIndex = state.project?.faces?.[0]?.face_index ?? 0;
+    const legacySnap = (!card.faces_ui && card.frame_components && !face._ui_state && faceIndex === firstIndex)
+      ? faceEditsSnapshot(card, null)
+      : null;
     syncCardWithProjectFace(card, face, state.project);
+    const saved = card.faces_ui?.[String(face.face_index ?? faceIndex)] || legacySnap;
+    if (saved) {
+      applyFaceSnapshot(card, saved, face);
+    } else {
+      // First time this face is shown: its own printed name is the "original" one
+      // (the other face's name must not leak into the official-title line).
+      card.original_name = card.name || '';
+      card.official_name = '';
+      card._official_manually_edited = false;
+    }
+    updateFaceNames(card);
     populateDetailControls(card);
+    // Show this face's template pack in the Layer Manager's Frame / P/T browsers.
+    const facePos = (state.project?.faces || []).indexOf(face);
+    layerManager?.setLayoutFilter(face.template || card.frame_components?.style || '', card, { backFace: facePos === 1 });
   } else {
     populateProjectTextPanels(face);
   }
@@ -3362,6 +3497,7 @@ function rememberProjectFaceEdits() {
   if (!face) return;
   const card = getActiveCard();
   if (card) syncProjectFaceFromCard(card, face);
+  captureActiveFaceEdits();
   readProjectTextPanels(face);
   state.faces[face.face_index ?? 0] = face.text_layers;
   state.dirty = true;
@@ -3451,6 +3587,10 @@ async function importFromScryfall() {
   document.getElementById('cb-sf-import-modal')?.classList.remove('open');
 }
 
+// DPI of the two single-card export buttons; keep in sync with their labels in card_builder.html.
+const SINGLE_PDF_EXPORT_DPI = 1200;
+const SINGLE_PNG_EXPORT_DPI = 600;
+
 async function exportCard() {
   const errorEl = document.getElementById('cb-sf-error');
   if (!state.project) return;
@@ -3461,6 +3601,8 @@ async function exportCard() {
     project_id: state.project.project_id,
     face_index: state.faceIndex,
     text_layers: face?.text_layers || null,
+    frame_spec: card ? await buildCardExportSpec(card, face, { set_symbol: state.project?.set_symbol }) : null,
+    export_dpi: SINGLE_PNG_EXPORT_DPI,
   };
   if (face?.art_layer?.url?.startsWith('data:image/')) {
     payload.art_override_dataurl = face.art_layer.url;
@@ -3654,11 +3796,14 @@ function bindProjectPanels() {
 
   document.getElementById('nav-save-state-btn')?.addEventListener('click', () => persistState(false));
   filterInput.addEventListener('input', renderLists);
+  readyFilterSel?.addEventListener('change', () => {
+    try { localStorage.setItem(READY_FILTER_KEY, readyFilterSel.value); } catch {}
+    boardLargeIndex = 0;
+    renderLists();
+  });
 
   document.getElementById('cb-select-all-btn')?.addEventListener('click', () => {
-    const allCards = getCards();
-    const q = (filterInput?.value || '').trim().toLowerCase();
-    const visible = allCards.filter((c) => !q || (c.name || '').toLowerCase().includes(q));
+    const visible = visibleBoardCards();
     if (!visible.length) return;
     const readySet = getReadyIds();
     const allSelected = visible.every((c) => readySet.has(c.id));
@@ -3681,6 +3826,7 @@ function bindProjectPanels() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          scryfall_id: target.id,
           name: target.name,
           set: target.set,
           root_dir: getActiveRootDir(),
@@ -3749,18 +3895,19 @@ function bindProjectPanels() {
   async function runBoardCardSearch() {
     const q = document.getElementById('cb-search-input').value.trim();
     if (!q) return;
-    setGlobalLoading(true, `Searching ${q}...`);
+    const tokens = !!document.getElementById('cb-search-tokens')?.checked;
+    setGlobalLoading(true, `Searching ${tokens ? 'tokens ' : ''}${q}...`);
     try {
       const resp = await fetch('/api/card-builder/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q, root_dir: getActiveRootDir() }),
+        body: JSON.stringify({ query: q, tokens, root_dir: getActiveRootDir() }),
       });
       const data = await resp.json();
       if (!resp.ok) return showToast(data.detail || 'Card not found');
       const results = Array.isArray(data.results) ? data.results : [];
       if (!results.length && !data.card) {
-        return showToast(`No cards found for "${q}"`);
+        return showToast(`No ${tokens ? 'tokens' : 'cards'} found for "${q}"`);
       }
       if (results.length > 1) {
         setGlobalLoading(false);

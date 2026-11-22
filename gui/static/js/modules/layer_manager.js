@@ -1,5 +1,6 @@
 import { iconSvg } from './icons.js?v=1';
 import { applyMaskToCanvas, drawArtInto, loadImageElement } from './crop_masks.js?v=3';
+import { createRecordingContext } from './canvas_recorder.js?v=1';
 
 const LAYER_LABELS = {
   background: 'Frame (Top / Title)',
@@ -9,6 +10,27 @@ const LAYER_LABELS = {
   crown: 'Crown',
   border: 'Border',
   pt_box: 'P/T Box',
+};
+
+// The frame is only split into Top/Bottom halves for pop-out cards (art drawn over the
+// title half but under the textbox half). Otherwise it is a single "Frame" layer.
+export function isSplitFrame(card) {
+  return Boolean(card?.art_over_top);
+}
+
+function layerLabel(key, card) {
+  if (key === 'background' && !isSplitFrame(card)) return 'Frame';
+  return LAYER_LABELS[key] || key;
+}
+
+const FRAME_SLOT_ROLES = {
+  background: 'base_frame',
+  textbox: 'base_frame',
+  pinlines: 'pinline',
+  name_box: 'stamp',
+  crown: 'crown',
+  border: 'border',
+  pt_box: 'pt_box',
 };
 
 const SHAPE_ICONS = {
@@ -576,7 +598,9 @@ export class LayerManager {
     if (card) this.render(card);
   }
 
-  setLayoutFilter(templateName, card = null) {
+  // opts.backFace: the card's second face, which uses the "...Back" twin of a "...Front" pack
+  // (e.g. TransformRegular -> M15TransformBack).
+  setLayoutFilter(templateName, card = null, opts = {}) {
     const cat = getSymbolsCatalog();
     const tpl = cat.templates?.[templateName];
     const rawPack = String(tpl?.pack || '').replace(/^pack/, '').replace(/\.js$/, '');
@@ -593,18 +617,86 @@ export class LayerManager {
         }
       }
     }
+    if (opts.backFace && matchedPack && /Front$/.test(matchedPack.id)) {
+      const backId = matchedPack.id.replace(/Front$/, 'Back');
+      const backPack = (matchedGroup.packs || []).find((pk) => pk.id === backId);
+      if (backPack) matchedPack = backPack;
+    }
     this.layerCatalogSel = this.layerCatalogSel || {};
-    for (const slotKey of ['background', 'crown', 'pt_box', 'border', 'name_box']) {
+    // Layer key -> catalog slot (the Bottom/Textbox half browses the same frames as the top).
+    for (const [layerKey, slotKey] of [['background', 'background'], ['textbox', 'background'], ['crown', 'crown'], ['pt_box', 'pt_box'], ['border', 'border'], ['name_box', 'name_box']]) {
       if (matchedPack && (matchedPack.items || []).some((it) => it.slot === slotKey)) {
-        this.layerCatalogSel[slotKey] = { groupId: matchedGroup.id, packId: matchedPack.id };
+        this.layerCatalogSel[layerKey] = { groupId: matchedGroup.id, packId: matchedPack.id };
       } else if (matchedGroup && (matchedGroup.packs || []).some((pk) => (pk.items || []).some((it) => it.slot === slotKey))) {
-        this.layerCatalogSel[slotKey] = { groupId: matchedGroup.id, packId: '' };
+        this.layerCatalogSel[layerKey] = { groupId: matchedGroup.id, packId: '' };
       } else {
-        this.layerCatalogSel[slotKey] = { groupId: '', packId: '' };
+        this.layerCatalogSel[layerKey] = { groupId: '', packId: '' };
       }
     }
     this.filterText = '';
     if (card) this.render(card);
+  }
+
+  // After a Layout (Geometry) change: put each frame slot on the matching component of the new
+  // layout's pack (selected by setLayoutFilter), so the frame art matches the new geometry.
+  // A slot keeps its component if the pack already has it; otherwise it takes the pack's
+  // component with the same label ("White Frame" -> "White Frame"), else the pack's first one.
+  // Slots the pack doesn't cover are left alone, and hidden layers stay hidden.
+  applyLayoutPackFrames(card) {
+    if (!card) return 0;
+    const cat = getSymbolsCatalog();
+    const groups = cat.frame_catalog?.groups || [];
+    const norm = (u) => {
+      try { return decodeURIComponent(String(u || '')).replace(/^https?:\/\/[^/]+/, '').replace(/^\/+/, ''); } catch { return String(u || ''); }
+    };
+    const packFor = (sel) => {
+      const g = groups.find((x) => x.id === sel?.groupId);
+      return (g?.packs || []).find((pk) => pk.id === sel?.packId) || null;
+    };
+    // Every catalog entry for a URL: pack items carry a name ("Green Frame"), role entries a material.
+    const entriesFor = (url) => {
+      const n = norm(url);
+      const out = [];
+      if (!n) return out;
+      for (const g of groups) for (const pk of g.packs || []) for (const it of pk.items || []) if (norm(it.url) === n) out.push(it);
+      for (const list of Object.values(cat.frames_by_role || {})) for (const it of list || []) if (norm(it.url) === n) out.push(it);
+      return out;
+    };
+    const nameOf = (url) => entriesFor(url).map((e) => e.name || e.label || '').find(Boolean) || '';
+    const colorOf = (url, name = '') => {
+      const words = { white: 'w', blue: 'u', black: 'b', red: 'r', green: 'g', multicolored: 'm', multicolor: 'm', gold: 'm', artifact: 'a', land: 'l', colorless: 'c', snow: 'snow' };
+      const fromWords = (txt) => {
+        const w = String(txt || '').toLowerCase().match(/[a-z]+/g) || [];
+        for (const t of w) if (words[t]) return words[t];
+        return '';
+      };
+      const stem = (norm(url).split('/').pop() || '').replace(/\.[a-z0-9]+$/i, '');
+      const fromFile = /snow/i.test(stem) ? 'snow'
+        : ((stem.match(/^(?:.*frame)?([wubrgmalc])(?:regular|textless)?$/i) || [])[1] || '').toLowerCase();
+      return fromWords(name) || fromFile || entriesFor(url).map((e) => fromWords(e.material) || fromWords(e.label)).find(Boolean) || '';
+    };
+    const fc = card.frame_components = card.frame_components || {};
+    const prevBackground = fc.background || '';
+    let changed = 0;
+    for (const [key, slot] of [['background', 'background'], ['textbox', 'background'], ['crown', 'crown'], ['pt_box', 'pt_box'], ['border', 'border']]) {
+      const items = (packFor(this.layerCatalogSel?.[slot])?.items || []).filter((it) => it.slot === slot && it.url);
+      if (!items.length) continue;
+      if (key === 'textbox' && (!fc.textbox || fc.textbox === prevBackground)) {
+        // Bottom half follows the top frame unless it was set separately (pop-out).
+        if (fc.textbox !== fc.background) { fc.textbox = fc.background; changed += 1; }
+        continue;
+      }
+      const current = fc[key] || '';
+      if (current && items.some((it) => norm(it.url) === norm(current))) continue;
+      const name = nameOf(current);
+      const color = colorOf(current, name);
+      const pick = (name && items.find((it) => it.name === name))
+        || (color && items.find((it) => colorOf(it.url, it.name) === color))
+        || items[0];
+      fc[key] = pick.url;
+      changed += 1;
+    }
+    return changed;
   }
 
   setSelected(key) {
@@ -622,6 +714,15 @@ export class LayerManager {
   _getLayerItems(key) {
     const cat = getSymbolsCatalog();
     const slotKey = key === 'textbox' ? 'background' : key;
+    // A template pack selected for this layer (setLayoutFilter / the drawer's Template select)
+    // limits the components to that pack; "All" in the drawer clears it.
+    const sel = this.layerCatalogSel?.[key];
+    if (sel?.groupId) {
+      const group = (cat.frame_catalog?.groups || []).find((g) => g.id === sel.groupId);
+      const packs = (group?.packs || []).filter((pk) => !sel.packId || pk.id === sel.packId);
+      const packItems = packs.flatMap((pk) => (pk.items || []).filter((it) => it.slot === slotKey && it.url));
+      if (packItems.length) return packItems;
+    }
     const all = (cat.frames_by_role && cat.frames_by_role[slotKey]) || [];
     if (slotKey !== 'background') return all;
     const tf = this.taxonomyFilters || {};
@@ -640,8 +741,8 @@ export class LayerManager {
     card.frame_components = card.frame_components || {};
     const prevBg = card.frame_components.background || '';
     card.frame_components[key] = item.url;
-    // Keep Bottom Textbox synced with Top Frame unless user previously chose a different Bottom Textbox
-    if (key === 'background' && (!card.frame_components.textbox || card.frame_components.textbox === prevBg)) {
+    // Keep Bottom Textbox synced with Top Frame unless, in pop-out mode, the user chose a different one
+    if (key === 'background' && (!isSplitFrame(card) || !card.frame_components.textbox || card.frame_components.textbox === prevBg)) {
       card.frame_components.textbox = item.url;
     }
     // Frame image selection is intentionally decoupled from card text/art Layout.
@@ -677,9 +778,11 @@ export class LayerManager {
     card.layer_opacities = card.layer_opacities || {};
 
     this.listEl.innerHTML = '';
+    const splitFrame = isSplitFrame(card);
     const displayOrder = [...order].reverse();
 
     displayOrder.forEach((key) => {
+      if (key === 'textbox' && !splitFrame) return;
       const wrapLi = document.createElement('li');
       wrapLi.className = 'layer-item-wrap';
       wrapLi.style.listStyle = 'none';
@@ -733,7 +836,7 @@ export class LayerManager {
         li.innerHTML = `
           <span title="Arrastrar para reordenar" style="cursor:grab; opacity:0.6; display:inline-flex;">${iconSvg('grip', 12)}</span>
           <button type="button" class="btn btn-sm" data-act="toggle" title="${isHidden ? 'Mostrar capa' : 'Ocultar capa'}" aria-pressed="${isHidden ? 'true' : 'false'}">${iconSvg(isHidden ? 'eye-off' : 'eye', 13)}</button>
-          <span class="layer-name" style="cursor:${hasCarousel ? 'pointer' : 'default'};" title="${hasCarousel ? 'Clic para desplegar carrusel de variantes' : ''}">${LAYER_LABELS[key] || key}${caretHtml}</span>
+          <span class="layer-name" style="cursor:${hasCarousel ? 'pointer' : 'default'};" title="${hasCarousel ? 'Clic para desplegar carrusel de variantes' : ''}">${layerLabel(key, card)}${caretHtml}</span>
           ${navArrowsHtml}
           ${colorCtrlHtml}
           <input type="range" min="0" max="1" step="0.05" value="${opacity}" data-act="opacity" style="width:40px;" title="Opacidad">
@@ -809,7 +912,7 @@ export class LayerManager {
           const url = key === 'textbox'
             ? (card.frame_components?.textbox || card.frame_components?.background)
             : card.frame_components?.[key];
-          if (url) showComponentContextMenu(e, url, LAYER_LABELS[key] || key);
+          if (url) showComponentContextMenu(e, url, layerLabel(key, card));
         });
       }
 
@@ -1224,7 +1327,7 @@ export class LayerManager {
     const countEl = overlay.querySelector('[data-el="count"]');
     const gridEl = overlay.querySelector('[data-el="grid"]');
 
-    titleEl.textContent = `Browse ${LAYER_LABELS[key] || key} Components`;
+    titleEl.textContent = `Browse ${layerLabel(key, card)} Components`;
     searchIn.value = this.filterText || '';
 
     const close = () => {
@@ -1947,10 +2050,15 @@ function drawRichRulesBox(ctx, oracleText, flavorText, geometry, colorHex, symbo
   ctx.restore();
 }
 
+function splitFromFace(face) {
+  const rawTypeY = Number(face?.text_layers?.type_line?.bounds?.y);
+  return Number.isFinite(rawTypeY) && rawTypeY > 400 && rawTypeY < 1950;
+}
+
 function computeFrameSplitY(face, card, height) {
   const sy = height / 2100;
   const rawTypeY = Number(face?.text_layers?.type_line?.bounds?.y);
-  if (Number.isFinite(rawTypeY) && rawTypeY > 400 && rawTypeY < 1950) {
+  if (splitFromFace(face)) {
     return Math.round(Math.max(0, rawTypeY - 22) * sy);
   }
   const layTypeY = Number(card?.layout?.type_line?.y);
@@ -1960,12 +2068,155 @@ function computeFrameSplitY(face, card, height) {
   return Math.round(1167 * sy);
 }
 
+const DEFAULT_ART_BOUNDS = { x: 115, y: 237, w: 1271, h: 930 };
+
+// The planeswalker ability-box backdrop as recorded canvas calls (empty for other cards), so the
+// export reproduces the preview's geometry (which depends on the client-side template) exactly.
+function recordPlaneswalkerBackdrop(face, width, height) {
+  const scratch = document.createElement('canvas');
+  scratch.width = 1;
+  scratch.height = 1;
+  const recorder = createRecordingContext(scratch.getContext('2d'));
+  drawPlaneswalkerBackdrop(recorder.ctx, face, width, height);
+  return recorder.ops.some((op) => op.op === 'fill' || op.op === 'fillRect') ? recorder.ops : [];
+}
+
+// Art zone (canvas px) and transform ({x, y} offsets from the zone centre, scale, rotation).
+// Returns null when neither the card layout nor the face says where the art goes.
+function computeArtPlacement(face, card, width, height) {
+  const art = face?.art_layer;
+  const layArt = card?.layout?.art;
+  if (!layArt && !art) return null;
+  const sx = width / 750;
+  const sy = height / 1050;
+  const bounds = layArt
+    ? {
+        x: Math.round(Number(layArt.x || 0) * sx),
+        y: Math.round(Number(layArt.y || 0) * sy),
+        w: Math.round(Number(layArt.w || 635) * sx),
+        h: Math.round(Number(layArt.h || 465) * sy),
+      }
+    : (art?.bounds || { ...DEFAULT_ART_BOUNDS });
+  const rawTx = Number(art?.transform?.x || 0);
+  const rawTy = Number(art?.transform?.y || 0);
+  const baseOx = (rawTx === Number(art?.bounds?.x || 0)) ? 0 : rawTx;
+  const baseOy = (rawTy === Number(art?.bounds?.y || 0)) ? 0 : rawTy;
+  const transform = {
+    ...(art?.transform || {}),
+    x: layArt ? Number(layArt.offset_x || 0) * sx : baseOx,
+    y: layArt ? Number(layArt.offset_y || 0) * sy : baseOy,
+    scale: Number(layArt?.scale ?? art?.transform?.scale ?? 1.0) || 1.0,
+  };
+  return { bounds, transform };
+}
+
+// Describes the frame layers exactly as renderProjectFace draws them, so the server-side
+// export (recipe_renderer.draw_frame_spec) can reproduce the preview: layer order, the
+// Top/Bottom split for pop-out cards, visibility, opacity and tint.
+export function buildFrameExportSpec(card, face = null, size = { width: 1500, height: 2100 }) {
+  if (!card || !card.frame_components) return null;
+  const width = Number(size.width) || 1500;
+  const height = Number(size.height) || 2100;
+  const fc = card.frame_components;
+  const hidden = normalizeHiddenLayers(card.hidden_layers);
+  const opacities = card.layer_opacities || {};
+  const colors = card.layer_colors || {};
+  const validHex = (v) => (/^#[0-9a-fA-F]{6}$/.test(String(v || '').trim()) ? String(v).trim() : '');
+  const order = Array.isArray(card.layer_order) && card.layer_order.length
+    ? [...card.layer_order]
+    : [...DEFAULT_LAYER_ORDER];
+  if (!order.includes('textbox')) {
+    const insertAt = Math.max(order.indexOf('crown'), order.indexOf('background'));
+    order.splice(insertAt >= 0 ? insertAt + 1 : order.length, 0, 'textbox');
+  }
+  const split = isSplitFrame(card);
+  const artIdx = order.indexOf('art');
+  const bgIdx = order.indexOf('background');
+  const crownIdx = order.indexOf('crown');
+  const artUnclipped = artIdx >= 0 && ((bgIdx >= 0 && artIdx > bgIdx) || (crownIdx >= 0 && artIdx > crownIdx));
+  const shapeScale = width / 750;
+  const shapes = new Map((card.shapes || []).map((sh) => [`shape:${sh.id}`, sh]));
+  const layers = [];
+  for (const key of order) {
+    if (key === 'art') {
+      const opacity = opacities.art ?? 1.0;
+      if (hidden.art || opacity <= 0.01) continue;
+      layers.push({
+        key: 'art',
+        url: card.custom_art_data || card.art_crop_url || face?.art_layer?.url || null,
+        placement: computeArtPlacement(face, card, width, height),
+        unclipped: artUnclipped,
+        opacity,
+        brightness: Number(card.brightness ?? 1.0),
+      });
+      continue;
+    }
+    if (key.startsWith('shape:')) {
+      const shape = shapes.get(key);
+      if (!shape || hidden[key]) continue;
+      layers.push({
+        key: 'shape',
+        type: shape.type || 'rect',
+        x: (shape.x || 0) * shapeScale,
+        y: (shape.y || 0) * shapeScale,
+        w: (shape.w || 0) * shapeScale,
+        h: (shape.h || 0) * shapeScale,
+        radius: Number(shape.radius ?? 14) * shapeScale,
+        color: validHex(shape.color) || '#000000',
+        opacity: Number(opacities[key] ?? shape.opacity ?? 0.55),
+      });
+      continue;
+    }
+    if (key === 'textbox' && (!split || hidden.textbox)) continue;
+    if (key === 'textbox' || (key === 'background' && !split)) layers.push({ key: 'pw_backdrop', ops: recordPlaneswalkerBackdrop(face, width, height) });
+    if (key !== 'textbox' && hidden[key]) continue;
+    const isTextbox = key === 'textbox';
+    const url = isTextbox ? (fc.textbox || fc.background) : fc[key];
+    const opacity = isTextbox ? (opacities.textbox ?? opacities.background ?? 1.0) : (opacities[key] ?? 1.0);
+    if (!url || opacity <= 0.01) continue;
+    let clip = null;
+    if (isTextbox) clip = 'bottom';
+    else if (key === 'background' && split) clip = 'top';
+    layers.push({
+      key,
+      url,
+      role: FRAME_SLOT_ROLES[key] || key,
+      opacity,
+      tint: validHex(isTextbox ? (colors.textbox || colors.background) : colors[key]),
+      clip,
+    });
+  }
+  return {
+    canvas_width: width,
+    canvas_height: height,
+    bg_color: validHex(card.bg_color) || '#111111',
+    hide_text: Boolean(card.hide_card_text),
+    split,
+    split_y: computeFrameSplitY(face, card, height),
+    split_y_from_face: splitFromFace(face),
+    layers,
+  };
+}
+
+// Full export description of a card face: frame/art/shape layers (buildFrameExportSpec)
+// plus the recorded set-symbol and text drawing calls, so the PNG matches the preview.
+export async function buildCardExportSpec(card, face, opts = {}) {
+  const size = opts.canvas || { width: 1500, height: 2100 };
+  const spec = buildFrameExportSpec(card, face, size);
+  if (!spec || !face) return spec;
+  if (document.fonts?.ready) await document.fonts.ready;
+  const scratch = document.createElement('canvas');
+  const result = await renderProjectFace(face, scratch, { ...opts, card, canvas: size, recordText: true });
+  spec.text_ops = result.text_ops || null;
+  return spec;
+}
+
 export async function renderProjectFace(face, canvasEl, opts = {}) {
   await ensureSymbolsCatalog();
   const size = opts.canvas || { width: 1500, height: 2100 };
   const width = Number(size.width) || 1500;
   const height = Number(size.height) || 2100;
-  const ctx = canvasEl.getContext('2d');
+  let ctx = canvasEl.getContext('2d');
   const card = opts.card || null;
 
   canvasEl.width = width;
@@ -2000,30 +2251,8 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
       result.skipped.push(artUrl);
       return;
     }
-    const sx = width / 750;
-    const sy = height / 1050;
-    const layArt = card?.layout?.art;
-    const baseBounds = layArt
-      ? {
-          x: Math.round(Number(layArt.x || 0) * sx),
-          y: Math.round(Number(layArt.y || 0) * sy),
-          w: Math.round(Number(layArt.w || 635) * sx),
-          h: Math.round(Number(layArt.h || 465) * sy),
-        }
-      : (art?.bounds || { x: 115, y: 237, w: 1271, h: 930 });
-    const uiScale = Number(layArt?.scale ?? art?.transform?.scale ?? 1.0) || 1.0;
-    const rawTx = Number(art?.transform?.x || 0);
-    const rawTy = Number(art?.transform?.y || 0);
-    const baseOx = (rawTx === Number(art?.bounds?.x || 0)) ? 0 : rawTx;
-    const baseOy = (rawTy === Number(art?.bounds?.y || 0)) ? 0 : rawTy;
-    const uiOx = layArt ? Number(layArt.offset_x || 0) * sx : baseOx;
-    const uiOy = layArt ? Number(layArt.offset_y || 0) * sy : baseOy;
-    const transform = {
-      ...(art?.transform || {}),
-      x: uiOx,
-      y: uiOy,
-      scale: uiScale,
-    };
+    const { bounds: baseBounds, transform } = computeArtPlacement(face, card, width, height)
+      || { bounds: { ...DEFAULT_ART_BOUNDS }, transform: { x: 0, y: 0, scale: 1.0 } };
     const bright = Number(card?.brightness ?? 1.0);
     ctx.save();
     ctx.globalAlpha = op;
@@ -2035,15 +2264,7 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
   };
 
   if (card && card.frame_components) {
-    const slotToRole = {
-      background: 'base_frame',
-      textbox: 'base_frame',
-      pinlines: 'pinline',
-      name_box: 'stamp',
-      crown: 'crown',
-      border: 'border',
-      pt_box: 'pt_box',
-    };
+    const slotToRole = FRAME_SLOT_ROLES;
     const rawOrder = Array.isArray(card.layer_order) && card.layer_order.length
       ? [...card.layer_order]
       : [...DEFAULT_LAYER_ORDER];
@@ -2056,6 +2277,7 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
     }
     const order = rawOrder;
     const scaleFactor = width / 750;
+    const splitFrame = isSplitFrame(card);
     const splitY = computeFrameSplitY(face, card, height);
     const artIdx = order.indexOf('art');
     const bgIdx = order.indexOf('background');
@@ -2075,6 +2297,8 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
         continue;
       }
       if (key === 'textbox') {
+        // Non pop-out: the single Frame layer (background) already covers the whole card.
+        if (!splitFrame) continue;
         if (hidden.textbox) continue;
         drawPlaneswalkerBackdrop(ctx, face, width, height);
         const op = opacities.textbox ?? opacities.background ?? 1.0;
@@ -2098,6 +2322,7 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
         result.layers += 1;
         continue;
       }
+      if (key === 'background' && !splitFrame) drawPlaneswalkerBackdrop(ctx, face, width, height);
       if (hidden[key]) continue;
       const op = opacities[key] ?? 1.0;
       const url = card.frame_components[key];
@@ -2112,7 +2337,7 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
         : '';
       const source = tintHex ? tintImageElement(img, tintHex) : img;
       ctx.save();
-      if (key === 'background') {
+      if (key === 'background' && splitFrame) {
         ctx.beginPath();
         ctx.rect(0, 0, width, splitY);
         ctx.clip();
@@ -2159,6 +2384,13 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
       ctx.restore();
       result.layers += 1;
     }
+  }
+
+  // From here on (set symbol + text) the export replays these exact calls server-side.
+  let recorder = null;
+  if (opts.recordText) {
+    recorder = createRecordingContext(ctx);
+    ctx = recorder.ctx;
   }
 
   // Set Symbol (Rune)
@@ -2449,6 +2681,8 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
       ctx.restore();
     }
   }
+
+  if (recorder) result.text_ops = recorder.ops;
 
   if (opts.draftShape) {
     drawShapeScaled(ctx, opts.draftShape, width / 750);

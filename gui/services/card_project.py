@@ -23,6 +23,7 @@ _TIMEOUT = 20.0
 _MIN_INTERVAL = 0.11
 _RATE_LOCK = threading.Lock()
 _LAST_SCRYFALL_TS = 0.0
+_SCRYFALL_ID_RE = re.compile(r"[0-9a-fA-F-]{36}")
 _CARD_URL_RE = re.compile(r"scryfall\.com/(?:card|cards)/([^/]+)/([^/?#]+)")
 
 
@@ -86,10 +87,14 @@ def cached(url: str):
     return target if os.path.isfile(target) and os.path.getsize(target) > 0 else None
 
 
-def resolve_card(card=None, url=None, name=None, set_code=None) -> dict:
+def resolve_card(card=None, url=None, name=None, set_code=None, scryfall_id=None) -> dict:
     if isinstance(card, dict):
         return card
-    if url:
+    if scryfall_id:
+        if not _SCRYFALL_ID_RE.fullmatch(scryfall_id):
+            raise ScryfallError(400, "ID de Scryfall inválido.")
+        endpoint = "https://api.scryfall.com/cards/%s" % scryfall_id
+    elif url:
         match = _CARD_URL_RE.search(url)
         if not match:
             raise ScryfallError(400, "URL de Scryfall inválida.")

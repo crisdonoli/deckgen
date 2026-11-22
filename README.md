@@ -12,8 +12,62 @@ Hybrid local web application (**Python FastAPI** backend + **HTML/CSS/Vanilla ES
 
 ## Quick Start
 
+DeckGen Studio needs **Python 3.10 or newer** (it is developed on **Python 3.14.9**). The Python that ships with macOS (3.9) is too old and fails at startup with `TypeError: unsupported operand type(s) for |`.
+
+### 1. Create a Python 3.14.9 virtual environment
+
+The easiest way on both platforms is [uv](https://docs.astral.sh/uv/), which downloads the exact Python version for you.
+
+**macOS** (Terminal):
+
 ```bash
-pip install -r requirements.txt
+brew install uv                      # or: curl -LsSf https://astral.sh/uv/install.sh | sh
+uv python install 3.14.9
+
+cd path/to/deckgen
+uv venv --seed --python 3.14.9 .venv  # --seed installs pip inside the venv
+source .venv/bin/activate
+python --version                     # Python 3.14.9
+```
+
+**Windows** (PowerShell):
+
+```powershell
+winget install --id=astral-sh.uv -e  # or: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+uv python install 3.14.9
+
+cd path\to\deckgen
+uv venv --seed --python 3.14.9 .venv  # --seed installs pip inside the venv
+.venv\Scripts\Activate.ps1           # cmd.exe: .venv\Scripts\activate.bat
+python --version                     # Python 3.14.9
+```
+
+If PowerShell blocks the activation script, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once and try again.
+
+#### Without uv (official installer from python.org)
+
+Install Python 3.14.9 from [python.org/downloads](https://www.python.org/downloads/). On Windows, tick **"Add python.exe to PATH"** in the installer. Then:
+
+```bash
+# macOS
+python3.14 -m venv .venv
+source .venv/bin/activate
+```
+
+```powershell
+# Windows
+py -3.14 -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+If you already have an old `.venv` (for example, one created with Python 3.9), delete it first: `rm -rf .venv` on macOS or `Remove-Item -Recurse -Force .venv` on Windows.
+
+### 2. Install dependencies and run
+
+With the virtual environment activated:
+
+```bash
+pip install -r requirements.txt      # or: uv pip install -r requirements.txt
 python run.py
 ```
 
@@ -22,7 +76,7 @@ Launcher options (`run.py`):
 - `--host 127.0.0.1`
 - `--no-browser` (starts the server without opening a browser tab)
 
-### Assets & Custom Landing Background (`mana-master`, `keyrune-master`, `Templates`, and HQ Arts)
+### Assets (frames, fonts, mana & set symbols)
 - Download [Templates](https://drive.google.com/drive/folders/1TsvefQ6QlSJNmvgfCxoEI61KzS1reWYn?usp=sharing) (updated: 22-11-2026) and extract it into the root folder of this project. 
 
 Your directory tree should look like:
@@ -30,25 +84,25 @@ Your directory tree should look like:
 ```text
 .
 ├── assets
-│   ├── artofmtg_artists_cards.json
-│   ├── artofmtg_cards.json
-│   ├── bloomburrow.json
-│   ├── foundations.json
-│   ├── keyrune-master
-│   ├── lost-caverns.json
-│   ├── mana-master
-│   ├── murders-karlov.json
-│   ├── Templates
-│   │   ├── normal
-│   │   ├── saga
-│   │   ├── token
-│   │   └── ...
-│   └── wild-eldraine.json
+│   ├── resources
+│   │   ├── frames              # frame layers (PNG/JPG/SVG), one folder per frame family
+│   │   │   ├── m15
+│   │   │   ├── 8th
+│   │   │   ├── adventure
+│   │   │   └── ...
+│   │   ├── _shared
+│   │   │   ├── fonts           # Beleren, MPlantin, Matrix, ...
+│   │   │   ├── mana_symbols    # one SVG per symbol code ({W}, {2}, {+1}, ...)
+│   │   │   └── set_symbols     # one SVG per set/rarity (e.g. 10e-c.svg)
+│   │   └── manifest.json
+│   ├── scryfall-map.json       # rules that map Scryfall card data to frame taxonomy
+│   ├── taxonomy.json
+│   └── fixtures                # sample Scryfall cards used by the test scripts
 ├── gui
 │   ├── app.py
 │   ├── config.py
 │   ├── core
-│   ├── data
+│   ├── data                    # art JSONs, frame_catalog/layouts/metadata, cache/
 │   ├── __init__.py
 │   ├── __main__.py
 │   ├── routes
@@ -62,36 +116,19 @@ Your directory tree should look like:
 └── run.py
 ```
 
-### Frame templates
+If `assets/resources` is missing, the app still starts but logs a warning, `/assets` is not mounted and the frame catalog is empty.
 
-Each folder in `assets/Templates/` is one **Template Style** (shown in the Card Builder by its folder name, e.g. `normal`, `ixalan`). Inside a style, subfolders group the frame layers and file names describe the layer itself:
+### Frames
 
-```text
-Templates/normal/
-├── Background/W.jpg + W.pdf        # one .jpg preview + .pdf (full quality) per layer
-├── Pinlines & Textbox/...
-├── Name & Title Boxes/...
-├── Legendary Crown/...
-├── PT Box/...
-├── Border/...
-└── Art Frame.jpg + .pdf            # reference shape of the art window
-```
+Frames are no longer picked from fixed template styles. When a card is imported from Scryfall, the **frame resolver** (`gui/core/frame_resolver.py`) reads its data (layout, colors, type line, frame era, frame effects, border, ...), infers a taxonomy using `assets/scryfall-map.json`, and selects the matching layers from `assets/resources/frames/`. Double-faced cards (transform, modal DFC, reversible) get one recipe per face.
 
-- Layers are sorted into frame components (`background`, `pinlines`, `name_box`, `crown`, `border`, `pt_box`) from their folder names, and auto-selected from the card's colors and type line (`W`, `UB`, `Gold`, `Artifact`, `Land`, `Colourless`...).
-- `token` uses a single full-frame layer per color in `Frame/<Legendary|Non-Legendary>/<Creature|Non-Creature>/`.
-- Folders named `WIP`, `Text and Icons`/`Text & Icons` and `Legal`, plus `Border Crop` and `* Reference` layers, are ignored.
-- Per-style text and art positions live in `gui/core/card_layouts.py` (`STYLE_LAYOUT_OVERRIDES`). The art boxes come from each style's `Art Frame`; regenerate them after adding or changing a style:
+- Frame files are discovered directly from disk. Optional per-file metadata comes from `gui/data/frame_metadata.json`; files without metadata get a role (`base_frame`, `crown`, `pt_box`, `stamp`, `border`, ...) inferred from their path.
+- The Frame Components picker is ordered by `gui/data/frame_catalog.json`. Any new file you drop into `assets/resources/frames/<folder>/` appears automatically under **Local Folders (Added)**.
+- Text and art positions per template live in `gui/data/frame_layouts.json` (defaults in `gui/core/card_layouts.py`).
+- Each imported card is stored as a card project (`gui/data/cache/projects/<id>.json`) and referenced from the workspace `state.json`.
+- Cards are exported server-side as **1500×2100 PNG** (`gui/core/recipe_renderer.py`). SVG symbols are rasterized with the first available of `cairosvg`, `rsvg-convert`, `inkscape` or ImageMagick `convert`.
 
-```bash
-python scripts/measure_art_frames.py
-```
-
-Projects saved with the older layout (`Automated Templates/` / `Manual Templates/`, `001_W_[oculta].jpg` file names) are migrated automatically when loaded. To convert an old asset download to the current file names:
-
-```bash
-python scripts/strip_asset_prefixes.py                            # dry run
-python scripts/strip_asset_prefixes.py --apply [--delete-unused]  # rename (and drop unused layers)
-```
+Projects saved with the older `Templates/<style>` layout are **not** migrated; re-import those cards.
 
 ## Key Features
 
@@ -113,12 +150,16 @@ python scripts/strip_asset_prefixes.py --apply [--delete-unused]  # rename (and 
 - `gui/app.py`: FastAPI server, static/assets mounting, and no-cache headers.
 - `gui/core/workspace.py`: Root Directory management, atomic `state.json` persistence, and collision versioning (`-1`, `-2`).
 - `gui/core/art_index.py`: $O(1)$ + inverted-token + fuzzy index over `gui/data/unified_art.json` and extra JSONs, plus Scryfall cache.
-- `gui/core/card_renderer.py`: Template catalog, frame auto-selection, independent layer composition, pop-out art, brightness, background color, and PDF/PNG export.
-- `gui/core/card_layouts.py`: Default card layout and per-style overrides (`STYLE_LAYOUT_OVERRIDES`).
-- `gui/core/asset_paths.py`: Migration of template paths and style keys saved with older asset layouts.
+- `gui/core/asset_catalog.py`: Folder-based discovery of frames, fonts, mana and set symbols.
+- `gui/core/frame_resolver.py`: Scryfall card → frame recipe (taxonomy inference and layer selection).
+- `gui/core/recipe_renderer.py` (re-exported by `card_renderer.py`): Draws a recipe (frames, art, text, mana and set symbols) to PNG.
+- `gui/core/svg_raster.py`: SVG → PNG rasterization with a cache in `~/.cache/deckgen/svg_cache`.
+- `gui/core/card_layouts.py`: Default card layout and per-template layouts from `gui/data/frame_layouts.json`.
+- `gui/core/asset_paths.py`: Asset filesystem paths and `/assets/...` URLs.
+- `gui/services/card_project.py`: Scryfall card resolution and card project storage.
 - `gui/core/sheets.py` & `gui/services/deck_service.py`: Sheet layout, individual card scaling, custom backs, and background PNG/JPG → PDF conversion.
 - `gui/static/js/modules/`: Modular ES6 frontend (`workspace_client.js`, `crop_masks.js`, `layer_manager.js`).
-- `scripts/`: Asset maintenance (`measure_art_frames.py`, `strip_asset_prefixes.py`) and the art scrapers that produced the art JSONs.
+- `scripts/`: Verification scripts (`frame_resolver_smoke.py`, `render_recipe_cli.py`, `test_e2e_archetypes.py`, `validate_assets_integrity.py`, `verify_browser_e2e.py`) and the art scrapers that produced the art JSONs.
 
 ## External Tools & Credits
 

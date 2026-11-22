@@ -142,6 +142,9 @@ def load_project_from_dir(root_dir: str) -> Dict[str, Any]:
     if os.path.isfile(state_path):
         with open(state_path, "r", encoding="utf-8") as f:
             raw = json.load(f)
+        # The folder that holds state.json is the project, whatever root_dir it recorded:
+        # a copied or moved project must not keep saving into its old location.
+        raw["root_dir"] = abs_root
         state = normalize_loaded_state(raw, fallback_root=abs_root)
     else:
         state = default_project_state(abs_root)
