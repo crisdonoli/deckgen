@@ -23,7 +23,7 @@ Launcher options (`run.py`):
 - `--no-browser` (starts the server without opening a browser tab)
 
 ### Assets & Custom Landing Background (`mana-master`, `keyrune-master`, `Templates`, and HQ Arts)
-- Download [Templates](https://drive.google.com/file/d/1SNVHCkykwsM8PFLw_0LDXb_k7e9MfYLB/view?usp=drive_link) (updated: 21-11-2026) and extract it into the root folder of this project. 
+- Download [Templates](https://drive.google.com/drive/folders/1TsvefQ6QlSJNmvgfCxoEI61KzS1reWYn?usp=sharing) (updated: 22-11-2026) and extract it into the root folder of this project. 
 
 Your directory tree should look like:
 
