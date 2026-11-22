@@ -138,6 +138,15 @@ function normalizeHiddenLayers(raw) {
   return {};
 }
 
+// Text colour a template declares for a line in frame_layouts.json (e.g. M15Extended's type
+// line is "white"), as a hex colour; '' when it declares none.
+function templateTextColor(face, boundsKey, bounds) {
+  const named = { white: '#ffffff', black: '#111111' };
+  const raw = String(bounds?.color || getSymbolsCatalog().templates?.[face?.template]?.text_bounds?.[boundsKey]?.color || '').trim().toLowerCase();
+  if (named[raw]) return named[raw];
+  return /^#[0-9a-f]{6}$/.test(raw) ? raw : '';
+}
+
 export function buildLayoutFromProjectFace(face) {
   const defColor = defaultTextColorForFace(face);
   const tl = face?.text_layers || {};
@@ -216,7 +225,8 @@ export function buildLayoutFromProjectFace(face) {
       y: Math.round((typeTopY + typeSize * 0.85) / 2),
       max_w: Math.round(Number(tyb.max_w || tyb.width || tyb.w || 1100) / 2),
       font_size: Math.round(typeSize / 2),
-      color: defColor,
+      // The template's type-line colour wins (white on M15Extended / Seventh / Future).
+      color: templateTextColor(face, 'type', tyb) || defColor,
     },
     set_symbol: {
       x: Math.round(Number(sb.x || 1384) / 2),
