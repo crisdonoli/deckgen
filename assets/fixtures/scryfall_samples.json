@@ -1,0 +1,147 @@
+[
+  {
+    "id": "fixture-mono-creature",
+    "name": "Test Beast",
+    "set": "m15",
+    "set_name": "Magic 2015",
+    "rarity": "rare",
+    "frame": "2015",
+    "layout": "normal",
+    "border_color": "black",
+    "lang": "en",
+    "collector_number": "1",
+    "artist": "Test Artist",
+    "colors": [
+      "G"
+    ],
+    "color_identity": [
+      "G"
+    ],
+    "mana_cost": "{2}{G}",
+    "type_line": "Creature — Beast",
+    "oracle_text": "Trample.",
+    "power": "3",
+    "toughness": "3",
+    "finishes": [
+      "nonfoil",
+      "foil"
+    ],
+    "image_uris": {
+      "art_crop": "https://example.test/art-mono.jpg"
+    }
+  },
+  {
+    "id": "fixture-dual-land",
+    "name": "Test Delta",
+    "set": "m15",
+    "set_name": "Magic 2015",
+    "rarity": "rare",
+    "frame": "2015",
+    "layout": "normal",
+    "border_color": "black",
+    "lang": "en",
+    "collector_number": "2",
+    "artist": "Test Artist",
+    "colors": [
+      "W",
+      "U"
+    ],
+    "color_identity": [
+      "W",
+      "U"
+    ],
+    "produced_mana": [
+      "W",
+      "U"
+    ],
+    "mana_cost": "",
+    "type_line": "Land",
+    "oracle_text": "This land enters tapped.\n{T}: Add {W} or {U}.",
+    "image_uris": {
+      "art_crop": "https://example.test/art-land.jpg"
+    }
+  },
+  {
+    "id": "fixture-transform",
+    "name": "Test Wanderer // Test Nightmare",
+    "set": "neo",
+    "set_name": "Kamigawa: Neon Dynasty",
+    "rarity": "mythic",
+    "frame": "2015",
+    "layout": "transform",
+    "border_color": "borderless",
+    "lang": "en",
+    "collector_number": "3",
+    "artist": "Test Artist",
+    "frame_effects": [
+      "legendary",
+      "showcase"
+    ],
+    "finishes": [
+      "nonfoil",
+      "foil"
+    ],
+    "promo_types": [
+      "boosterfun"
+    ],
+    "color_identity": [
+      "U"
+    ],
+    "card_faces": [
+      {
+        "name": "Test Wanderer",
+        "mana_cost": "{1}{U}",
+        "type_line": "Legendary Creature — Human",
+        "oracle_text": "When this creature enters, draw a card.",
+        "power": "2",
+        "toughness": "2",
+        "colors": [
+          "U"
+        ],
+        "image_uris": {
+          "art_crop": "https://example.test/art-front.jpg"
+        }
+      },
+      {
+        "name": "Test Nightmare",
+        "mana_cost": "",
+        "type_line": "Legendary Creature — Nightmare",
+        "oracle_text": "Flying",
+        "power": "4",
+        "toughness": "4",
+        "colors": [
+          "U"
+        ],
+        "image_uris": {
+          "art_crop": "https://example.test/art-back.jpg"
+        }
+      }
+    ]
+  },
+  {
+    "id": "fixture-planeswalker",
+    "name": "Test Vess",
+    "set": "m15",
+    "set_name": "Magic 2015",
+    "rarity": "mythic",
+    "frame": "2015",
+    "layout": "normal",
+    "border_color": "black",
+    "lang": "en",
+    "collector_number": "4",
+    "artist": "Test Artist",
+    "colors": [
+      "B"
+    ],
+    "color_identity": [
+      "B"
+    ],
+    "mana_cost": "{3}{B}{B}",
+    "type_line": "Legendary Planeswalker — Vess",
+    "oracle_text": "+1: Draw a card.\n-3: Target creature gets -3/-3 until end of turn.\n-7: You get an emblem.",
+    "loyalty": "4",
+    "image_uris": {
+      "art_crop": "https://example.test/art-pw.jpg"
+    }
+  }
+]

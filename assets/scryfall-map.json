@@ -1,0 +1,1226 @@
+{
+  "frame_mapping": {
+    "source_field": "frame",
+    "rules": {
+      "1993": {
+        "taxonomy_value": "1993",
+        "fork_directories": [
+          "img/frames/old/abu/",
+          "img/frames/old/fourth/"
+        ]
+      },
+      "1997": {
+        "taxonomy_value": "1997",
+        "fork_directories": [
+          "img/frames/seventh/regular/"
+        ]
+      },
+      "2003": {
+        "taxonomy_value": "2003",
+        "fork_directories": [
+          "img/frames/8th/"
+        ]
+      },
+      "2015": {
+        "taxonomy_value": "2015",
+        "fork_directories": [
+          "img/frames/m15/new/",
+          "img/frames/m15/regular/"
+        ]
+      },
+      "future": {
+        "taxonomy_value": "future",
+        "fork_directories": [
+          "img/frames/future/regular/"
+        ]
+      }
+    }
+  },
+  "layout_mapping": {
+    "source_fields": [
+      "layout",
+      "keywords"
+    ],
+    "rules": {
+      "normal": {
+        "taxonomy_value": "normal",
+        "fork_directories": [
+          "img/frames/m15/new/"
+        ]
+      },
+      "split": {
+        "taxonomy_value": "split",
+        "condition": "default",
+        "fork_directories": [
+          "img/frames/m15/split/",
+          "img/frames/m15/split/fuse/"
+        ]
+      },
+      "aftermath": {
+        "taxonomy_value": "split",
+        "condition": "'Aftermath' in keywords",
+        "fork_directories": [
+          "img/frames/m15/aftermath/"
+        ]
+      },
+      "flip": {
+        "taxonomy_value": "flip",
+        "fork_directories": [
+          "img/frames/m15/flip/"
+        ]
+      },
+      "transform": {
+        "taxonomy_value": "transform",
+        "fork_directories": [
+          "img/frames/m15/transform/regular/"
+        ]
+      },
+      "modal_dfc": {
+        "taxonomy_value": "modal_dfc",
+        "fork_directories": [
+          "img/frames/modal/regular/"
+        ]
+      },
+      "saga": {
+        "taxonomy_value": "saga",
+        "fork_directories": [
+          "img/frames/saga/regular/"
+        ]
+      },
+      "class": {
+        "taxonomy_value": "class",
+        "fork_directories": [
+          "img/frames/class/"
+        ]
+      },
+      "adventure": {
+        "taxonomy_value": "adventure",
+        "fork_directories": [
+          "img/frames/adventure/regular/"
+        ]
+      },
+      "mutate": {
+        "taxonomy_value": "mutate",
+        "fork_directories": [
+          "img/frames/m15/mutate/"
+        ]
+      },
+      "prototype": {
+        "taxonomy_value": "prototype",
+        "fork_directories": [
+          "img/frames/m15/prototype/regular/"
+        ]
+      },
+      "battle": {
+        "taxonomy_value": "battle",
+        "fork_directories": [
+          "img/frames/m15/battle/"
+        ]
+      },
+      "leveler": {
+        "taxonomy_value": "leveler",
+        "fork_directories": [
+          "img/frames/levelers/regular/"
+        ]
+      },
+      "planar": {
+        "taxonomy_value": "planar",
+        "fork_directories": [
+          "img/frames/planechase/"
+        ]
+      },
+      "vanguard": {
+        "taxonomy_value": "vanguard",
+        "fork_directories": [
+          "img/frames/vanguard/"
+        ]
+      },
+      "token": {
+        "taxonomy_value": "token",
+        "fork_directories": [
+          "img/frames/token/m15/regular/",
+          "img/frames/token/regular/"
+        ]
+      },
+      "double_faced_token": {
+        "taxonomy_value": "double_faced_token",
+        "fork_directories": [
+          "img/frames/token/m15/regular/"
+        ]
+      },
+      "emblem": {
+        "taxonomy_value": "emblem",
+        "fork_directories": [
+          "img/frames/token/emblem/"
+        ]
+      }
+    }
+  },
+  "structural_type_override_mapping": {
+    "source_field": "type_line",
+    "rules": [
+      {
+        "match": "Planeswalker",
+        "taxonomy_value": "planeswalker",
+        "fork_directories": [
+          "img/frames/planeswalker/regular/",
+          "img/frames/planeswalker/tall/",
+          "img/frames/planeswalker/compleated/"
+        ]
+      },
+      {
+        "match": "Dungeon",
+        "taxonomy_value": "dungeon",
+        "fork_directories": [
+          "img/frames/dungeon/regular/"
+        ]
+      },
+      {
+        "match": "Attraction",
+        "taxonomy_value": "attraction",
+        "fork_directories": [
+          "img/frames/attraction/"
+        ]
+      },
+      {
+        "condition": "default",
+        "taxonomy_value": "standard",
+        "fork_directories": []
+      }
+    ]
+  },
+  "box_variant_mapping": {
+    "source_fields": [
+      "textless",
+      "full_art",
+      "type_line",
+      "oracle_text",
+      "layout"
+    ],
+    "rules": [
+      {
+        "condition": "textless == true and frame == '1997'",
+        "taxonomy_value": "textless",
+        "fork_directories": [
+          "img/frames/seventh/textless/"
+        ]
+      },
+      {
+        "condition": "textless == true and frame == '2015'",
+        "taxonomy_value": "textless",
+        "fork_directories": [
+          "img/frames/textless/2022/",
+          "img/frames/textless/genericShowcase/",
+          "img/frames/textless/invention/"
+        ]
+      },
+      {
+        "condition": "full_art == true and 'Basic Land' in type_line",
+        "taxonomy_value": "textless",
+        "fork_directories": [
+          "img/frames/m15/basics/",
+          "img/frames/textless/basics/",
+          "img/frames/textless/zendikar/",
+          "img/frames/textless/unhinged/"
+        ]
+      },
+      {
+        "condition": "set == 'sld' and 'Basic Land' in type_line and len(oracle_text) > 200",
+        "taxonomy_value": "full_text",
+        "fork_directories": [
+          "img/frames/m15/fullText/"
+        ]
+      },
+      {
+        "condition": "'Planeswalker' in type_line and oracle_text.count('\\n') >= 3",
+        "taxonomy_value": "tall",
+        "fork_directories": [
+          "img/frames/planeswalker/tall/"
+        ]
+      },
+      {
+        "condition": "layout == 'modal_dfc' and len(oracle_text) < 120",
+        "taxonomy_value": "short",
+        "fork_directories": [
+          "img/frames/modal/short/"
+        ]
+      }
+    ]
+  },
+  "has_nickname_mapping": {
+    "source_field": "flavor_name",
+    "rules": {
+      "is_not_null": {
+        "taxonomy_value": true,
+        "fork_directories": [
+          "img/frames/m15/nickname/",
+          "img/frames/modal/nickname/",
+          "img/frames/planeswalker/nickname/",
+          "img/frames/promo/nickname/"
+        ]
+      },
+      "is_null": {
+        "taxonomy_value": false,
+        "fork_directories": []
+      }
+    }
+  },
+  "crown_style_mapping": {
+    "source_fields": [
+      "frame_effects",
+      "border_color",
+      "type_line"
+    ],
+    "rules": [
+      {
+        "condition": "'legendary' not in frame_effects",
+        "taxonomy_value": "none",
+        "fork_directories": []
+      },
+      {
+        "condition": "'legendary' in frame_effects and (border_color == 'borderless' or 'extendedart' in frame_effects)",
+        "taxonomy_value": "floating",
+        "fork_directories": [
+          "img/frames/m15/crowns/"
+        ],
+        "filename_patterns": [
+          "Floating\\.png$"
+        ]
+      },
+      {
+        "condition": "'legendary' in frame_effects and 'nyxtouched' in frame_effects",
+        "taxonomy_value": "nyx",
+        "fork_directories": [
+          "img/frames/m15/innerCrowns/new/nyx/"
+        ]
+      },
+      {
+        "condition": "'legendary' in frame_effects and 'companion' in frame_effects",
+        "taxonomy_value": "companion",
+        "fork_directories": [
+          "img/frames/m15/innerCrowns/new/companion/"
+        ]
+      },
+      {
+        "condition": "'legendary' in frame_effects and 'Sliver' in type_line",
+        "taxonomy_value": "sliver",
+        "fork_directories": [
+          "img/frames/m15/m15MaskBorderSliverCrown.png"
+        ]
+      },
+      {
+        "condition": "'legendary' in frame_effects",
+        "taxonomy_value": "standard",
+        "fork_directories": [
+          "img/frames/m15/crowns/"
+        ]
+      }
+    ]
+  },
+  "frame_effects_and_finish_mapping": {
+    "source_fields": [
+      "frame_effects",
+      "finishes",
+      "promo_types",
+      "security_stamp"
+    ],
+    "rules": {
+      "extendedart": {
+        "taxonomy_value": "extendedart",
+        "fork_directories": [
+          "img/frames/m15/new/extended/"
+        ]
+      },
+      "etched": {
+        "taxonomy_value": "etched",
+        "fork_directories": [
+          "img/frames/etched/regular/",
+          "img/frames/etched/legends/"
+        ]
+      },
+      "snow": {
+        "taxonomy_value": "snow",
+        "fork_directories": [
+          "img/frames/m15/new/snow/",
+          "img/frames/seventh/snowlands/"
+        ]
+      },
+      "nyxtouched": {
+        "taxonomy_value": "nyxtouched",
+        "fork_directories": [
+          "img/frames/m15/new/nyx/"
+        ]
+      },
+      "enchantment": {
+        "taxonomy_value": "enchantment",
+        "fork_directories": [
+          "img/frames/m15/new/nyx/"
+        ]
+      },
+      "devoid": {
+        "taxonomy_value": "devoid",
+        "fork_directories": [
+          "img/frames/m15/devoid/"
+        ]
+      },
+      "miracle": {
+        "taxonomy_value": "miracle",
+        "fork_directories": [
+          "img/frames/m15/miracle/"
+        ]
+      },
+      "colorshifted": {
+        "taxonomy_value": "colorshifted",
+        "fork_directories": [
+          "img/frames/8th/colorshifted/",
+          "img/frames/m15/colorshifted/"
+        ]
+      },
+      "spree": {
+        "taxonomy_value": "spree",
+        "fork_directories": [
+          "img/frames/m15/spree/"
+        ]
+      },
+      "inverted": {
+        "taxonomy_value": "inverted",
+        "fork_directories": [
+          "img/frames/m15/borderless/"
+        ]
+      },
+      "universes_beyond": {
+        "condition": "security_stamp == 'triangle' or 'universesbeyond' in promo_types",
+        "taxonomy_value": "universes_beyond",
+        "fork_directories": [
+          "img/frames/m15/new/ub/",
+          "img/frames/m15/ub/regular/"
+        ]
+      },
+      "oilslick": {
+        "condition": "'oilslick' in promo_types",
+        "taxonomy_value": "showcase",
+        "fork_directories": [
+          "img/frames/m15/oilslick/"
+        ]
+      }
+    }
+  },
+  "showcase_style_mapping": {
+    "source_fields": [
+      "set",
+      "frame_effects",
+      "promo_types",
+      "lang"
+    ],
+    "rules": [
+      {
+        "condition": "set == 'sta' and lang == 'ja'",
+        "taxonomy_value": "mystical_archive_jp",
+        "fork_directories": [
+          "img/frames/mysticalArchive/jp/"
+        ]
+      },
+      {
+        "condition": "set == 'sta'",
+        "taxonomy_value": "mystical_archive_global",
+        "fork_directories": [
+          "img/frames/mysticalArchive/"
+        ]
+      },
+      {
+        "condition": "set == 'dmu' and 'showcase' in frame_effects",
+        "taxonomy_value": "stained_glass_dmu",
+        "fork_directories": [
+          "img/frames/dmu/stainedGlass/"
+        ]
+      },
+      {
+        "condition": "set == 'wot'",
+        "taxonomy_value": "enchanting_tales_wot",
+        "fork_directories": [
+          "img/frames/enchantingTales/"
+        ]
+      },
+      {
+        "condition": "set == 'otj' and 'showcase' in frame_effects",
+        "taxonomy_value": "wanted_otj",
+        "fork_directories": [
+          "img/frames/wanted/"
+        ]
+      },
+      {
+        "condition": "set == 'otp'",
+        "taxonomy_value": "breaking_news_otp",
+        "fork_directories": [
+          "img/frames/breakingNews/"
+        ]
+      },
+      {
+        "condition": "set == 'big' and 'showcase' in frame_effects",
+        "taxonomy_value": "vault_big",
+        "fork_directories": [
+          "img/frames/vault/"
+        ]
+      },
+      {
+        "condition": "'phyrexian' in promo_types",
+        "taxonomy_value": "praetors_phyrexian",
+        "fork_directories": [
+          "img/frames/m15/praetors/"
+        ]
+      },
+      {
+        "condition": "set in ['mid', 'vow'] and 'showcase' in frame_effects and 'Vampire' in type_line",
+        "taxonomy_value": "fang_vow",
+        "fork_directories": [
+          "img/frames/m15/fang/"
+        ]
+      },
+      {
+        "condition": "set in ['mid', 'vow'] and 'showcase' in frame_effects",
+        "taxonomy_value": "equinox_mid_vow",
+        "fork_directories": [
+          "img/frames/m15/equinox/"
+        ]
+      },
+      {
+        "condition": "set == 'dbl'",
+        "taxonomy_value": "eternal_night_dbl",
+        "fork_directories": [
+          "img/frames/doubleFeature/"
+        ]
+      },
+      {
+        "condition": "set == 'neo' and 'showcase' in frame_effects and 'Ninja' in type_line",
+        "taxonomy_value": "ninja_neo",
+        "fork_directories": [
+          "img/frames/neo/ninja/"
+        ]
+      },
+      {
+        "condition": "set == 'neo' and 'showcase' in frame_effects and 'Samurai' in type_line",
+        "taxonomy_value": "samurai_neo",
+        "fork_directories": [
+          "img/frames/neo/samurai/"
+        ]
+      },
+      {
+        "condition": "set == 'neo' and 'showcase' in frame_effects",
+        "taxonomy_value": "neon_neo",
+        "fork_directories": [
+          "img/frames/neo/neon/"
+        ]
+      },
+      {
+        "condition": "set == 'snc' and 'gilded' in promo_types",
+        "taxonomy_value": "gilded_snc",
+        "fork_directories": [
+          "img/frames/snc/gilded/"
+        ]
+      },
+      {
+        "condition": "set == 'snc' and 'Basic Land' in type_line",
+        "taxonomy_value": "skyscraper_snc",
+        "fork_directories": [
+          "img/frames/snc/skyscraper/"
+        ]
+      },
+      {
+        "condition": "set == 'snc' and 'showcase' in frame_effects",
+        "taxonomy_value": "art_deco_snc",
+        "fork_directories": [
+          "img/frames/snc/artDeco/"
+        ]
+      },
+      {
+        "condition": "set == 'ltr' and 'scroll' in promo_types",
+        "taxonomy_value": "lotr_scroll",
+        "fork_directories": [
+          "img/frames/scroll/"
+        ]
+      },
+      {
+        "condition": "set == 'ltr' and 'showcase' in frame_effects",
+        "taxonomy_value": "lotr_ring",
+        "fork_directories": [
+          "img/frames/lotr/"
+        ]
+      },
+      {
+        "condition": "set == 'who' and 'showcase' in frame_effects",
+        "taxonomy_value": "tardis_who",
+        "fork_directories": [
+          "img/frames/tardis/"
+        ]
+      },
+      {
+        "condition": "set == 'pip' and 'showcase' in frame_effects",
+        "taxonomy_value": "pipboy_pip",
+        "fork_directories": [
+          "img/frames/pipboy/"
+        ]
+      },
+      {
+        "condition": "set == 'mkm' and 'showcase' in frame_effects",
+        "taxonomy_value": "dossier_mkm",
+        "fork_directories": [
+          "img/frames/dossier/"
+        ]
+      },
+      {
+        "condition": "set in ['mom', 'mul'] and 'showcase' in frame_effects",
+        "taxonomy_value": "multiverse_legends_mom",
+        "fork_directories": [
+          "img/frames/ravnica/",
+          "img/frames/tarkir/",
+          "img/frames/crystal/",
+          "img/frames/ixalanCoin/",
+          "img/frames/invocation/mul/",
+          "img/frames/m15/invention/mul/",
+          "img/frames/storybook/mul/"
+        ]
+      },
+      {
+        "condition": "set == 'khm' and 'showcase' in frame_effects",
+        "taxonomy_value": "kaldheim_viking",
+        "fork_directories": [
+          "img/frames/kaldheim/"
+        ]
+      },
+      {
+        "condition": "set == 'eld' and 'showcase' in frame_effects",
+        "taxonomy_value": "storybook_eld",
+        "fork_directories": [
+          "img/frames/storybook/"
+        ]
+      },
+      {
+        "condition": "set == 'znr' and 'showcase' in frame_effects",
+        "taxonomy_value": "zendikar_rising_znr",
+        "fork_directories": [
+          "img/frames/m15/zendikarRising/"
+        ]
+      },
+      {
+        "condition": "set == 'zne'",
+        "taxonomy_value": "expedition_znr",
+        "fork_directories": [
+          "img/frames/expedition/znr/"
+        ]
+      },
+      {
+        "condition": "set == 'exp'",
+        "taxonomy_value": "expedition_bfz",
+        "fork_directories": [
+          "img/frames/expedition/bfz/"
+        ]
+      },
+      {
+        "condition": "set in ['xln', 'rix'] and 'showcase' in frame_effects",
+        "taxonomy_value": "ixalan_map_xln",
+        "fork_directories": [
+          "img/frames/ixalan/"
+        ]
+      },
+      {
+        "condition": "set == 'lcc' and 'showcase' in frame_effects",
+        "taxonomy_value": "ixalan_coin_lcc",
+        "fork_directories": [
+          "img/frames/ixalanCoin/"
+        ]
+      },
+      {
+        "condition": "set == 'mps'",
+        "taxonomy_value": "invention_kld",
+        "fork_directories": [
+          "img/frames/m15/invention/"
+        ]
+      },
+      {
+        "condition": "set == 'mp2'",
+        "taxonomy_value": "invocation_akh",
+        "fork_directories": [
+          "img/frames/invocation/"
+        ]
+      },
+      {
+        "condition": "set in ['ss1', 'ss2', 'ss3']",
+        "taxonomy_value": "signature_spellbook",
+        "fork_directories": [
+          "img/frames/m15/signatureSpellbook/"
+        ]
+      },
+      {
+        "condition": "set == 'm21' and 'showcase' in frame_effects",
+        "taxonomy_value": "m21_planeswalker_signature",
+        "fork_directories": [
+          "img/frames/m15/m21/"
+        ]
+      },
+      {
+        "condition": "set in ['cns', 'cn2'] and 'draft' in frame_effects",
+        "taxonomy_value": "conspiracy_draft",
+        "fork_directories": [
+          "img/frames/m15/conspiracy/"
+        ]
+      },
+      {
+        "condition": "set == 'ust' and layout in ['augment', 'host']",
+        "taxonomy_value": "unstable_augment",
+        "fork_directories": [
+          "img/frames/unstable/"
+        ]
+      },
+      {
+        "condition": "set in ['cmb1', 'cmb2'] or 'playtest' in promo_types",
+        "taxonomy_value": "playtest_sketch",
+        "fork_directories": []
+      }
+    ]
+  },
+  "texture_and_color_blend_mapping": {
+    "source_fields": [
+      "colors",
+      "color_identity",
+      "produced_mana",
+      "type_line",
+      "mana_cost",
+      "frame",
+      "frame_effects"
+    ],
+    "file_suffix_rules": [
+      {
+        "condition": "'Vehicle' in type_line",
+        "texture_material": "vehicle_bronze_riveted",
+        "color_blend_mode": "monocolor",
+        "file_suffix": "v.png"
+      },
+      {
+        "condition": "'Artifact' in type_line and len(colors) == 0",
+        "texture_material": "artifact_brown_retro if frame in ['1993', '1997'] else artifact_steel_modern",
+        "color_blend_mode": "monocolor",
+        "file_suffix": "a.png"
+      },
+      {
+        "condition": "'Land' in type_line and len(produced_mana) >= 3",
+        "texture_material": "land_neutral",
+        "color_blend_mode": "land_gold_pinline",
+        "file_suffix": "ml.png"
+      },
+      {
+        "condition": "'Land' in type_line and len(produced_mana) == 2",
+        "texture_material": "land_neutral",
+        "color_blend_mode": "land_dual_pinline",
+        "file_suffix": "[c1][c2]l.png (masked with maskRightHalf.png)"
+      },
+      {
+        "condition": "'Land' in type_line and len(produced_mana) == 1",
+        "texture_material": "land_neutral",
+        "color_blend_mode": "monocolor",
+        "file_suffix": "[w|u|b|r|g]l.png"
+      },
+      {
+        "condition": "'Land' in type_line and len(produced_mana) == 0",
+        "texture_material": "land_neutral",
+        "color_blend_mode": "monocolor",
+        "file_suffix": "l.png"
+      },
+      {
+        "condition": "'/' in mana_cost and len(colors) == 2",
+        "texture_material": "hybrid_pair",
+        "color_blend_mode": "hybrid_gradient",
+        "file_suffix": "[c1].png + [c2].png (masked with maskRightHalf.png)"
+      },
+      {
+        "condition": "len(colors) >= 2",
+        "texture_material": "gold_metallic",
+        "color_blend_mode": "gold_solid",
+        "file_suffix": "m.png"
+      },
+      {
+        "condition": "colors == ['W']",
+        "texture_material": "white_marble",
+        "color_blend_mode": "monocolor",
+        "file_suffix": "w.png"
+      },
+      {
+        "condition": "colors == ['U']",
+        "texture_material": "blue_water",
+        "color_blend_mode": "monocolor",
+        "file_suffix": "u.png"
+      },
+      {
+        "condition": "colors == ['B']",
+        "texture_material": "black_swamp",
+        "color_blend_mode": "monocolor",
+        "file_suffix": "b.png"
+      },
+      {
+        "condition": "colors == ['R']",
+        "texture_material": "red_volcanic",
+        "color_blend_mode": "monocolor",
+        "file_suffix": "r.png"
+      },
+      {
+        "condition": "colors == ['G']",
+        "texture_material": "green_bark",
+        "color_blend_mode": "monocolor",
+        "file_suffix": "g.png"
+      },
+      {
+        "condition": "len(colors) == 0",
+        "texture_material": "colorless_stone",
+        "color_blend_mode": "monocolor",
+        "file_suffix": "c.png"
+      }
+    ]
+  },
+  "corner_cut_mapping": {
+    "source_fields": [
+      "set",
+      "border_color"
+    ],
+    "rules": {
+      "modern_radius": {
+        "condition": "default",
+        "taxonomy_value": "modern_radius",
+        "fork_files": [
+          "img/frames/cornerCutout.png",
+          "img/frames/margins/blackCorners.png"
+        ]
+      },
+      "square_corners": {
+        "condition": "set in ['ced', 'cei']",
+        "taxonomy_value": "square_corners",
+        "fork_files": [],
+        "procedural_fallback": "no_corner_clip"
+      },
+      "alpha_radius": {
+        "condition": "set == 'lea'",
+        "taxonomy_value": "alpha_radius",
+        "fork_files": [],
+        "procedural_fallback": "rounded_rect_radius_mm:4.0"
+      },
+      "asymmetric_corners": {
+        "condition": "layout == 'vanguard'",
+        "taxonomy_value": "asymmetric_corners",
+        "fork_files": [],
+        "procedural_fallback": "asymmetric_top_rounded_bottom_square"
+      }
+    }
+  },
+  "non_official_fork_assets": {
+    "description": "Carpetas presentes en el fork sin correspondencia oficial en Scryfall",
+    "custom_mtg_community": [
+      "img/frames/custom/classicshifted/",
+      "img/frames/custom/circuit/",
+      "img/frames/custom/tapped/",
+      "img/frames/custom/deckCover/",
+      "img/frames/custom/dualLands/",
+      "img/frames/custom/celid/",
+      "img/frames/custom/feuerAmeise/",
+      "img/frames/custom/magrao/",
+      "img/frames/custom/m15-eighth/",
+      "img/frames/custom/brawl/",
+      "img/frames/custom/neon/",
+      "img/frames/custom/simpleInvention/"
+    ],
+    "other_tcg_or_accessory": [
+      "img/frames/fab/",
+      "img/frames/custom/pokemon/",
+      "img/frames/cardbacks/"
+    ]
+  },
+  "border_color_mapping": {
+    "source_field": "border_color",
+    "rules": {
+      "black": {
+        "taxonomy_value": "black",
+        "fork_files": [
+          "img/frames/margins/blackBorderExtension.png",
+          "img/frames/margins/blackBorderExtensionLandscape.png"
+        ],
+        "procedural_fallback": "canvas_fill_hex:#000000"
+      },
+      "white": {
+        "taxonomy_value": "white",
+        "fork_files": [
+          "img/frames/white.png",
+          "img/frames/old/fourth/borderWhite.png"
+        ]
+      },
+      "silver": {
+        "taxonomy_value": "silver",
+        "fork_files": [
+          "img/frames/silver.png"
+        ]
+      },
+      "gold": {
+        "taxonomy_value": "gold",
+        "fork_files": [
+          "img/frames/gold.png"
+        ]
+      },
+      "borderless": {
+        "taxonomy_value": "borderless",
+        "fork_files": [
+          "img/frames/margins/borderlessBorderExtension.png",
+          "img/frames/margins/borderlessBottomBarExtension.png"
+        ]
+      },
+      "yellow": {
+        "taxonomy_value": "yellow",
+        "fork_files": [],
+        "procedural_fallback": "canvas_fill_hex:#E6C229"
+      }
+    }
+  },
+  "frame_texture_material_mapping": {
+    "description": "Mapeo por patrón de archivo dentro de cada carpeta de marco y carpetas temáticas dedicadas",
+    "rules": [
+      {
+        "taxonomy_value": "white_marble",
+        "filename_patterns": [
+          "^w\\.png$",
+          "FrameW\\.png$",
+          "FrontW\\.png$",
+          "BackW\\.png$",
+          "TallW\\.png$",
+          "CompleatedW\\.png$",
+          "^wf\\.png$",
+          "^wb\\.png$"
+        ],
+        "exclude_paths": [
+          "snow/",
+          "nyx/",
+          "etched/",
+          "devoid/",
+          "old/",
+          "seventh/"
+        ]
+      },
+      {
+        "taxonomy_value": "blue_water",
+        "filename_patterns": [
+          "^u\\.png$",
+          "FrameU\\.png$",
+          "FrontU\\.png$",
+          "BackU\\.png$",
+          "TallU\\.png$",
+          "CompleatedU\\.png$",
+          "^uf\\.png$",
+          "^ub\\.png$"
+        ],
+        "exclude_paths": [
+          "snow/",
+          "nyx/",
+          "etched/",
+          "devoid/",
+          "old/",
+          "seventh/"
+        ]
+      },
+      {
+        "taxonomy_value": "black_swamp",
+        "filename_patterns": [
+          "^b\\.png$",
+          "FrameB\\.png$",
+          "FrontB\\.png$",
+          "BackB\\.png$",
+          "TallB\\.png$",
+          "CompleatedB\\.png$",
+          "^bf\\.png$",
+          "^bb\\.png$"
+        ],
+        "exclude_paths": [
+          "snow/",
+          "nyx/",
+          "etched/",
+          "devoid/",
+          "old/",
+          "seventh/"
+        ]
+      },
+      {
+        "taxonomy_value": "red_volcanic",
+        "filename_patterns": [
+          "^r\\.png$",
+          "FrameR\\.png$",
+          "FrontR\\.png$",
+          "BackR\\.png$",
+          "TallR\\.png$",
+          "CompleatedR\\.png$",
+          "^rf\\.png$",
+          "^rb\\.png$"
+        ],
+        "exclude_paths": [
+          "snow/",
+          "nyx/",
+          "etched/",
+          "devoid/",
+          "old/",
+          "seventh/"
+        ]
+      },
+      {
+        "taxonomy_value": "green_bark",
+        "filename_patterns": [
+          "^g\\.png$",
+          "FrameG\\.png$",
+          "FrontG\\.png$",
+          "BackG\\.png$",
+          "TallG\\.png$",
+          "CompleatedG\\.png$",
+          "^gf\\.png$",
+          "^gb\\.png$"
+        ],
+        "exclude_paths": [
+          "snow/",
+          "nyx/",
+          "etched/",
+          "devoid/",
+          "old/",
+          "seventh/"
+        ]
+      },
+      {
+        "taxonomy_value": "gold_metallic",
+        "filename_patterns": [
+          "^m\\.png$",
+          "FrameM\\.png$",
+          "FrontM\\.png$",
+          "BackM\\.png$",
+          "TallM\\.png$",
+          "CompleatedM\\.png$",
+          "^mf\\.png$",
+          "^mb\\.png$"
+        ],
+        "exclude_paths": [
+          "snow/",
+          "nyx/",
+          "etched/",
+          "devoid/",
+          "old/",
+          "seventh/"
+        ]
+      },
+      {
+        "taxonomy_value": "artifact_brown_retro",
+        "path_prefixes": [
+          "img/frames/old/",
+          "img/frames/seventh/"
+        ],
+        "filename_patterns": [
+          "^a\\.png$",
+          "FrameA\\.png$"
+        ]
+      },
+      {
+        "taxonomy_value": "artifact_steel_modern",
+        "filename_patterns": [
+          "^a\\.png$",
+          "FrameA\\.png$",
+          "FrontA\\.png$",
+          "BackA\\.png$",
+          "TallA\\.png$",
+          "^af\\.png$",
+          "^ab\\.png$"
+        ],
+        "exclude_paths": [
+          "old/",
+          "seventh/",
+          "snow/",
+          "nyx/",
+          "etched/",
+          "devoid/"
+        ]
+      },
+      {
+        "taxonomy_value": "vehicle_bronze_riveted",
+        "filename_patterns": [
+          "^v\\.png$",
+          "FrameV\\.png$",
+          "BackV\\.png$"
+        ]
+      },
+      {
+        "taxonomy_value": "colorless_stone",
+        "filename_patterns": [
+          "^c\\.png$",
+          "FrameC\\.png$",
+          "FrameCAlt\\.png$",
+          "^cAlt\\.png$"
+        ],
+        "exclude_paths": [
+          "snow/",
+          "nyx/",
+          "etched/"
+        ]
+      },
+      {
+        "taxonomy_value": "land_neutral",
+        "filename_patterns": [
+          "^l\\.png$",
+          "^[wubrgm]l\\.png$",
+          "FrameL\\.png$",
+          "FrontL\\.png$",
+          "BackL\\.png$",
+          "TallL\\.png$",
+          "^lf\\.png$",
+          "^lb\\.png$",
+          "^dualLand\\.png$",
+          "^l[A-Z].*\\.png$"
+        ],
+        "exclude_paths": [
+          "snow/",
+          "snowlands/",
+          "nyx/",
+          "etched/"
+        ]
+      },
+      {
+        "taxonomy_value": "snow_ice",
+        "path_prefixes": [
+          "img/frames/m15/new/snow/",
+          "img/frames/m15/snow/",
+          "img/frames/extended/regular/snow/",
+          "img/frames/extended/shorter/snow/",
+          "img/frames/seventh/snowlands/",
+          "img/frames/textless/snowBasics/",
+          "img/frames/textless/2022/snow/",
+          "img/frames/etched/regular/snow/",
+          "img/frames/m15/spree/snow/"
+        ],
+        "filename_patterns": [
+          "^snow\\.png$"
+        ]
+      },
+      {
+        "taxonomy_value": "nyx_starfield",
+        "path_prefixes": [
+          "img/frames/m15/new/nyx/",
+          "img/frames/m15/nyx/",
+          "img/frames/nyxShowcase/",
+          "img/frames/extended/regular/nyx/",
+          "img/frames/extended/shorter/nyx/",
+          "img/frames/saga/nyx/",
+          "img/frames/etched/regular/nyx/",
+          "img/frames/etched/legends/nyx/"
+        ],
+        "filename_patterns": [
+          "Nyx\\.png$",
+          "NyxSL\\.png$"
+        ]
+      },
+      {
+        "taxonomy_value": "etched_foil",
+        "path_prefixes": [
+          "img/frames/etched/"
+        ]
+      },
+      {
+        "taxonomy_value": "transparent_fullart",
+        "path_prefixes": [
+          "img/frames/m15/devoid/",
+          "img/frames/m15/clearTextbox/",
+          "img/frames/m15/new/fullart/",
+          "img/frames/m15/ub/full/"
+        ]
+      },
+      {
+        "taxonomy_value": "showcase_custom",
+        "path_prefixes": [
+          "img/frames/mysticalArchive/",
+          "img/frames/dmu/stainedGlass/",
+          "img/frames/enchantingTales/",
+          "img/frames/wanted/",
+          "img/frames/breakingNews/",
+          "img/frames/vault/",
+          "img/frames/m15/praetors/",
+          "img/frames/m15/fang/",
+          "img/frames/m15/equinox/",
+          "img/frames/doubleFeature/",
+          "img/frames/neo/",
+          "img/frames/snc/",
+          "img/frames/lotr/",
+          "img/frames/scroll/",
+          "img/frames/tardis/",
+          "img/frames/pipboy/",
+          "img/frames/dossier/",
+          "img/frames/ixalan/",
+          "img/frames/ixalanCoin/",
+          "img/frames/ravnica/",
+          "img/frames/tarkir/",
+          "img/frames/crystal/",
+          "img/frames/kaldheim/",
+          "img/frames/storybook/",
+          "img/frames/m15/zendikarRising/",
+          "img/frames/expedition/",
+          "img/frames/m15/invention/",
+          "img/frames/invocation/",
+          "img/frames/m15/signatureSpellbook/",
+          "img/frames/m15/m21/",
+          "img/frames/m15/conspiracy/",
+          "img/frames/unstable/",
+          "img/frames/playtest/"
+        ]
+      }
+    ]
+  },
+  "color_blend_mode_mapping": {
+    "description": "Mapeo de archivos de mezcla cromática y máscaras de partición",
+    "rules": [
+      {
+        "taxonomy_value": "monocolor",
+        "filename_patterns": [
+          "^[wubrgacv]\\.png$",
+          "Frame[WUBRGACV]\\.png$",
+          "Tall[WUBRGAL]\\.png$",
+          "Compleated[WUBRG]\\.png$"
+        ]
+      },
+      {
+        "taxonomy_value": "gold_solid",
+        "filename_patterns": [
+          "^m\\.png$",
+          "FrameM\\.png$",
+          "TallM\\.png$",
+          "CompleatedM\\.png$"
+        ]
+      },
+      {
+        "taxonomy_value": "hybrid_gradient",
+        "fork_files": [
+          "img/frames/maskRightHalf.png",
+          "img/frames/maskLeftHalf.png",
+          "img/frames/maskMiddleThird.png",
+          "img/frames/ravnica/maskRight.png",
+          "img/frames/crystal/maskRightHalf.png",
+          "img/frames/lotr/maskRightHalf.png",
+          "img/frames/scroll/maskRightHalf.png",
+          "img/frames/mh2/rightHalf.png"
+        ]
+      },
+      {
+        "taxonomy_value": "land_dual_pinline",
+        "filename_patterns": [
+          "^[wubrg]l\\.png$",
+          "^dualLand\\.png$",
+          "^l[A-Z].*\\.png$"
+        ]
+      },
+      {
+        "taxonomy_value": "land_gold_pinline",
+        "filename_patterns": [
+          "^ml\\.png$"
+        ]
+      },
+      {
+        "taxonomy_value": "devoid_fade",
+        "path_prefixes": [
+          "img/frames/m15/devoid/"
+        ]
+      }
+    ]
+  }
+}
