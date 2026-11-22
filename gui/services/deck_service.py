@@ -11,6 +11,7 @@ from config import CARD_H_MM, CARD_W_MM, DPI, PAPER_SIZES, PREVIEW_CACHE_DIR, PR
 from core.pdf_build import IMAGE_EXTS, build_pdf, convert_images_folder_to_pdfs, image_to_standard_pdf
 from core.pdf_render import render_card_file_to_image
 from core.sheets import draw_cut_lines_on_canvas, generate_base_sheets, generate_sheets, sheet_geometry
+from services.card_project import build_card_project
 from utils.conversions import mm_to_px
 from utils.text import safe_card_filename
 

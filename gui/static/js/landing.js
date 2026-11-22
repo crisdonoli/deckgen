@@ -11,7 +11,7 @@ import {
   setGlobalLoading,
   showToast,
   updateProjectBadge,
-} from './modules/workspace_client.js?v=21';
+} from './modules/workspace_client.js?v=23';
 
 initThemeAndNavbar('home');
 

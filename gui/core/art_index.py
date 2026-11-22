@@ -208,7 +208,7 @@ class ArtIndex:
             if wait > 0:
                 await asyncio.sleep(wait)
             try:
-                async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, transport=httpx.AsyncHTTPTransport(local_address="0.0.0.0", retries=2)) as client:
                     resp = await client.get(
                         url,
                         headers={

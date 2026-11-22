@@ -23,6 +23,8 @@ def create_app() -> FastAPI:
 
     if os.path.isdir(ASSETS_DIR):
         app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")
+    else:
+        logging.warning("ASSETS_DIR does not exist, /assets not mounted: %s", ASSETS_DIR)
 
     app.include_router(pages.router)
     app.include_router(workspace.router)

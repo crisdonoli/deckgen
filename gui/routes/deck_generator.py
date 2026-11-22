@@ -10,8 +10,9 @@ from fastapi.responses import FileResponse
 
 from config import DPI, PREVIEW_CACHE_DIR, RENDER_CACHE_DIR
 from core.pdf_build import IMAGE_EXTS, build_pdf, image_to_standard_pdf
-from core.workspace import check_dir_collision, ensure_workspace_subdirs, resolve_collision_target
-from services.deck_service import build_deck_sheets, dfc_back_pairs
+from core.workspace import check_dir_collision, ensure_workspace_subdirs, load_project_from_dir, resolve_collision_target
+from services.card_project import ScryfallError, register_card_project, resolve_card
+from services.deck_service import build_card_project, build_deck_sheets, dfc_back_pairs
 
 router = APIRouter(prefix="/api/deck")
 
@@ -28,6 +29,40 @@ def _set_progress(done: int, total: int, message: str) -> None:
 @router.get("/progress")
 async def api_deck_progress():
     return _PROGRESS_STATE
+
+
+@router.get("/cards")
+async def api_deck_cards(root_dir: str = Query(...)):
+    if not root_dir or not os.path.isdir(root_dir):
+        return {"cards": []}
+    state = load_project_from_dir(root_dir)
+    return {"cards": state["card_builder"].get("cards") or []}
+
+
+@router.post("/import-cards")
+async def api_deck_import_cards(payload: Dict[str, Any] = Body(...)):
+    root_dir = (payload.get("root_dir") or "").strip()
+    if not root_dir or not os.path.isdir(root_dir):
+        raise HTTPException(status_code=400, detail="Debe haber un proyecto activo (root_dir).")
+    entries = payload.get("cards") or []
+    if not entries:
+        raise HTTPException(status_code=400, detail="No hay cartas para importar.")
+
+    loop = asyncio.get_running_loop()
+    imported, errors = [], []
+    for entry in entries:
+        try:
+            card = await loop.run_in_executor(
+                None,
+                lambda e=entry: resolve_card(card=e) if isinstance(e, dict) else resolve_card(name=str(e)),
+            )
+            project = await loop.run_in_executor(None, lambda c=card: build_card_project(c))
+        except ScryfallError as exc:
+            errors.append({"entry": entry.get("name") if isinstance(entry, dict) else entry, "error": exc.message})
+            continue
+        imported.append(await loop.run_in_executor(None, lambda p=project: register_card_project(root_dir, p)))
+
+    return {"status": "ok", "cards": imported, "errors": errors}
 
 
 @router.post("/preview")

@@ -218,3 +218,71 @@ export class CropMaskModal {
     if (this.onApply) this.onApply(dataUrl, this.maskType);
   }
 }
+
+const _imgElemCache = new Map();
+
+export function loadImageElement(src) {
+  if (!src) return Promise.resolve(null);
+  const cached = _imgElemCache.get(src);
+  if (cached && cached.complete && (cached.naturalWidth || cached.width) > 0) {
+    return Promise.resolve(cached);
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    if (!/^data:/i.test(src)) img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (_imgElemCache.size > 200) {
+        const firstKey = _imgElemCache.keys().next().value;
+        _imgElemCache.delete(firstKey);
+      }
+      _imgElemCache.set(src, img);
+      resolve(img);
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+export function applyMaskToCanvas(canvas, maskImage) {
+  if (!canvas || !maskImage) return canvas;
+  const aux = document.createElement('canvas');
+  aux.width = canvas.width;
+  aux.height = canvas.height;
+  const auxCtx = aux.getContext('2d');
+  auxCtx.drawImage(maskImage, 0, 0, canvas.width, canvas.height);
+  const ctx = canvas.getContext('2d');
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(aux, 0, 0);
+  ctx.restore();
+  return canvas;
+}
+
+// zone: {x,y,w,h} in absolute canvas coordinates; transform: {x,y,scale,rotation}
+export function drawArtInto(targetCtx, artImage, zone, transform = {}, opts = {}) {
+  if (!artImage || !zone) return;
+  const scale = Math.max(zone.w / artImage.width, zone.h / artImage.height) * (transform.scale || 1);
+  const dw = artImage.width * scale;
+  const dh = artImage.height * scale;
+  targetCtx.save();
+  if (!opts.unclipped) {
+    targetCtx.beginPath();
+    targetCtx.rect(zone.x, zone.y, zone.w, zone.h);
+    targetCtx.clip();
+  }
+  if (transform.rotation) {
+    targetCtx.translate(zone.x + zone.w / 2 + (transform.x || 0), zone.y + zone.h / 2 + (transform.y || 0));
+    targetCtx.rotate((transform.rotation * Math.PI) / 180);
+    targetCtx.drawImage(artImage, -dw / 2, -dh / 2, dw, dh);
+  } else {
+    targetCtx.drawImage(
+      artImage,
+      zone.x + (zone.w - dw) / 2 + (transform.x || 0),
+      zone.y + (zone.h - dh) / 2 + (transform.y || 0),
+      dw,
+      dh
+    );
+  }
+  targetCtx.restore();
+}
+
