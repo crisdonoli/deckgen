@@ -25,7 +25,7 @@ import {
   resolveSetSymbolUrl,
   syncCardWithProjectFace,
   syncProjectFaceFromCard,
-} from './modules/layer_manager.js?v=52';
+} from './modules/layer_manager.js?v=54';
 
 initThemeAndNavbar('card-builder');
 
@@ -3769,6 +3769,14 @@ function bindProjectPanels() {
       if (card) renderCardCanvas(card);
     }
   );
+
+  // Choosing a sibling template for the Frame (e.g. Tokens › Tall) switches Layout (Geometry) too.
+  layerManager.onLayoutRequest = (card, tplName) => {
+    const layoutSel = document.getElementById('cb-layout-select');
+    if (!layoutSel || card !== getActiveCard() || ![...layoutSel.options].some((o) => o.value === tplName)) return;
+    layoutSel.value = tplName;
+    layoutSel.dispatchEvent(new Event('change'));
+  };
 
   cropModal = new CropMaskModal(document.getElementById('cb-crop-modal'), (dataUrl, maskType) => {
     const card = getActiveCard();

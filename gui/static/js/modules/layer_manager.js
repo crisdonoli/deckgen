@@ -671,6 +671,7 @@ export class LayerManager {
   // opts.backFace: the card's second face, which uses the "...Back" twin of a "...Front" pack
   // (e.g. TransformRegular -> M15TransformBack).
   setLayoutFilter(templateName, card = null, opts = {}) {
+    this.currentTemplate = templateName || '';
     const cat = getSymbolsCatalog();
     const tpl = cat.templates?.[templateName];
     const rawPack = String(tpl?.pack || '').replace(/^pack/, '').replace(/\.js$/, '');
@@ -716,13 +717,40 @@ export class LayerManager {
     if (!card) return 0;
     const cat = getSymbolsCatalog();
     const groups = cat.frame_catalog?.groups || [];
-    const norm = (u) => {
-      try { return decodeURIComponent(String(u || '')).replace(/^https?:\/\/[^/]+/, '').replace(/^\/+/, ''); } catch { return String(u || ''); }
-    };
     const packFor = (sel) => {
       const g = groups.find((x) => x.id === sel?.groupId);
       return (g?.packs || []).find((pk) => pk.id === sel?.packId) || null;
     };
+    const fc = card.frame_components = card.frame_components || {};
+    const prevBackground = fc.background || '';
+    let changed = 0;
+    for (const [key, slot] of [['background', 'background'], ['textbox', 'background'], ['crown', 'crown'], ['pt_box', 'pt_box'], ['border', 'border']]) {
+      const items = (packFor(this.layerCatalogSel?.[slot])?.items || []).filter((it) => it.slot === slot && it.url);
+      if (!items.length) continue;
+      if (key === 'textbox' && (!fc.textbox || fc.textbox === prevBackground)) {
+        // Bottom half follows the top frame unless it was set separately (pop-out).
+        if (fc.textbox !== fc.background) { fc.textbox = fc.background; changed += 1; }
+        continue;
+      }
+      const pick = this._matchingPackItem(fc[key] || '', items);
+      if (!pick) continue;
+      fc[key] = pick.url;
+      changed += 1;
+    }
+    return changed;
+  }
+
+  // The item of `items` that best replaces `currentUrl`: null if `currentUrl` is already one of
+  // them, else the item with the same name ("Green Frame"), else the same colour (inferred from
+  // name, file name or catalog material), else the first item.
+  _matchingPackItem(currentUrl, items) {
+    if (!items?.length) return null;
+    const cat = getSymbolsCatalog();
+    const groups = cat.frame_catalog?.groups || [];
+    const norm = (u) => {
+      try { return decodeURIComponent(String(u || '')).replace(/^https?:\/\/[^/]+/, '').replace(/^\/+/, ''); } catch { return String(u || ''); }
+    };
+    if (currentUrl && items.some((it) => norm(it.url) === norm(currentUrl))) return null;
     // Every catalog entry for a URL: pack items carry a name ("Green Frame"), role entries a material.
     const entriesFor = (url) => {
       const n = norm(url);
@@ -745,28 +773,46 @@ export class LayerManager {
         : ((stem.match(/^(?:.*frame)?([wubrgmalc])(?:regular|textless)?$/i) || [])[1] || '').toLowerCase();
       return fromWords(name) || fromFile || entriesFor(url).map((e) => fromWords(e.material) || fromWords(e.label)).find(Boolean) || '';
     };
-    const fc = card.frame_components = card.frame_components || {};
-    const prevBackground = fc.background || '';
-    let changed = 0;
-    for (const [key, slot] of [['background', 'background'], ['textbox', 'background'], ['crown', 'crown'], ['pt_box', 'pt_box'], ['border', 'border']]) {
-      const items = (packFor(this.layerCatalogSel?.[slot])?.items || []).filter((it) => it.slot === slot && it.url);
-      if (!items.length) continue;
-      if (key === 'textbox' && (!fc.textbox || fc.textbox === prevBackground)) {
-        // Bottom half follows the top frame unless it was set separately (pop-out).
-        if (fc.textbox !== fc.background) { fc.textbox = fc.background; changed += 1; }
-        continue;
-      }
-      const current = fc[key] || '';
-      if (current && items.some((it) => norm(it.url) === norm(current))) continue;
-      const name = nameOf(current);
-      const color = colorOf(current, name);
-      const pick = (name && items.find((it) => it.name === name))
-        || (color && items.find((it) => colorOf(it.url, it.name) === color))
-        || items[0];
-      fc[key] = pick.url;
-      changed += 1;
+    const name = nameOf(currentUrl);
+    const color = colorOf(currentUrl, name);
+    return (name && items.find((it) => it.name === name))
+      || (color && items.find((it) => colorOf(it.url, it.name) === color))
+      || items[0];
+  }
+
+  // The Layout (Geometry) template whose pack is `sel.packId` (its "...Front" twin for a "...Back"
+  // pack), if it differs from the current template and the current template's pack is in the
+  // same catalog group. Empty otherwise.
+  _siblingTemplateForSel(sel) {
+    if (!sel?.packId || !this.currentTemplate) return '';
+    const cat = getSymbolsCatalog();
+    const templates = cat.templates || {};
+    const packOf = (name) => String(templates[name]?.pack || '').replace(/^pack/, '').replace(/\.js$/, '');
+    const group = (cat.frame_catalog?.groups || []).find((g) => g.id === sel.groupId);
+    const curPack = packOf(this.currentTemplate);
+    if (!group || !(group.packs || []).some((pk) => pk.id === curPack || pk.id === curPack.replace(/Front$/, 'Back'))) return '';
+    const wanted = [sel.packId, sel.packId.replace(/Back$/, 'Front')];
+    if (wanted.includes(curPack)) return '';
+    return Object.keys(templates).find((name) => wanted.includes(packOf(name))) || '';
+  }
+
+  // After the user picks a Group/Template in a layer's browser: if the layer's current component
+  // is not in the new selection, switch it to the matching one there (same name, colour, or the first).
+  // "All" (no group) leaves the layer as it is.
+  _applyCatalogSelection(card, key) {
+    if (!card || !this.layerCatalogSel?.[key]?.groupId) return false;
+    // Picking a sibling template's pack for the Frame (e.g. Tokens & Markers › Tall while on
+    // TokenRegular) switches Layout (Geometry) to that template, whose layout change then also
+    // applies the matching frame.
+    const tplName = key === 'background' ? this._siblingTemplateForSel(this.layerCatalogSel[key]) : '';
+    if (tplName && this.onLayoutRequest) {
+      this.onLayoutRequest(card, tplName);
+      return true;
     }
-    return changed;
+    const pick = this._matchingPackItem(card.frame_components?.[key] || '', this._getLayerItems(key));
+    if (!pick) return false;
+    this._applyComponentItem(card, key, pick);
+    return true;
   }
 
   setSelected(key) {
@@ -1309,12 +1355,12 @@ export class LayerManager {
           e.stopPropagation();
           sel.groupId = groupSel.value;
           sel.packId = '';
-          this.render(card);
+          if (!this._applyCatalogSelection(card, key)) this.render(card);
         });
         packSel?.addEventListener('change', (e) => {
           e.stopPropagation();
           sel.packId = packSel.value;
-          renderTrack(this.filterText);
+          if (!this._applyCatalogSelection(card, key)) renderTrack(this.filterText);
         });
         clearCatBtn?.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -1505,11 +1551,13 @@ export class LayerManager {
     groupSel.onchange = () => {
       sel.groupId = groupSel.value;
       sel.packId = '';
+      this._applyCatalogSelection(card, key);
       populateDropdowns();
       renderGrid();
     };
     packSel.onchange = () => {
       sel.packId = packSel.value;
+      this._applyCatalogSelection(card, key);
       renderGrid();
     };
     searchIn.oninput = () => {
