@@ -1,4 +1,5 @@
 """Draw a resolved frame recipe (core.frame_resolver.build_recipe) onto a PNG canvas."""
+import base64
 import io
 import os
 import re
@@ -306,6 +307,99 @@ def _clip_rows(img: Image.Image, y0: int, y1: int) -> Image.Image:
     return img
 
 
+def _clip_rect(img: Image.Image, crop: dict | None, scale_x: float, scale_y: float) -> Image.Image:
+    if not isinstance(crop, dict):
+        return img
+    try:
+        x0 = max(0, int(round(float(crop.get("x", 0)) * scale_x)))
+        y0 = max(0, int(round(float(crop.get("y", 0)) * scale_y)))
+        x1 = min(img.width, int(round((float(crop.get("x", 0)) + float(crop.get("w", 0))) * scale_x)))
+        y1 = min(img.height, int(round((float(crop.get("y", 0)) + float(crop.get("h", 0))) * scale_y)))
+    except (TypeError, ValueError):
+        return img
+    box = Image.new("L", img.size, 0)
+    if x1 > x0 and y1 > y0:
+        box.paste(255, (x0, y0, x1, y1))
+    img.putalpha(ImageChops.multiply(img.getchannel("A"), box))
+    return img
+
+
+def _apply_eraser_mask(img: Image.Image, eraser_dataurl: str | None) -> Image.Image:
+    """Apply a freehand PNG eraser mask (opaque strokes = erased) at any export DPI."""
+    if not eraser_dataurl or not isinstance(eraser_dataurl, str):
+        return img
+    try:
+        if eraser_dataurl.startswith("data:") and "," in eraser_dataurl:
+            raw = base64.b64decode(eraser_dataurl.split(",", 1)[1])
+            mask_rgba = Image.open(io.BytesIO(raw)).convert("RGBA")
+        else:
+            mpath = _resolve_frame_ref(eraser_dataurl)
+            if mpath is None:
+                return img
+            mask_rgba = _open_rgba(mpath)
+        if mask_rgba.size != img.size:
+            mask_rgba = mask_rgba.resize(img.size, Image.LANCZOS)
+        keep = ImageChops.invert(mask_rgba.getchannel("A"))
+        img.putalpha(ImageChops.multiply(img.getchannel("A"), keep))
+    except Exception:
+        return img
+    return img
+
+
+def _build_spec_mask_l(
+    mask_spec: dict | None,
+    size: tuple[int, int],
+    scale_x: float,
+    scale_y: float,
+    warnings: list,
+    harden: bool = False,
+) -> Image.Image | None:
+    """Build an 'L' alpha mask from either a Card Conjurer PNG URL or a geometric rounded-rect."""
+    if not isinstance(mask_spec, dict):
+        return None
+    url = mask_spec.get("url")
+    if url:
+        mpath = _resolve_frame_ref(url)
+        if mpath is not None:
+            mimg = _open_rgba(mpath)
+            if mimg.size != size:
+                mimg = mimg.resize(size, Image.LANCZOS)
+            alpha = mimg.getchannel("A")
+            if harden:
+                alpha = alpha.point(lambda a: 255 if a >= 200 else 0)
+            return alpha
+        warnings.append("mask_missing:%s" % url)
+    rect = mask_spec.get("rect")
+    if isinstance(rect, dict):
+        try:
+            x = float(rect.get("x", 0)) * scale_x
+            y = float(rect.get("y", 0)) * scale_y
+            w = float(rect.get("w", 0)) * scale_x
+            h = float(rect.get("h", 0)) * scale_y
+            r = float(rect.get("r", 0)) * min(scale_x, scale_y)
+        except (TypeError, ValueError):
+            return None
+        if w <= 0 or h <= 0:
+            return None
+        if harden:
+            inset = max(1.0, 1.0 * min(scale_x, scale_y))
+            if w > inset * 2 and h > inset * 2:
+                x += inset
+                y += inset
+                w -= inset * 2
+                h -= inset * 2
+                r = max(0.0, r - inset)
+        mask_img = Image.new("L", size, 0)
+        draw = ImageDraw.Draw(mask_img)
+        rr = max(0.0, min(r, w / 2.0, h / 2.0))
+        if rr > 0.5:
+            draw.rounded_rectangle([x, y, x + w, y + h], radius=rr, fill=255)
+        else:
+            draw.rectangle([x, y, x + w, y + h], fill=255)
+        return mask_img
+    return None
+
+
 def _spec_split_y(face: dict, spec: dict, canvas_h: int, scale_y: float) -> int:
     """Same rule as layer_manager.computeFrameSplitY: just above the type line."""
     if not spec.get("split_y_from_face"):
@@ -386,6 +480,10 @@ def _draw_spec_art(canvas: Image.Image, face: dict, layer: dict, art_override, s
         zone = Image.new("L", canvas.size, 0)
         zone.paste(255, (int(round(zx)), int(round(zy)), int(round(zx + zw)), int(round(zy + zh))))
         piece.putalpha(ImageChops.multiply(piece.getchannel("A"), zone))
+    if layer.get("crop"):
+        _clip_rect(piece, layer.get("crop"), scale_x, scale_y)
+    if layer.get("eraser_mask"):
+        _apply_eraser_mask(piece, layer.get("eraser_mask"))
     canvas.alpha_composite(_with_opacity(piece, layer.get("opacity", 1.0)))
     return 1
 
@@ -454,18 +552,39 @@ def draw_frame_spec(canvas: Image.Image, face: dict, spec: dict, art_override, w
         if re.fullmatch(r"#[0-9a-fA-F]{6}", tint):
             img = _tinted(img, tint)
         clip = layer.get("clip")
+        crop_spec = layer.get("crop")
+        eraser_mask = layer.get("eraser_mask")
+        mask_spec = layer.get("mask")
+        exclude_masks = layer.get("exclude_masks") or []
         opacity = layer.get("opacity", 1.0)
         try:
             opaque = float(opacity) >= 1.0
         except (TypeError, ValueError):
             opaque = True
-        if clip not in ("top", "bottom") and opaque:
+        if clip not in ("top", "bottom") and not crop_spec and not eraser_mask and not mask_spec and not exclude_masks and opaque:
             # Common case: draw straight onto the card (saves a full-size layer at high DPI).
             _place_component(canvas, img, str(layer.get("role") or ""))
             drawn += 1
             continue
         piece = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
         _place_component(piece, img, str(layer.get("role") or ""))
+        if mask_spec:
+            inc_mask = _build_spec_mask_l(mask_spec, canvas.size, scale_x, scale_y, warnings, harden=False)
+            if inc_mask is not None:
+                piece.putalpha(ImageChops.multiply(piece.getchannel("A"), inc_mask))
+        if exclude_masks:
+            combined_exc = None
+            for ex in exclude_masks:
+                em = _build_spec_mask_l(ex, canvas.size, scale_x, scale_y, warnings, harden=True)
+                if em is not None:
+                    combined_exc = em if combined_exc is None else ImageChops.lighter(combined_exc, em)
+            if combined_exc is not None:
+                keep = ImageChops.invert(combined_exc)
+                piece.putalpha(ImageChops.multiply(piece.getchannel("A"), keep))
+        if crop_spec:
+            _clip_rect(piece, crop_spec, scale_x, scale_y)
+        if eraser_mask:
+            _apply_eraser_mask(piece, eraser_mask)
         if clip == "top":
             _clip_rows(piece, 0, split_y)
         elif clip == "bottom":

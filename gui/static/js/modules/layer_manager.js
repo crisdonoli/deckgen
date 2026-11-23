@@ -3,8 +3,11 @@ import { applyMaskToCanvas, drawArtInto, loadImageElement } from './crop_masks.j
 import { createRecordingContext } from './canvas_recorder.js?v=1';
 
 const LAYER_LABELS = {
-  background: 'Frame (Top / Title)',
-  textbox: 'Frame (Bottom / Textbox)',
+  background: 'Frame',
+  pinlines: 'Pinlines',
+  title_box: 'Title Box',
+  type_box: 'Type Box',
+  textbox: 'Ability Textbox',
   art: 'Artwork',
   name_box: 'Holo Stamp',
   crown: 'Crown',
@@ -12,21 +15,129 @@ const LAYER_LABELS = {
   pt_box: 'P/T Box',
 };
 
-// The frame is only split into Top/Bottom halves for pop-out cards (art drawn over the
-// title half but under the textbox half). Otherwise it is a single "Frame" layer.
-export function isSplitFrame(card) {
-  return Boolean(card?.art_over_top);
+// Sub-components extracted from the base frame PNG via Card Conjurer masks
+// (or geometric rounded-rect fallbacks) when Split Frame Components (Pop-Out) is active.
+export const FRAME_DERIVED_LAYERS = new Set(['title_box', 'type_box', 'textbox', 'pinlines']);
+
+const DERIVED_LAYER_TO_MASK_SLOT = {
+  title_box: 'title',
+  type_box: 'type',
+  textbox: 'rules',
+  pinlines: 'pinline',
+};
+
+// Frame components (Frame, Pinlines, Title Box, Type Box, Ability Textbox, Crown, Border,
+// Holo Stamp, P/T Box) are always decomposed in Layer Manager so Artwork can be dragged
+// above or below any individual component at any time.
+export function isSplitFrame() {
+  return true;
 }
 
-function layerLabel(key, card) {
-  if (key === 'background' && !isSplitFrame(card)) return 'Frame';
+// Fast-path check: when Artwork and Shapes are not interleaved between Frame and its derived
+// sub-components, and no sub-component is hidden, tinted, faded, or swapped to a different image,
+// we can render the single whole base frame directly without extra masking passes.
+function canFastPathWholeFrame(card, order, activeDerivedKeys) {
+  if (!card || !Array.isArray(order) || !activeDerivedKeys.length) return false;
+  if (card.duplicated_layers && Object.keys(card.duplicated_layers).length > 0) return false;
+  if (card.layer_crops && Object.keys(card.layer_crops).length > 0) return false;
+  if (card.layer_eraser_masks && Object.keys(card.layer_eraser_masks).length > 0) return false;
+  const hidden = normalizeHiddenLayers(card.hidden_layers);
+  const opacities = card.layer_opacities || {};
+  const colors = card.layer_colors || {};
+  const fc = card.frame_components || {};
+  const bgUrl = fc.background || '';
+  const bgOp = opacities.background ?? 1.0;
+  const bgColor = (colors.background || '').trim();
+  const bgIdx = order.indexOf('background');
+  if (bgIdx < 0 || hidden.background) return false;
+
+  const groupIndices = [bgIdx];
+  for (const dk of activeDerivedKeys) {
+    if (hidden[dk]) return false;
+    const dUrl = fc[dk] || bgUrl;
+    if (dUrl !== bgUrl) return false;
+    const dOp = opacities[dk] ?? bgOp;
+    if (Math.abs(dOp - bgOp) > 0.005) return false;
+    const dCol = (colors[dk] || '').trim();
+    if (dCol && dCol !== bgColor) return false;
+    const idx = order.indexOf(dk);
+    if (idx < 0) return false;
+    groupIndices.push(idx);
+  }
+  // If border is active & visible and placed below any frame component, don't fast-path
+  const maxFrameIdx = Math.max(...groupIndices);
+  const artIdx = order.indexOf('art');
+  if (artIdx >= 0 && artIdx > Math.min(...groupIndices)) return false;
+  // Also check if any custom shape sits between frame components
+  const minFrameIdx = Math.min(...groupIndices);
+  for (let i = minFrameIdx + 1; i < maxFrameIdx; i += 1) {
+    const k = order[i];
+    if (k.startsWith('shape:') && !hidden[k]) return false;
+    if (k === 'crown' && !hidden.crown && fc.crown && i < maxFrameIdx) return false;
+  }
+  return true;
+}
+
+export function baseLayerKey(key, card = null) {
+  if (!key) return '';
+  if (key.startsWith('dup:')) {
+    const src = card?.duplicated_layers?.[key]?.source;
+    if (src) return src;
+    const m = key.match(/^dup:([a-z_]+)_\d+/);
+    return m ? m[1] : key;
+  }
+  return key;
+}
+
+export function getLayerDisplayLabel(key, card = null) {
+  if (!key) return '';
+  if (key.startsWith('dup:')) {
+    const lbl = card?.duplicated_layers?.[key]?.label;
+    if (lbl) return lbl;
+    const base = baseLayerKey(key, card);
+    return `${LAYER_LABELS[base] || base} (Copy)`;
+  }
   return LAYER_LABELS[key] || key;
+}
+
+function layerLabel(key, card = null) {
+  return getLayerDisplayLabel(key, card);
+}
+
+export function getDefaultLayerCropRect(key, card = null, face = null) {
+  const base = baseLayerKey(key, card);
+  const masks = resolveFrameComponentMasks(card, face, 750, 1050);
+  if (base === 'title_box' && masks?.title?.rect) {
+    const r = masks.title.rect;
+    return { x: r.x, y: r.y, w: r.w, h: r.h };
+  }
+  if (base === 'type_box' && masks?.type?.rect) {
+    const r = masks.type.rect;
+    return { x: r.x, y: r.y, w: r.w, h: r.h };
+  }
+  if (base === 'textbox' && masks?.rules?.rect) {
+    const r = masks.rules.rect;
+    return { x: r.x, y: r.y, w: r.w, h: r.h };
+  }
+  if (base === 'crown') return { x: 36, y: 14, w: 678, h: 112 };
+  if (base === 'pt_box') return { x: 560, y: 920, w: 162, h: 86 };
+  if (base === 'name_box') return { x: 318, y: 924, w: 114, h: 66 };
+  if (base === 'art') {
+    const a = card?.layout?.art;
+    if (a && a.w > 10 && a.h > 10) {
+      return { x: Math.round(a.x), y: Math.round(a.y), w: Math.round(a.w), h: Math.round(a.h) };
+    }
+    return { x: 58, y: 118, w: 635, h: 465 };
+  }
+  return { x: 0, y: 0, w: 750, h: 1050 };
 }
 
 const FRAME_SLOT_ROLES = {
   background: 'base_frame',
+  pinlines: 'base_frame',
+  title_box: 'base_frame',
+  type_box: 'base_frame',
   textbox: 'base_frame',
-  pinlines: 'pinline',
   name_box: 'stamp',
   crown: 'crown',
   border: 'border',
@@ -39,36 +150,68 @@ const SHAPE_ICONS = {
   circle: 'circle',
 };
 
-const COLORABLE_FRAME_KEYS = new Set(['background', 'textbox', 'name_box', 'crown', 'border', 'pt_box']);
+const COLORABLE_FRAME_KEYS = new Set([
+  'background',
+  'pinlines',
+  'title_box',
+  'type_box',
+  'textbox',
+  'name_box',
+  'crown',
+  'border',
+  'pt_box',
+]);
 
 export const DEFAULT_LAYER_ORDER = [
   'art',
   'background',
+  'pinlines',
   'crown',
+  'title_box',
+  'type_box',
   'textbox',
-  'name_box',
   'border',
+  'name_box',
   'pt_box',
 ];
+
+export function normalizeLayerOrder(rawOrder) {
+  const order = Array.isArray(rawOrder) && rawOrder.length
+    ? [...rawOrder]
+    : [...DEFAULT_LAYER_ORDER];
+  // Insert any newly added default layers at sensible positions for saved cards
+  const insertAfter = (key, anchors) => {
+    if (order.includes(key)) return;
+    let idx = -1;
+    for (const a of anchors) {
+      const i = order.indexOf(a);
+      if (i > idx) idx = i;
+    }
+    if (idx >= 0) order.splice(idx + 1, 0, key);
+    else order.push(key);
+  };
+  insertAfter('pinlines', ['background']);
+  insertAfter('title_box', ['crown', 'pinlines', 'background']);
+  insertAfter('type_box', ['title_box', 'crown', 'background']);
+  insertAfter('textbox', ['type_box', 'title_box', 'crown', 'background']);
+  DEFAULT_LAYER_ORDER.forEach((k) => { if (!order.includes(k)) order.push(k); });
+  return order;
+}
 
 export function applyPopOutOrder(card, enabled) {
   if (!card) return;
   card.art_over_top = Boolean(enabled);
-  const base = Array.isArray(card.layer_order) && card.layer_order.length
-    ? [...card.layer_order]
-    : [...DEFAULT_LAYER_ORDER];
-  DEFAULT_LAYER_ORDER.forEach((k) => { if (!base.includes(k)) base.push(k); });
+  const base = normalizeLayerOrder(card.layer_order);
   const withoutArt = base.filter((k) => k !== 'art');
   if (enabled) {
-    // Place Artwork above Frame (Top / Title) & Crown, while keeping Frame (Bottom / Textbox) on top
+    // Place Artwork above Frame, Pinlines, Crown, Title Box & Type Box,
+    // while keeping Ability Textbox, Border, Holo Stamp & P/T Box on top by default.
+    const behindArt = ['background', 'pinlines', 'crown', 'title_box', 'type_box'];
     const tbIdx = withoutArt.indexOf('textbox');
-    const bgIdx = withoutArt.indexOf('background');
-    const crownIdx = withoutArt.indexOf('crown');
-    const topEnd = Math.max(bgIdx, crownIdx);
-    let insertIdx = tbIdx >= 0 ? tbIdx : (topEnd >= 0 ? topEnd + 1 : withoutArt.length);
-    if (topEnd >= 0 && insertIdx <= topEnd) {
-      // Ensure textbox sits above top frame/crown if user moved it earlier
-      insertIdx = topEnd + 1;
+    const behindEnd = behindArt.reduce((m, k) => Math.max(m, withoutArt.indexOf(k)), -1);
+    let insertIdx = tbIdx >= 0 ? tbIdx : (behindEnd >= 0 ? behindEnd + 1 : withoutArt.length);
+    if (behindEnd >= 0 && insertIdx <= behindEnd) {
+      insertIdx = behindEnd + 1;
     }
     withoutArt.splice(insertIdx, 0, 'art');
   } else {
@@ -87,11 +230,11 @@ export async function ensureSymbolsCatalog() {
     _symbolsPromise = fetch('/api/card-builder/symbols')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        _symbolsCatalog = data || { mana: {}, sets: {}, templates: {}, frames_by_role: {}, defaults_by_material: {} };
+        _symbolsCatalog = data || { mana: {}, sets: {}, templates: {}, frames_by_role: {}, defaults_by_material: {}, frame_masks: { by_dir: {}, family_rules: [] } };
         return _symbolsCatalog;
       })
       .catch(() => {
-        _symbolsCatalog = { mana: {}, sets: {}, templates: {}, frames_by_role: {}, defaults_by_material: {} };
+        _symbolsCatalog = { mana: {}, sets: {}, templates: {}, frames_by_role: {}, defaults_by_material: {}, frame_masks: { by_dir: {}, family_rules: [] } };
         return _symbolsCatalog;
       });
   }
@@ -99,7 +242,7 @@ export async function ensureSymbolsCatalog() {
 }
 
 export function getSymbolsCatalog() {
-  return _symbolsCatalog || { mana: {}, sets: {}, templates: {}, frames_by_role: {}, defaults_by_material: {} };
+  return _symbolsCatalog || { mana: {}, sets: {}, templates: {}, frames_by_role: {}, defaults_by_material: {}, frame_masks: { by_dir: {}, family_rules: [] } };
 }
 
 export function normalizeManaCode(raw) {
@@ -425,10 +568,14 @@ export function syncCardWithProjectFace(card, face, project = null) {
     const defaultStamp = (defaults.stamp && (defaults.stamp.default || defaults.stamp[material] || Object.values(defaults.stamp)[0])) || '';
     const defaultBorder = (defaults.border && (defaults.border.default || Object.values(defaults.border)[0])) || '';
 
+    const baseUrl = baseFrames[0]?.url || '';
     const fc = {
       style: face.template || 'M15Regular',
-      background: baseFrames[0]?.url || '',
-      textbox: baseFrames[0]?.url || '',
+      background: baseUrl,
+      pinlines: baseUrl,
+      title_box: baseUrl,
+      type_box: baseUrl,
+      textbox: baseUrl,
       name_box: defaultStamp || stampLayer?.url || '',
       crown: crownLayer?.url || defaultCrown,
       border: borderLayer?.url || defaultBorder,
@@ -462,6 +609,10 @@ export function syncCardWithProjectFace(card, face, project = null) {
       hidden_layers: hidden,
       layer_opacities: {},
       layer_colors: {},
+      layer_crops: {},
+      layer_eraser_masks: {},
+      duplicated_layers: {},
+      shapes: [],
       layer_order: [...DEFAULT_LAYER_ORDER],
       layout: buildLayoutFromProjectFace(face),
     };
@@ -475,6 +626,10 @@ export function syncCardWithProjectFace(card, face, project = null) {
   card.hidden_layers = face._ui_state.hidden_layers;
   card.layer_opacities = face._ui_state.layer_opacities;
   card.layer_colors = face._ui_state.layer_colors;
+  card.layer_crops = face._ui_state.layer_crops || {};
+  card.layer_eraser_masks = face._ui_state.layer_eraser_masks || {};
+  card.duplicated_layers = face._ui_state.duplicated_layers || {};
+  if (Array.isArray(face._ui_state.shapes)) card.shapes = face._ui_state.shapes;
   card.layer_order = face._ui_state.layer_order;
   card.layout = { ...(card.layout || {}), ...(face._ui_state.layout || buildLayoutFromProjectFace(face)) };
 
@@ -529,6 +684,9 @@ export function resetCardToOriginalFace(card, face) {
     card.hidden_layers = orig.hidden_layers;
     card.layer_opacities = orig.layer_opacities;
     card.layer_colors = orig.layer_colors;
+    card.layer_crops = orig.layer_crops || {};
+    card.layer_eraser_masks = orig.layer_eraser_masks || {};
+    card.duplicated_layers = orig.duplicated_layers || {};
     card.layer_order = orig.layer_order;
     card.layout = orig.layout;
     if (face._original_text) {
@@ -597,6 +755,10 @@ export function syncProjectFaceFromCard(card, face) {
     hidden_layers: card.hidden_layers || {},
     layer_opacities: card.layer_opacities || {},
     layer_colors: card.layer_colors || {},
+    layer_crops: card.layer_crops || {},
+    layer_eraser_masks: card.layer_eraser_masks || {},
+    duplicated_layers: card.duplicated_layers || {},
+    shapes: Array.isArray(card.shapes) ? card.shapes : [],
     layer_order: card.layer_order || [...DEFAULT_LAYER_ORDER],
     layout: card.layout || face._ui_state?.layout || buildLayoutFromProjectFace(face),
   };
@@ -650,8 +812,11 @@ export class LayerManager {
     this.listEl = listEl;
     this.onChange = onChange;
     this.onSelect = onSelect;
+    this.onCropToggle = null;
+    this.onEraserOpen = null;
     this.dragKey = null;
     this.selectedKey = null;
+    this.cropKey = null;
     this.expandedKey = null;
     this.filterText = '';
     this.taxonomyFilters = { frame_era: '', layout: '', material: '', showcase_style: '' };
@@ -724,12 +889,21 @@ export class LayerManager {
     const fc = card.frame_components = card.frame_components || {};
     const prevBackground = fc.background || '';
     let changed = 0;
-    for (const [key, slot] of [['background', 'background'], ['textbox', 'background'], ['crown', 'crown'], ['pt_box', 'pt_box'], ['border', 'border']]) {
+    for (const [key, slot] of [
+      ['background', 'background'],
+      ['pinlines', 'background'],
+      ['title_box', 'background'],
+      ['type_box', 'background'],
+      ['textbox', 'background'],
+      ['crown', 'crown'],
+      ['pt_box', 'pt_box'],
+      ['border', 'border'],
+    ]) {
       const items = (packFor(this.layerCatalogSel?.[slot])?.items || []).filter((it) => it.slot === slot && it.url);
       if (!items.length) continue;
-      if (key === 'textbox' && (!fc.textbox || fc.textbox === prevBackground)) {
-        // Bottom half follows the top frame unless it was set separately (pop-out).
-        if (fc.textbox !== fc.background) { fc.textbox = fc.background; changed += 1; }
+      if (FRAME_DERIVED_LAYERS.has(key) && (!fc[key] || fc[key] === prevBackground)) {
+        // Derived frame components follow the main Frame unless customized separately.
+        if (fc[key] !== fc.background) { fc[key] = fc.background; changed += 1; }
         continue;
       }
       const pick = this._matchingPackItem(fc[key] || '', items);
@@ -815,6 +989,10 @@ export class LayerManager {
     return true;
   }
 
+  setCropKey(key) {
+    this.cropKey = key || null;
+  }
+
   setSelected(key) {
     this.selectedKey = key || null;
     if (!this.listEl) return;
@@ -827,9 +1005,10 @@ export class LayerManager {
     });
   }
 
-  _getLayerItems(key) {
+  _getLayerItems(key, card = null) {
     const cat = getSymbolsCatalog();
-    const slotKey = key === 'textbox' ? 'background' : key;
+    const base = baseLayerKey(key, card);
+    const slotKey = FRAME_DERIVED_LAYERS.has(base) ? 'background' : base;
     // A template pack selected for this layer (setLayoutFilter / the drawer's Template select)
     // limits the components to that pack; "All" in the drawer clears it.
     const sel = this.layerCatalogSel?.[key];
@@ -857,9 +1036,13 @@ export class LayerManager {
     card.frame_components = card.frame_components || {};
     const prevBg = card.frame_components.background || '';
     card.frame_components[key] = item.url;
-    // Keep Bottom Textbox synced with Top Frame unless, in pop-out mode, the user chose a different one
-    if (key === 'background' && (!isSplitFrame(card) || !card.frame_components.textbox || card.frame_components.textbox === prevBg)) {
-      card.frame_components.textbox = item.url;
+    // Keep derived frame components synced with Frame unless the user chose a separate variant
+    if (key === 'background') {
+      for (const dk of FRAME_DERIVED_LAYERS) {
+        if (!isSplitFrame(card) || !card.frame_components[dk] || card.frame_components[dk] === prevBg) {
+          card.frame_components[dk] = item.url;
+        }
+      }
     }
     // Frame image selection is intentionally decoupled from card text/art Layout.
     card.hidden_layers = normalizeHiddenLayers(card.hidden_layers);
@@ -869,7 +1052,7 @@ export class LayerManager {
   }
 
   _stepComponent(card, key, delta) {
-    const items = this._getLayerItems(key);
+    const items = this._getLayerItems(key, card);
     if (!items.length) return;
     const curUrl = card.frame_components?.[key] || '';
     let idx = items.findIndex((it) => it.url === curUrl);
@@ -882,23 +1065,35 @@ export class LayerManager {
     if (!this.listEl || !card) return;
     const shapes = Array.isArray(card.shapes) ? card.shapes : [];
     const shapeMap = new Map(shapes.map((s) => [`shape:${s.id}`, s]));
-    const validKeys = new Set([...DEFAULT_LAYER_ORDER, ...shapeMap.keys()]);
+    card.duplicated_layers = card.duplicated_layers || {};
+    card.layer_crops = card.layer_crops || {};
+    const dupKeys = Object.keys(card.duplicated_layers);
+    const validKeys = new Set([...DEFAULT_LAYER_ORDER, ...shapeMap.keys(), ...dupKeys]);
 
-    const order = Array.isArray(card.layer_order) && card.layer_order.length
-      ? card.layer_order.filter((k) => validKeys.has(k))
-      : [...DEFAULT_LAYER_ORDER];
-    DEFAULT_LAYER_ORDER.forEach((k) => { if (!order.includes(k)) order.push(k); });
+    const order = normalizeLayerOrder(
+      Array.isArray(card.layer_order) && card.layer_order.length
+        ? card.layer_order.filter((k) => validKeys.has(k))
+        : [...DEFAULT_LAYER_ORDER]
+    );
     shapeMap.forEach((_, sk) => { if (!order.includes(sk)) order.push(sk); });
+    dupKeys.forEach((dk) => { if (!order.includes(dk)) order.push(dk); });
     card.layer_order = order;
     card.hidden_layers = normalizeHiddenLayers(card.hidden_layers);
     card.layer_opacities = card.layer_opacities || {};
 
     this.listEl.innerHTML = '';
     const splitFrame = isSplitFrame(card);
+    const activeMasks = splitFrame ? resolveFrameComponentMasks(card, null, 1500, 2100) : null;
     const displayOrder = [...order].reverse();
 
     displayOrder.forEach((key) => {
-      if (key === 'textbox' && !splitFrame) return;
+      const baseKey = baseLayerKey(key, card);
+      const isDup = key.startsWith('dup:');
+      if (FRAME_DERIVED_LAYERS.has(baseKey)) {
+        if (!splitFrame) return;
+        const mSlot = DERIVED_LAYER_TO_MASK_SLOT[baseKey];
+        if (mSlot && !activeMasks?.[mSlot]) return;
+      }
       const wrapLi = document.createElement('li');
       wrapLi.className = 'layer-item-wrap';
       wrapLi.style.listStyle = 'none';
@@ -906,15 +1101,16 @@ export class LayerManager {
       const li = document.createElement('div');
       const isShape = key.startsWith('shape:');
       const shape = isShape ? shapeMap.get(key) : null;
-      const carouselItems = (!isShape && key !== 'art') ? this._getLayerItems(key) : [];
+      const carouselItems = (!isShape && baseKey !== 'art') ? this._getLayerItems(key, card) : [];
       const hasCarousel = carouselItems.length > 0;
-      const resolvedUrl = key === 'textbox'
-        ? (card.frame_components?.textbox || card.frame_components?.background || '')
-        : (card.frame_components?.[key] || '');
-      const isEmptyFrame = !isShape && key !== 'art' && !resolvedUrl;
+      const resolvedUrl = FRAME_DERIVED_LAYERS.has(baseKey)
+        ? (card.frame_components?.[key] || card.frame_components?.[baseKey] || card.frame_components?.background || '')
+        : (card.frame_components?.[key] || (isDup ? card.frame_components?.[baseKey] : '') || '');
+      const isEmptyFrame = !isShape && baseKey !== 'art' && !resolvedUrl;
+      card.layer_eraser_masks = card.layer_eraser_masks || {};
       const isHidden = Boolean(card.hidden_layers[key]) || isEmptyFrame;
       const isSelected = Boolean(this.selectedKey && this.selectedKey === key);
-      const isExpanded = Boolean(hasCarousel && this.expandedKey === key);
+      const isExpanded = Boolean(this.expandedKey === key);
       li.className = 'layer-item' + (isHidden ? ' is-hidden-layer' : '') + (isSelected ? ' is-selected' : '');
       li.draggable = true;
       li.dataset.layerKey = key;
@@ -922,112 +1118,51 @@ export class LayerManager {
       const opacity = isShape
         ? (shape?.opacity ?? card.layer_opacities[key] ?? 0.55)
         : (card.layer_opacities[key] ?? 1.0);
+      const hasCrop = Boolean(card.layer_crops && card.layer_crops[key]);
+      const hasEraser = Boolean(card.layer_eraser_masks && card.layer_eraser_masks[key]);
+      const isCropping = Boolean(this.cropKey && this.cropKey === key);
 
-      if (isShape && shape) {
-        const shapeIdx = shapes.findIndex((s) => s.id === shape.id) + 1;
-        const iconName = SHAPE_ICONS[shape.type] || 'rect';
-        const label = shape.type === 'circle' ? 'Circle' : (shape.type === 'rounded' ? 'Rounded' : 'Box');
-        li.innerHTML = `
-          <span title="Arrastrar para reordenar" style="cursor:grab; opacity:0.6; display:inline-flex;">${iconSvg('grip', 12)}</span>
-          <button type="button" class="btn btn-sm" data-act="toggle" title="${isHidden ? 'Mostrar capa' : 'Ocultar capa'}">${iconSvg(isHidden ? 'eye-off' : 'eye', 13)}</button>
-          <span class="layer-name">${iconSvg(iconName, 12)} ${label} #${shapeIdx}</span>
-          <input type="color" data-act="color" value="${shape.color || '#000000'}" title="Color" style="width:20px; height:18px; padding:0; border:none; background:none; cursor:pointer; flex-shrink:0;">
-          <input type="range" min="0" max="1" step="0.05" value="${opacity}" data-act="opacity" style="width:44px;" title="Opacidad">
-          <button type="button" class="btn btn-sm" data-act="dup" title="Duplicar" style="padding:2px 4px;">${iconSvg('copy', 12)}</button>
-          <button type="button" class="btn btn-sm" data-act="del" title="Eliminar" style="padding:2px 4px;">${iconSvg('x', 12)}</button>
-        `;
-      } else {
-        const canColor = COLORABLE_FRAME_KEYS.has(key);
-        const curColor = canColor ? ((card.layer_colors && card.layer_colors[key]) || '') : '';
-        const hasColor = Boolean(curColor && curColor !== 'no-color');
-        const colorCtrlHtml = canColor
-          ? `<input type="color" data-act="layer-color" value="${hasColor ? curColor : '#1e293b'}" title="${hasColor ? `Tinte: ${curColor}` : 'Aplicar tinte de color'}" style="width:16px; height:16px; padding:0; border:1px solid ${hasColor ? 'var(--accent)' : 'var(--border)'}; border-radius:3px; background:none; cursor:pointer; opacity:${hasColor ? '1' : '0.45'}; flex-shrink:0;">`
-            + (hasColor ? `<button type="button" class="btn btn-sm" data-act="layer-color-clear" title="Quitar tinte" style="padding:1px 3px;">${iconSvg('x', 10)}</button>` : '')
-          : '';
-        const navArrowsHtml = hasCarousel
-          ? `<button type="button" class="btn btn-sm layer-nav-btn" data-act="prev" title="Variante anterior">‹</button>`
-            + `<button type="button" class="btn btn-sm layer-nav-btn" data-act="next" title="Siguiente variante">›</button>`
-          : '';
-        const caretHtml = hasCarousel ? `<span style="font-size:10px; opacity:0.65; margin-left:2px;">${isExpanded ? '▾' : '▸'}</span>` : '';
-        li.innerHTML = `
-          <span title="Arrastrar para reordenar" style="cursor:grab; opacity:0.6; display:inline-flex;">${iconSvg('grip', 12)}</span>
-          <button type="button" class="btn btn-sm" data-act="toggle" title="${isHidden ? 'Mostrar capa' : 'Ocultar capa'}" aria-pressed="${isHidden ? 'true' : 'false'}">${iconSvg(isHidden ? 'eye-off' : 'eye', 13)}</button>
-          <span class="layer-name" style="cursor:${hasCarousel ? 'pointer' : 'default'};" title="${hasCarousel ? 'Clic para desplegar carrusel de variantes' : ''}">${layerLabel(key, card)}${caretHtml}</span>
-          ${navArrowsHtml}
-          ${colorCtrlHtml}
-          <input type="range" min="0" max="1" step="0.05" value="${opacity}" data-act="opacity" style="width:40px;" title="Opacidad">
-        `;
-      }
+      const displayTitle = (isShape && shape)
+        ? `<span data-role="shape-dot" style="display:inline-block; width:9px; height:9px; border-radius:2px; background:${shape.color || '#1e293b'}; border:1px solid rgba(255,255,255,0.35); margin-right:3px; vertical-align:middle;"></span>${iconSvg(SHAPE_ICONS[shape.type] || 'rect', 12)} ${shape.type === 'circle' ? 'Circle' : (shape.type === 'rounded' ? 'Rounded' : 'Box')} #${shapes.findIndex((s) => s.id === shape.id) + 1}`
+        : layerLabel(key, card);
+
+      const statusIcons = [
+        hasCrop ? `<span title="Cropped" style="color:${isCropping ? '#f59e0b' : 'var(--accent)'}; display:inline-flex; opacity:0.9;">${iconSvg('crop', 10)}</span>` : '',
+        hasEraser ? `<span title="Erased mask active" style="color:#f43f5e; display:inline-flex; opacity:0.9;">${iconSvg('eraser', 10)}</span>` : '',
+      ].join('');
+
+      // Clean minimal main row: grip + visibility eye + layer name + subtle status + expand caret
+      li.innerHTML = `
+        <span title="Drag to reorder" style="cursor:grab; opacity:0.6; display:inline-flex;">${iconSvg('grip', 12)}</span>
+        <button type="button" class="btn btn-sm" data-act="toggle" title="${isHidden ? 'Show layer' : 'Hide layer'}" aria-pressed="${isHidden ? 'true' : 'false'}">${iconSvg(isHidden ? 'eye-off' : 'eye', 13)}</button>
+        <span class="layer-name" style="cursor:pointer; flex:1;" title="Click to expand layer options">${displayTitle}</span>
+        ${statusIcons}
+        <span style="font-size:10px; opacity:0.65; margin-left:2px;">${isExpanded ? '▾' : '▸'}</span>
+      `;
 
       const toggleBtn = li.querySelector('[data-act="toggle"]');
-      const prevBtn = li.querySelector('[data-act="prev"]');
-      const nextBtn = li.querySelector('[data-act="next"]');
-      const opacityInput = li.querySelector('[data-act="opacity"]');
-      const colorInput = li.querySelector('[data-act="color"]');
-      const layerColorInput = li.querySelector('[data-act="layer-color"]');
-      const layerColorClearBtn = li.querySelector('[data-act="layer-color-clear"]');
-      const dupBtn = li.querySelector('[data-act="dup"]');
-      const delBtn = li.querySelector('[data-act="del"]');
-
-      [toggleBtn, prevBtn, nextBtn, opacityInput, colorInput, layerColorInput, layerColorClearBtn, dupBtn, delBtn].filter(Boolean).forEach((ctrl) => {
-        ctrl.addEventListener('pointerdown', (e) => {
-          e.stopPropagation();
-          li.draggable = false;
-          const restore = () => { li.draggable = true; };
-          window.addEventListener('pointerup', restore, { once: true });
-          window.addEventListener('pointercancel', restore, { once: true });
-        });
+      toggleBtn.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        li.draggable = false;
+        const restore = () => { li.draggable = true; };
+        window.addEventListener('pointerup', restore, { once: true });
+        window.addEventListener('pointercancel', restore, { once: true });
       });
-
-      if (prevBtn) {
-        prevBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          this._stepComponent(card, key, -1);
-        });
-      }
-      if (nextBtn) {
-        nextBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          this._stepComponent(card, key, 1);
-        });
-      }
-
-      if (layerColorInput) {
-        layerColorInput.addEventListener('input', (e) => {
-          card.layer_colors = card.layer_colors || {};
-          card.layer_colors[key] = e.target.value;
-          layerColorInput.style.opacity = '1';
-          layerColorInput.style.borderColor = 'var(--accent)';
-          this.onChange?.(card);
-        });
-        layerColorInput.addEventListener('change', () => this.render(card));
-      }
-
-      if (layerColorClearBtn) {
-        layerColorClearBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (card.layer_colors) delete card.layer_colors[key];
-          this.render(card);
-          this.onChange?.(card);
-        });
-      }
 
       li.addEventListener('click', (e) => {
         if (e.target && e.target.closest('button, input')) return;
         this.setSelected(key);
         this.onSelect?.(key, card);
-        if (hasCarousel) {
-          this.expandedKey = (this.expandedKey === key) ? null : key;
-          this.filterText = '';
-          this.render(card);
-        }
+        this.expandedKey = (this.expandedKey === key) ? null : key;
+        this.filterText = '';
+        this.render(card);
       });
 
-      if (!isShape && key !== 'art') {
+      if (!isShape && baseKey !== 'art') {
         li.addEventListener('contextmenu', (e) => {
-          const url = key === 'textbox'
-            ? (card.frame_components?.textbox || card.frame_components?.background)
-            : card.frame_components?.[key];
+          const url = FRAME_DERIVED_LAYERS.has(baseKey)
+            ? (card.frame_components?.[key] || card.frame_components?.[baseKey] || card.frame_components?.background)
+            : (card.frame_components?.[key] || card.frame_components?.[baseKey]);
           if (url) showComponentContextMenu(e, url, layerLabel(key, card));
         });
       }
@@ -1039,52 +1174,6 @@ export class LayerManager {
         this.render(card);
         this.onChange?.(card);
       });
-
-      opacityInput.addEventListener('input', (e) => {
-        const val = parseFloat(e.target.value);
-        card.layer_opacities[key] = val;
-        if (isShape && shape) shape.opacity = val;
-        this.onChange?.(card);
-      });
-
-      if (colorInput && shape) {
-        colorInput.addEventListener('input', (e) => {
-          shape.color = e.target.value;
-          this.onChange?.(card);
-        });
-      }
-
-      if (dupBtn && shape) {
-        dupBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const newId = 's_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
-          const copy = { ...shape, id: newId, x: (shape.x || 70) + 18, y: (shape.y || 640) + 18 };
-          card.shapes.push(copy);
-          const copyKey = `shape:${newId}`;
-          const curIdx = card.layer_order.indexOf(key);
-          if (curIdx >= 0) card.layer_order.splice(curIdx + 1, 0, copyKey);
-          else card.layer_order.push(copyKey);
-          card.layer_opacities[copyKey] = copy.opacity ?? 0.55;
-          this.selectedKey = copyKey;
-          this.render(card);
-          this.onSelect?.(copyKey, card);
-          this.onChange?.(card);
-        });
-      }
-
-      if (delBtn && shape) {
-        delBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          card.shapes = (card.shapes || []).filter((s) => s.id !== shape.id);
-          card.layer_order = (card.layer_order || []).filter((k) => k !== key);
-          delete card.layer_opacities[key];
-          if (card.hidden_layers) delete card.hidden_layers[key];
-          if (this.selectedKey === key) this.selectedKey = null;
-          this.render(card);
-          this.onSelect?.(null, card);
-          this.onChange?.(card);
-        });
-      }
 
       li.addEventListener('dragstart', (e) => {
         if (e.target && e.target.closest('button, input')) {
@@ -1130,11 +1219,16 @@ export class LayerManager {
         if (!dropAboveInUI) targetIdx += 1;
         nextDisplay.splice(targetIdx, 0, dragged);
         card.layer_order = [...nextDisplay].reverse();
+        // Keep the Pop-Out preset checkbox synced with whether Artwork sits above any frame component.
         const artIdx = card.layer_order.indexOf('art');
-        const bgIdx = card.layer_order.indexOf('background');
-        if (artIdx >= 0 && bgIdx >= 0) {
-          card.art_over_top = artIdx > bgIdx;
-        }
+        const frameKeys = ['background', 'pinlines', 'crown', 'title_box', 'type_box', 'textbox', 'border'];
+        const isPopped = artIdx >= 0 && frameKeys.some((fk) => {
+          const idx = card.layer_order.indexOf(fk);
+          return idx >= 0 && artIdx > idx;
+        });
+        card.art_over_top = isPopped;
+        const popEl = document.getElementById('cb-art-over-top');
+        if (popEl) popEl.checked = isPopped;
         this.render(card);
         this.onChange?.(card);
       };
@@ -1149,10 +1243,282 @@ export class LayerManager {
 
       wrapLi.appendChild(li);
 
+      // Collapsible Controls Drawer (Opacity, Color Tint, Crop, Eraser, Duplicate, Delete, Variant Steppers)
+      if (isExpanded) {
+        const ctrlDrawer = document.createElement('div');
+        ctrlDrawer.className = 'layer-controls-drawer';
+        ctrlDrawer.style.cssText = 'margin:3px 0 4px 6px; padding:7px 8px; background:var(--surface); border:1px solid var(--border); border-radius:6px; display:flex; flex-direction:column; gap:6px;';
+
+        const canColor = isShape || COLORABLE_FRAME_KEYS.has(baseKey);
+        const curColor = isShape
+          ? (shape?.color || '#000000')
+          : (canColor ? ((card.layer_colors && card.layer_colors[key]) || '') : '');
+        const hasColor = isShape ? true : Boolean(curColor && curColor !== 'no-color');
+
+        const cropBtnStyle = isCropping
+          ? 'background:#f59e0b; color:#111; border-color:#f59e0b;'
+          : (hasCrop ? 'border-color:var(--accent); color:var(--accent);' : '');
+        const eraserBtnStyle = hasEraser ? 'border-color:#f43f5e; color:#f43f5e;' : '';
+
+        const actionBtns = [];
+        if (!isShape) {
+          actionBtns.push(`<button type="button" class="btn btn-sm" data-act="crop" style="padding:2px 6px; font-size:10.5px; ${cropBtnStyle}" title="${isCropping ? 'Finish cropping' : 'Crop / clip layer region'}">${iconSvg('crop', 11)} Crop</button>`);
+          if (hasCrop) {
+            actionBtns.push(`<button type="button" class="btn btn-sm" data-act="crop-clear" style="padding:2px 5px; font-size:10.5px;" title="Clear crop">${iconSvg('x', 10)}</button>`);
+          }
+          actionBtns.push(`<button type="button" class="btn btn-sm" data-act="eraser" style="padding:2px 6px; font-size:10.5px; ${eraserBtnStyle}" title="Open freehand eraser pop-up">${iconSvg('eraser', 11)} Eraser</button>`);
+          if (hasEraser) {
+            actionBtns.push(`<button type="button" class="btn btn-sm" data-act="eraser-clear" style="padding:2px 5px; font-size:10.5px;" title="Clear erased strokes">${iconSvg('x', 10)}</button>`);
+          }
+          actionBtns.push(`<button type="button" class="btn btn-sm" data-act="dup-layer" style="padding:2px 6px; font-size:10.5px;" title="Duplicate layer">${iconSvg('copy', 11)} Dup</button>`);
+          if (isDup) {
+            actionBtns.push(`<button type="button" class="btn btn-sm" data-act="del-layer" style="padding:2px 6px; font-size:10.5px; color:#f87171;" title="Delete duplicated layer">${iconSvg('trash', 11)}</button>`);
+          }
+        } else {
+          actionBtns.push(`<button type="button" class="btn btn-sm" data-act="dup" style="padding:2px 6px; font-size:10.5px;" title="Duplicate shape">${iconSvg('copy', 11)} Dup</button>`);
+          actionBtns.push(`<button type="button" class="btn btn-sm" data-act="del" style="padding:2px 6px; font-size:10.5px; color:#f87171;" title="Delete shape">${iconSvg('trash', 11)} Delete</button>`);
+        }
+        if (hasCarousel) {
+          actionBtns.push(`<button type="button" class="btn btn-sm layer-nav-btn" data-act="prev" title="Previous variant" style="margin-left:auto;">‹</button>`);
+          actionBtns.push(`<button type="button" class="btn btn-sm layer-nav-btn" data-act="next" title="Next variant">›</button>`);
+        }
+
+        const colorHtml = (!isShape && canColor)
+          ? `<label class="row" style="gap:4px; font-size:10.5px; color:var(--text-muted); margin-left:6px;">
+              <span>Color</span>
+              <input type="color" data-act="layer-color" value="${hasColor ? curColor : '#1e293b'}" style="width:20px; height:18px; padding:0; border:1px solid ${hasColor ? 'var(--accent)' : 'var(--border)'}; border-radius:3px; background:none; cursor:pointer; opacity:${hasColor ? '1' : '0.55'};">
+              ${hasColor ? `<button type="button" class="btn btn-sm" data-act="layer-color-clear" title="Clear tint" style="padding:1px 4px;">${iconSvg('x', 10)}</button>` : ''}
+            </label>`
+          : '';
+
+        const shapeColorRow = (isShape && shape)
+          ? `<div class="row" style="gap:6px; align-items:center; flex-wrap:wrap;">
+              <span style="font-size:10.5px; color:var(--text-muted);">Color</span>
+              <input type="color" data-act="color" value="${curColor}" title="Pick fill color" style="width:24px; height:20px; padding:0; border:1px solid var(--border); border-radius:4px; background:none; cursor:pointer;">
+              <input type="text" data-act="color-hex" value="${curColor}" maxlength="7" spellcheck="false" title="Hex color (#rrggbb)" style="width:66px; padding:2px 5px; font-size:10.5px; font-family:monospace; background:var(--surface-2); color:var(--text); border:1px solid var(--border); border-radius:4px;">
+              <div class="cb-shape-swatches">
+                ${['#ffffff', '#000000', '#1e293b', '#d4af37', '#dc2626', '#2563eb', '#16a34a', '#f5ebd6'].map((sw) => `<button type="button" class="cb-shape-swatch" data-shape-swatch="${sw}" title="${sw}" style="background:${sw};"></button>`).join('')}
+              </div>
+            </div>`
+          : '';
+
+        const shapeRadiusRow = (isShape && shape && shape.type === 'rounded')
+          ? `<label class="row" style="gap:5px; font-size:10.5px; color:var(--text-muted);">
+              <span>Radius</span>
+              <input type="range" min="0" max="60" step="2" value="${shape.radius ?? 16}" data-act="shape-radius" style="flex:1; min-width:54px;">
+              <span data-role="radius-val" style="min-width:30px; text-align:right; font-variant-numeric:tabular-nums;">${shape.radius ?? 16}px</span>
+            </label>`
+          : '';
+
+        ctrlDrawer.innerHTML = `
+          <div class="row" style="gap:4px; flex-wrap:wrap; align-items:center;">
+            ${actionBtns.join('')}
+          </div>
+          ${shapeColorRow}
+          <div class="row" style="gap:6px; align-items:center; justify-content:space-between;">
+            <label class="row" style="gap:5px; font-size:10.5px; color:var(--text-muted); flex:1;">
+              <span>Opacity</span>
+              <input type="range" min="0" max="1" step="0.05" value="${opacity}" data-act="opacity" style="flex:1; min-width:54px;">
+              <span data-role="opacity-val" style="min-width:28px; text-align:right; font-variant-numeric:tabular-nums;">${Math.round(opacity * 100)}%</span>
+            </label>
+            ${colorHtml}
+          </div>
+          ${shapeRadiusRow}
+        `;
+
+        ctrlDrawer.querySelector('[data-act="prev"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._stepComponent(card, key, -1);
+        });
+        ctrlDrawer.querySelector('[data-act="next"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._stepComponent(card, key, 1);
+        });
+        const dOp = ctrlDrawer.querySelector('[data-act="opacity"]');
+        const dOpVal = ctrlDrawer.querySelector('[data-role="opacity-val"]');
+        dOp?.addEventListener('input', (e) => {
+          const val = parseFloat(e.target.value);
+          card.layer_opacities[key] = val;
+          if (isShape && shape) shape.opacity = val;
+          if (dOpVal) dOpVal.textContent = `${Math.round(val * 100)}%`;
+          this.onChange?.(card);
+        });
+        // Prevent drawer interactions from triggering drag/collapse on the parent layer item
+        ctrlDrawer.addEventListener('pointerdown', (e) => e.stopPropagation());
+        ctrlDrawer.addEventListener('mousedown', (e) => e.stopPropagation());
+        ctrlDrawer.addEventListener('click', (e) => e.stopPropagation());
+        const dColorShape = ctrlDrawer.querySelector('[data-act="color"]');
+        const dHexShape = ctrlDrawer.querySelector('[data-act="color-hex"]');
+        const shapeDot = li.querySelector('[data-role="shape-dot"]');
+        if (isShape && shape) {
+          const shapeId = shape.id;
+          const setShapeColor = (hex) => {
+            const clean = String(hex || '').trim();
+            if (!/^#[0-9a-fA-F]{6}$/.test(clean)) return;
+            const live = (card.shapes || []).find((s) => s.id === shapeId) || shape;
+            live.color = clean;
+            if (dColorShape && dColorShape.value.toLowerCase() !== clean.toLowerCase()) dColorShape.value = clean;
+            if (dHexShape && dHexShape.value.toLowerCase() !== clean.toLowerCase()) dHexShape.value = clean;
+            if (shapeDot) shapeDot.style.background = clean;
+            const toolColor = document.getElementById('cb-tool-color');
+            if (toolColor) toolColor.value = clean;
+            this.onChange?.(card);
+          };
+          dColorShape?.addEventListener('input', (e) => setShapeColor(e.target.value));
+          dColorShape?.addEventListener('change', (e) => setShapeColor(e.target.value));
+          dHexShape?.addEventListener('input', (e) => {
+            let v = e.target.value.trim();
+            if (v && !v.startsWith('#')) v = '#' + v;
+            if (/^#[0-9a-fA-F]{6}$/.test(v)) setShapeColor(v);
+          });
+          ctrlDrawer.querySelectorAll('[data-shape-swatch]').forEach((btn) => {
+            btn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              setShapeColor(btn.dataset.shapeSwatch);
+            });
+          });
+          const dRad = ctrlDrawer.querySelector('[data-act="shape-radius"]');
+          const dRadVal = ctrlDrawer.querySelector('[data-role="radius-val"]');
+          dRad?.addEventListener('input', (e) => {
+            const val = parseInt(e.target.value, 10) || 0;
+            const live = (card.shapes || []).find((s) => s.id === shapeId) || shape;
+            live.radius = val;
+            if (dRadVal) dRadVal.textContent = `${val}px`;
+            this.onChange?.(card);
+          });
+        }
+        const dLayerColor = ctrlDrawer.querySelector('[data-act="layer-color"]');
+        if (dLayerColor) {
+          dLayerColor.addEventListener('input', (e) => {
+            card.layer_colors = card.layer_colors || {};
+            card.layer_colors[key] = e.target.value;
+            dLayerColor.style.opacity = '1';
+            dLayerColor.style.borderColor = 'var(--accent)';
+            this.onChange?.(card);
+          });
+          dLayerColor.addEventListener('change', () => this.render(card));
+        }
+        ctrlDrawer.querySelector('[data-act="layer-color-clear"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (card.layer_colors) delete card.layer_colors[key];
+          this.render(card);
+          this.onChange?.(card);
+        });
+        ctrlDrawer.querySelector('[data-act="crop"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.setSelected(key);
+          this.onCropToggle?.(key, card);
+        });
+        ctrlDrawer.querySelector('[data-act="crop-clear"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (card.layer_crops) delete card.layer_crops[key];
+          if (this.cropKey === key) {
+            this.cropKey = null;
+            this.onCropToggle?.(null, card);
+          }
+          this.render(card);
+          this.onChange?.(card);
+        });
+        ctrlDrawer.querySelector('[data-act="eraser"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.setSelected(key);
+          this.onEraserOpen?.(key, card);
+        });
+        ctrlDrawer.querySelector('[data-act="eraser-clear"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (card.layer_eraser_masks) delete card.layer_eraser_masks[key];
+          this.render(card);
+          this.onChange?.(card);
+        });
+        ctrlDrawer.querySelector('[data-act="dup"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!shape) return;
+          const newId = 's_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+          const copy = { ...shape, id: newId, x: (shape.x || 70) + 18, y: (shape.y || 640) + 18 };
+          card.shapes.push(copy);
+          const copyKey = `shape:${newId}`;
+          const curIdx = card.layer_order.indexOf(key);
+          if (curIdx >= 0) card.layer_order.splice(curIdx + 1, 0, copyKey);
+          else card.layer_order.push(copyKey);
+          card.layer_opacities[copyKey] = copy.opacity ?? 0.55;
+          this.selectedKey = copyKey;
+          this.expandedKey = copyKey;
+          this.render(card);
+          this.onSelect?.(copyKey, card);
+          this.onChange?.(card);
+        });
+        ctrlDrawer.querySelector('[data-act="del"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!shape) return;
+          card.shapes = (card.shapes || []).filter((s) => s.id !== shape.id);
+          card.layer_order = (card.layer_order || []).filter((k) => k !== key);
+          delete card.layer_opacities[key];
+          if (card.hidden_layers) delete card.hidden_layers[key];
+          if (this.selectedKey === key) this.selectedKey = null;
+          if (this.expandedKey === key) this.expandedKey = null;
+          this.render(card);
+          this.onSelect?.(null, card);
+          this.onChange?.(card);
+        });
+        ctrlDrawer.querySelector('[data-act="dup-layer"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          card.duplicated_layers = card.duplicated_layers || {};
+          card.frame_components = card.frame_components || {};
+          card.layer_opacities = card.layer_opacities || {};
+          card.layer_colors = card.layer_colors || {};
+          card.layer_crops = card.layer_crops || {};
+          card.layer_eraser_masks = card.layer_eraser_masks || {};
+          const srcBase = baseLayerKey(key, card);
+          const existingCount = Object.values(card.duplicated_layers).filter((d) => d?.source === srcBase).length;
+          const dupKey = `dup:${srcBase}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+          const baseLbl = LAYER_LABELS[srcBase] || srcBase;
+          card.duplicated_layers[dupKey] = { source: srcBase, label: `${baseLbl} #${existingCount + 2}` };
+          if (srcBase !== 'art') {
+            const srcUrl = card.frame_components[key] || card.frame_components[srcBase] || (FRAME_DERIVED_LAYERS.has(srcBase) ? card.frame_components.background : '');
+            if (srcUrl) card.frame_components[dupKey] = srcUrl;
+          }
+          if (card.layer_opacities[key] !== undefined) card.layer_opacities[dupKey] = card.layer_opacities[key];
+          if (card.layer_colors[key]) card.layer_colors[dupKey] = card.layer_colors[key];
+          if (card.layer_crops[key]) card.layer_crops[dupKey] = { ...card.layer_crops[key] };
+          if (card.layer_eraser_masks[key]) card.layer_eraser_masks[dupKey] = card.layer_eraser_masks[key];
+          const curIdx = card.layer_order.indexOf(key);
+          if (curIdx >= 0) card.layer_order.splice(curIdx + 1, 0, dupKey);
+          else card.layer_order.push(dupKey);
+          this.selectedKey = dupKey;
+          this.expandedKey = dupKey;
+          this.render(card);
+          this.onSelect?.(dupKey, card);
+          this.onChange?.(card);
+        });
+        ctrlDrawer.querySelector('[data-act="del-layer"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!isDup) return;
+          if (card.duplicated_layers) delete card.duplicated_layers[key];
+          card.layer_order = (card.layer_order || []).filter((k) => k !== key);
+          if (card.frame_components) delete card.frame_components[key];
+          if (card.layer_opacities) delete card.layer_opacities[key];
+          if (card.layer_colors) delete card.layer_colors[key];
+          if (card.layer_crops) delete card.layer_crops[key];
+          if (card.layer_eraser_masks) delete card.layer_eraser_masks[key];
+          if (card.hidden_layers) delete card.hidden_layers[key];
+          if (this.cropKey === key) {
+            this.cropKey = null;
+            this.onCropToggle?.(null, card);
+          }
+          if (this.selectedKey === key) this.selectedKey = null;
+          if (this.expandedKey === key) this.expandedKey = null;
+          this.render(card);
+          this.onSelect?.(null, card);
+          this.onChange?.(card);
+        });
+
+        wrapLi.appendChild(ctrlDrawer);
+      }
+
       // Collapsible Carousel Drawer when this layer is expanded (Card Conjurer Group -> Template -> Component hierarchy)
       if (isExpanded && hasCarousel) {
         const cat = getSymbolsCatalog();
-        const catalogSlot = key === 'textbox' ? 'background' : key;
+        const catalogSlot = FRAME_DERIVED_LAYERS.has(baseKey) ? 'background' : baseKey;
         const rawGroups = cat.frame_catalog?.groups || [];
         const fallbackRoleItems = (cat.frames_by_role && cat.frames_by_role[catalogSlot]) || [];
 
@@ -1628,7 +1994,7 @@ function drawSingleComponentImage(ctx, source, img, role, width, height) {
     const y = Math.round(45 * (height / 2100));
     ctx.drawImage(source, x, y, tw, th);
   } else if (role === 'pt_box') {
-    const scale = iw > 320 ? width / 2010 : 1;
+    const scale = iw > 320 ? width / 2010 : (width / 1500);
     const tw = Math.round(iw * scale);
     const th = Math.round(ih * scale);
     const x = Math.round(1152 * (width / 1500));
@@ -1649,7 +2015,11 @@ function drawSingleComponentImage(ctx, source, img, role, width, height) {
   }
 }
 
+const _tintCache = new Map();
 function tintImageElement(img, colorHex) {
+  const srcKey = (img && (img.currentSrc || img.src)) || '';
+  const cacheKey = srcKey ? `${srcKey}|${colorHex}` : '';
+  if (cacheKey && _tintCache.has(cacheKey)) return _tintCache.get(cacheKey);
   const w = img.naturalWidth || img.width || 1500;
   const h = img.naturalHeight || img.height || 2100;
   const off = document.createElement('canvas');
@@ -1661,8 +2031,42 @@ function tintImageElement(img, colorHex) {
   octx.fillStyle = colorHex;
   octx.fillRect(0, 0, w, h);
   octx.globalCompositeOperation = 'source-over';
+  if (cacheKey) {
+    if (_tintCache.size > 24) {
+      const first = _tintCache.keys().next().value;
+      _tintCache.delete(first);
+    }
+    _tintCache.set(cacheKey, off);
+  }
   return off;
 }
+
+const _layerBitmapCache = new Map();
+function _layerCacheGet(k) {
+  const v = _layerBitmapCache.get(k);
+  if (!v) return null;
+  _layerBitmapCache.delete(k);
+  _layerBitmapCache.set(k, v);
+  return v;
+}
+function _layerCacheSet(k, canvas) {
+  if (_layerBitmapCache.size >= 40) {
+    const first = _layerBitmapCache.keys().next().value;
+    _layerBitmapCache.delete(first);
+  }
+  _layerBitmapCache.set(k, canvas);
+}
+function _eraserSig(dataUrl) {
+  if (!dataUrl) return '';
+  return `${dataUrl.length}:${dataUrl.slice(0, 28)}:${dataUrl.slice(-28)}`;
+}
+function _maskSpecSig(spec) {
+  if (!spec) return '';
+  if (spec.url) return spec.url;
+  if (spec.rect) return `${spec.rect.x},${spec.rect.y},${spec.rect.w},${spec.rect.h},${spec.rect.r}`;
+  return '';
+}
+let _artScratchCanvas = null;
 
 function drawShapeScaled(ctx, s, scale, opOverride = undefined) {
   if (!s) return;
@@ -2228,9 +2632,250 @@ function computeArtPlacement(face, card, width, height) {
   return { bounds, transform };
 }
 
+
+// ---------------------------------------------------------------------------
+// Frame Component Decomposition: Card Conjurer pixel masks + geometric fallbacks
+// ---------------------------------------------------------------------------
+
+function resolveFrameMaskUrls(frameUrl) {
+  const cat = getSymbolsCatalog();
+  const fm = cat.frame_masks || {};
+  const byDir = fm.by_dir || {};
+  const rules = fm.family_rules || [];
+  const result = { title: null, type: null, rules: null, pinline: null, border: null };
+  if (!frameUrl) return result;
+  let raw = String(frameUrl).trim();
+  try { raw = decodeURIComponent(raw); } catch {}
+  const prefix = '/assets/resources/frames/';
+  if (raw.includes(prefix)) raw = raw.split(prefix)[1];
+  const rel = raw.replace(/^\/+/, '');
+  const slashIdx = rel.lastIndexOf('/');
+  const dirKey = slashIdx >= 0 ? rel.slice(0, slashIdx) : '';
+  if (!dirKey) return result;
+
+  const candidates = [dirKey];
+  const parentSlash = dirKey.lastIndexOf('/');
+  const parent = parentSlash >= 0 ? dirKey.slice(0, parentSlash) : '';
+  if (parent && !(dirKey.toLowerCase().startsWith('token/textless') && parent.toLowerCase() === 'token')) {
+    candidates.push(parent);
+  }
+  const dirLow = dirKey.toLowerCase();
+  for (const rule of rules) {
+    const rp = String(rule?.prefix || '').toLowerCase();
+    if (rp && (dirLow === rp || dirLow.startsWith(rp + '/'))) {
+      for (const inh of (rule.inherit || [])) {
+        if (!candidates.includes(inh)) candidates.push(inh);
+      }
+      break;
+    }
+  }
+  for (const cand of candidates) {
+    const slotMap = byDir[cand];
+    if (!slotMap) continue;
+    for (const slot of ['title', 'type', 'rules', 'pinline', 'border']) {
+      if (!result[slot] && slotMap[slot]) result[slot] = slotMap[slot];
+    }
+  }
+  return result;
+}
+
+function buildGeometricFallbackRect(bounds, padX, padTop, padBottom, radius, sx, sy, width, height) {
+  if (!bounds) return null;
+  const bx = Number(bounds.x);
+  const by = Number(bounds.y);
+  const bw = Number(bounds.w ?? bounds.width);
+  const bh = Number(bounds.h ?? bounds.height);
+  if (!Number.isFinite(bx) || !Number.isFinite(by) || !Number.isFinite(bw) || !Number.isFinite(bh) || bw <= 0 || bh <= 0) {
+    return null;
+  }
+  const x = Math.max(0, Math.round((bx - padX) * sx));
+  const y = Math.max(0, Math.round((by - padTop) * sy));
+  const w = Math.min(width - x, Math.round((bw + padX * 2) * sx));
+  const h = Math.min(height - y, Math.round((bh + padTop + padBottom) * sy));
+  const r = Math.round(radius * Math.min(sx, sy));
+  return { x, y, w, h, r };
+}
+
+export function resolveFrameComponentMasks(card, face = null, width = 1500, height = 2100) {
+  const sx = width / 1500;
+  const sy = height / 2100;
+  const bgUrl = card?.frame_components?.background || '';
+  const urls = resolveFrameMaskUrls(bgUrl);
+
+  const tplName = face?.template || card?.frame_components?.style || 'M15Regular';
+  const tpl = getSymbolsCatalog().templates?.[tplName] || {};
+  const tb = tpl.text_bounds || {};
+  const ftl = face?.text_layers || {};
+
+  const titleBounds = ftl.title?.bounds || tb.title || { x: 125, y: 108, width: 1244, height: 114 };
+  const typeBounds = ftl.type_line?.bounds || tb.type || { x: 125, y: 1185, width: 1244, height: 114 };
+  const rulesBounds = ftl.oracle_text?.bounds || ftl.flavor_text?.bounds || tb.rules || null;
+
+  const titleRect = buildGeometricFallbackRect(titleBounds, 34, 14, 10, 22, sx, sy, width, height);
+  const typeRect = buildGeometricFallbackRect(typeBounds, 34, 12, 10, 22, sx, sy, width, height);
+  const rulesRect = rulesBounds
+    ? buildGeometricFallbackRect(rulesBounds, 28, 16, 16, 12, sx, sy, width, height)
+    : null;
+
+  return {
+    title: (urls.title || titleRect) ? { url: urls.title || null, rect: titleRect } : null,
+    type: (urls.type || typeRect) ? { url: urls.type || null, rect: typeRect } : null,
+    rules: (urls.rules || rulesRect) ? { url: urls.rules || null, rect: rulesRect } : null,
+    pinline: urls.pinline ? { url: urls.pinline, rect: null } : null,
+    border: urls.border ? { url: urls.border, rect: null } : null,
+  };
+}
+
+function drawRoundedRectPath(ctx, x, y, w, h, r) {
+  const rr = Math.max(0, Math.min(r || 0, w / 2, h / 2));
+  ctx.beginPath();
+  if (rr > 0.5 && typeof ctx.roundRect === 'function') {
+    ctx.roundRect(x, y, w, h, rr);
+  } else if (rr > 0.5) {
+    ctx.moveTo(x + rr, y);
+    ctx.lineTo(x + w - rr, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + rr);
+    ctx.lineTo(x + w, y + h - rr);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+    ctx.lineTo(x + rr, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - rr);
+    ctx.lineTo(x, y + rr);
+    ctx.quadraticCurveTo(x, y, x + rr, y);
+    ctx.closePath();
+  } else {
+    ctx.rect(x, y, w, h);
+  }
+}
+
+async function applySpecMaskToCanvas(canvas, maskSpec, width, height) {
+  if (!canvas || !maskSpec) return canvas;
+  if (maskSpec.url) {
+    const maskImg = await loadImageElement(maskSpec.url);
+    if (maskImg) {
+      applyMaskToCanvas(canvas, maskImg);
+      return canvas;
+    }
+  }
+  if (maskSpec.rect) {
+    const { x, y, w, h, r } = maskSpec.rect;
+    const aux = document.createElement('canvas');
+    aux.width = width;
+    aux.height = height;
+    const auxCtx = aux.getContext('2d');
+    auxCtx.fillStyle = '#ffffff';
+    drawRoundedRectPath(auxCtx, x, y, w, h, r);
+    auxCtx.fill();
+    const ctx = canvas.getContext('2d');
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(aux, 0, 0);
+    ctx.restore();
+  }
+  return canvas;
+}
+
+const _excludeMaskCache = new Map();
+
+async function getHardenedExcludeMaskCanvas(excludeSpecs, width, height) {
+  if (!excludeSpecs || !excludeSpecs.length) return null;
+  const cacheKey = `${width}x${height}|` + excludeSpecs.map((m) => (
+    m.url || (m.rect ? `${m.rect.x},${m.rect.y},${m.rect.w},${m.rect.h},${m.rect.r}` : '')
+  )).join(';');
+  const cached = _excludeMaskCache.get(cacheKey);
+  if (cached) return cached;
+
+  const out = document.createElement('canvas');
+  out.width = width;
+  out.height = height;
+  const octx = out.getContext('2d');
+
+  for (const spec of excludeSpecs) {
+    if (!spec) continue;
+    let drewUrl = false;
+    if (spec.url) {
+      const maskImg = await loadImageElement(spec.url);
+      if (maskImg) {
+        const tmp = document.createElement('canvas');
+        tmp.width = width;
+        tmp.height = height;
+        const tctx = tmp.getContext('2d');
+        tctx.drawImage(maskImg, 0, 0, width, height);
+        const imgData = tctx.getImageData(0, 0, width, height);
+        const data = imgData.data;
+        // Harden alpha >= 200 so the box interior is 100% punched out while keeping
+        // the 1px anti-aliased fringe underneath to prevent hairline seams.
+        for (let i = 3; i < data.length; i += 4) {
+          data[i] = data[i] >= 200 ? 255 : 0;
+        }
+        tctx.putImageData(imgData, 0, 0);
+        octx.drawImage(tmp, 0, 0);
+        drewUrl = true;
+      }
+    }
+    if (!drewUrl && spec.rect) {
+      const inset = Math.max(1, Math.round(width / 1500));
+      const { x, y, w, h, r } = spec.rect;
+      const ix = w > inset * 2 ? x + inset : x;
+      const iy = h > inset * 2 ? y + inset : y;
+      const iw = w > inset * 2 ? w - inset * 2 : w;
+      const ih = h > inset * 2 ? h - inset * 2 : h;
+      const ir = Math.max(0, (r || 0) - inset);
+      octx.fillStyle = '#ffffff';
+      drawRoundedRectPath(octx, ix, iy, iw, ih, ir);
+      octx.fill();
+    }
+  }
+
+  if (_excludeMaskCache.size > 24) {
+    const firstKey = _excludeMaskCache.keys().next().value;
+    _excludeMaskCache.delete(firstKey);
+  }
+  _excludeMaskCache.set(cacheKey, out);
+  return out;
+}
+
+function getBackgroundExcludeMasks(masks, card, order = null) {
+  if (!masks) return [];
+  const hidden = normalizeHiddenLayers(card?.hidden_layers);
+  const opacities = card?.layer_opacities || {};
+  const colors = card?.layer_colors || {};
+  const fc = card?.frame_components || {};
+  const bgUrl = fc.background || '';
+  const bgColor = (colors.background || '').trim();
+  const ord = Array.isArray(order) && order.length ? order : normalizeLayerOrder(card?.layer_order);
+  const bgIdx = ord.indexOf('background');
+
+  const shouldPunch = (compKey) => {
+    const idx = ord.indexOf(compKey);
+    // Component sits BELOW Frame -> Frame MUST punch out so the component (and art between them) shows through
+    if (bgIdx >= 0 && idx >= 0 && idx < bgIdx) return true;
+    // Component is hidden -> punch out so hiding it actually hides it
+    if (hidden[compKey]) return true;
+    // Component is translucent -> punch out so opacity reduction actually reveals what's behind
+    const op = opacities[compKey] ?? opacities.background ?? 1.0;
+    if (op < 0.99) return true;
+    // Component uses a different frame variant or tint -> punch out so the alternate style doesn't bleed
+    const cUrl = fc[compKey] || bgUrl;
+    if (cUrl && bgUrl && cUrl !== bgUrl) return true;
+    const cCol = (colors[compKey] || '').trim();
+    if (cCol && cCol !== bgColor) return true;
+    // Component sits ABOVE Frame with the same frame texture: keep Frame intact behind it
+    // so cropping or erasing part of the component only removes that component, never the frame behind!
+    return false;
+  };
+
+  const out = [];
+  if (masks.title && shouldPunch('title_box')) out.push(masks.title);
+  if (masks.type && shouldPunch('type_box')) out.push(masks.type);
+  if (masks.rules && shouldPunch('textbox')) out.push(masks.rules);
+  if (masks.pinline && shouldPunch('pinlines')) out.push(masks.pinline);
+  if (masks.border && fc.border && shouldPunch('border')) out.push(masks.border);
+  return out;
+}
+
 // Describes the frame layers exactly as renderProjectFace draws them, so the server-side
-// export (recipe_renderer.draw_frame_spec) can reproduce the preview: layer order, the
-// Top/Bottom split for pop-out cards, visibility, opacity and tint.
+// export (recipe_renderer.draw_frame_spec) can reproduce the preview: layer order,
+// component mask decomposition for pop-out cards, visibility, opacity and tint.
 export function buildFrameExportSpec(card, face = null, size = { width: 1500, height: 2100 }) {
   if (!card || !card.frame_components) return null;
   const width = Number(size.width) || 1500;
@@ -2240,32 +2885,51 @@ export function buildFrameExportSpec(card, face = null, size = { width: 1500, he
   const opacities = card.layer_opacities || {};
   const colors = card.layer_colors || {};
   const validHex = (v) => (/^#[0-9a-fA-F]{6}$/.test(String(v || '').trim()) ? String(v).trim() : '');
-  const order = Array.isArray(card.layer_order) && card.layer_order.length
-    ? [...card.layer_order]
-    : [...DEFAULT_LAYER_ORDER];
-  if (!order.includes('textbox')) {
-    const insertAt = Math.max(order.indexOf('crown'), order.indexOf('background'));
-    order.splice(insertAt >= 0 ? insertAt + 1 : order.length, 0, 'textbox');
-  }
-  const split = isSplitFrame(card);
+  const order = normalizeLayerOrder(card.layer_order);
+  const masks = resolveFrameComponentMasks(card, face, width, height);
+  const activeDerivedKeys = [...FRAME_DERIVED_LAYERS].filter((k) => Boolean(masks?.[DERIVED_LAYER_TO_MASK_SLOT[k]]));
+  const split = !canFastPathWholeFrame(card, order, activeDerivedKeys);
+  const excludeMasks = split ? getBackgroundExcludeMasks(masks, card, order) : [];
   const artIdx = order.indexOf('art');
-  const bgIdx = order.indexOf('background');
-  const crownIdx = order.indexOf('crown');
-  const artUnclipped = artIdx >= 0 && ((bgIdx >= 0 && artIdx > bgIdx) || (crownIdx >= 0 && artIdx > crownIdx));
+  const frameKeys = ['background', 'pinlines', 'crown', 'title_box', 'type_box', 'textbox', 'border'];
+  const artUnclipped = artIdx >= 0 && frameKeys.some((k) => {
+    const idx = order.indexOf(k);
+    return idx >= 0 && artIdx > idx;
+  });
   const shapeScale = width / 750;
+  const cropScaleY = height / 1050;
+  const crops = card.layer_crops || {};
+  const scaledCrop = (k) => {
+    const c = crops[k];
+    if (!c || !(Number(c.w) > 0 && Number(c.h) > 0)) return undefined;
+    return {
+      x: Math.round(Number(c.x || 0) * shapeScale),
+      y: Math.round(Number(c.y || 0) * cropScaleY),
+      w: Math.round(Number(c.w || 0) * shapeScale),
+      h: Math.round(Number(c.h || 0) * cropScaleY),
+    };
+  };
   const shapes = new Map((card.shapes || []).map((sh) => [`shape:${sh.id}`, sh]));
   const layers = [];
   for (const key of order) {
-    if (key === 'art') {
-      const opacity = opacities.art ?? 1.0;
-      if (hidden.art || opacity <= 0.01) continue;
+    const base = baseLayerKey(key, card);
+    if (base === 'art') {
+      const opacity = opacities[key] ?? opacities.art ?? 1.0;
+      if (hidden[key] || opacity <= 0.01) continue;
+      const myIdx = order.indexOf(key);
+      const myUnclipped = artUnclipped || (myIdx >= 0 && frameKeys.some((fk) => {
+        const fi = order.indexOf(fk);
+        return fi >= 0 && myIdx > fi;
+      }));
       layers.push({
         key: 'art',
         url: card.custom_art_data || card.art_crop_url || face?.art_layer?.url || null,
         placement: computeArtPlacement(face, card, width, height),
-        unclipped: artUnclipped,
+        unclipped: myUnclipped,
         opacity,
         brightness: Number(card.brightness ?? 1.0),
+        crop: scaledCrop(key),
+        eraser_mask: card.layer_eraser_masks?.[key] || undefined,
       });
       continue;
     }
@@ -2285,23 +2949,45 @@ export function buildFrameExportSpec(card, face = null, size = { width: 1500, he
       });
       continue;
     }
-    if (key === 'textbox' && (!split || hidden.textbox)) continue;
-    if (key === 'textbox' || (key === 'background' && !split)) layers.push({ key: 'pw_backdrop', ops: recordPlaneswalkerBackdrop(face, width, height) });
-    if (key !== 'textbox' && hidden[key]) continue;
-    const isTextbox = key === 'textbox';
-    const url = isTextbox ? (fc.textbox || fc.background) : fc[key];
-    const opacity = isTextbox ? (opacities.textbox ?? opacities.background ?? 1.0) : (opacities[key] ?? 1.0);
+    if (FRAME_DERIVED_LAYERS.has(base)) {
+      if (!split || hidden[key]) continue;
+      const maskSlot = DERIVED_LAYER_TO_MASK_SLOT[base];
+      const maskSpec = masks?.[maskSlot];
+      if (!maskSpec) continue;
+      if (key === 'textbox') {
+        layers.push({ key: 'pw_backdrop', ops: recordPlaneswalkerBackdrop(face, width, height) });
+      }
+      const url = fc[key] || fc[base] || fc.background;
+      const opacity = opacities[key] ?? opacities[base] ?? opacities.background ?? 1.0;
+      if (!url || opacity <= 0.01) continue;
+      layers.push({
+        key,
+        url,
+        role: FRAME_SLOT_ROLES[base] || 'base_frame',
+        opacity,
+        tint: validHex(colors[key] || colors[base] || colors.background),
+        mask: maskSpec,
+        crop: scaledCrop(key),
+        eraser_mask: card.layer_eraser_masks?.[key] || undefined,
+      });
+      continue;
+    }
+    if (key === 'background' && !split) {
+      layers.push({ key: 'pw_backdrop', ops: recordPlaneswalkerBackdrop(face, width, height) });
+    }
+    if (hidden[key]) continue;
+    const url = fc[key] || fc[base];
+    const opacity = opacities[key] ?? 1.0;
     if (!url || opacity <= 0.01) continue;
-    let clip = null;
-    if (isTextbox) clip = 'bottom';
-    else if (key === 'background' && split) clip = 'top';
     layers.push({
       key,
       url,
-      role: FRAME_SLOT_ROLES[key] || key,
+      role: FRAME_SLOT_ROLES[base] || base,
       opacity,
-      tint: validHex(isTextbox ? (colors.textbox || colors.background) : colors[key]),
-      clip,
+      tint: validHex(colors[key]),
+      exclude_masks: (base === 'background' && split && excludeMasks.length) ? excludeMasks : undefined,
+      crop: scaledCrop(key),
+      eraser_mask: card.layer_eraser_masks?.[key] || undefined,
     });
   }
   return {
@@ -2337,26 +3023,68 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
   let ctx = canvasEl.getContext('2d');
   const card = opts.card || null;
 
-  canvasEl.width = width;
-  canvasEl.height = height;
+  if (canvasEl.width !== width) canvasEl.width = width;
+  if (canvasEl.height !== height) canvasEl.height = height;
+  ctx.clearRect(0, 0, width, height);
   canvasEl.style.maxWidth = '100%';
   canvasEl.style.height = 'auto';
   canvasEl.style.transform = '';
 
-  const bgColor = (card?.bg_color && /^#[0-9a-fA-F]{6}$/.test(card.bg_color.trim()))
-    ? card.bg_color.trim()
-    : '#111111';
-  ctx.fillStyle = bgColor;
-  ctx.fillRect(0, 0, width, height);
+  const onlyKey = opts.onlyKey || null;
+  const excludeKey = opts.excludeKey || null;
+  const skipEraserForKey = opts.skipEraserForKey || null;
+  const stopBeforeKey = opts.stopBeforeKey || null;
+  const startAfterKey = opts.startAfterKey || null;
+  const transparentBg = Boolean(opts.transparentBg || onlyKey || startAfterKey);
+  if (transparentBg) {
+    ctx.clearRect(0, 0, width, height);
+  } else {
+    const bgColor = (card?.bg_color && /^#[0-9a-fA-F]{6}$/.test(card.bg_color.trim()))
+      ? card.bg_color.trim()
+      : '#111111';
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, width, height);
+  }
 
   const result = { layers: 0, skipped: [] };
   const hidden = normalizeHiddenLayers(card?.hidden_layers);
   const opacities = card?.layer_opacities || {};
   const layerColors = card?.layer_colors || {};
 
-  const drawArt = async (unclipped = false) => {
-    if (hidden.art) return;
-    const op = opacities.art ?? 1.0;
+  const layerCrops = card?.layer_crops || {};
+  const applyCropClip = (targetCtx, layerKey) => {
+    const c = layerCrops[layerKey];
+    if (!c || !(Number(c.w) > 0 && Number(c.h) > 0)) return false;
+    const csx = width / 750;
+    const csy = height / 1050;
+    targetCtx.beginPath();
+    targetCtx.rect(
+      Math.round(Number(c.x || 0) * csx),
+      Math.round(Number(c.y || 0) * csy),
+      Math.round(Number(c.w || 0) * csx),
+      Math.round(Number(c.h || 0) * csy)
+    );
+    targetCtx.clip();
+    return true;
+  };
+
+  const eraserMasks = card?.layer_eraser_masks || {};
+  const applyEraserToScratch = async (scratchCanvas, layerKey) => {
+    if (skipEraserForKey && skipEraserForKey === layerKey) return;
+    const dataUrl = eraserMasks[layerKey];
+    if (!dataUrl) return;
+    const emImg = await loadImageElement(dataUrl);
+    if (!emImg) return;
+    const sctx = scratchCanvas.getContext('2d');
+    sctx.save();
+    sctx.globalCompositeOperation = 'destination-out';
+    sctx.drawImage(emImg, 0, 0, width, height);
+    sctx.restore();
+  };
+
+  const drawArt = async (unclipped = false, layerKey = 'art') => {
+    if (!onlyKey && hidden[layerKey]) return;
+    const op = onlyKey ? 1.0 : (opacities[layerKey] ?? opacities.art ?? 1.0);
     if (op <= 0.01) return;
     const art = face?.art_layer;
     const rawArtUrl = card?.custom_art_data || card?.art_crop_url || art?.url;
@@ -2372,39 +3100,69 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
     const { bounds: baseBounds, transform } = computeArtPlacement(face, card, width, height)
       || { bounds: { ...DEFAULT_ART_BOUNDS }, transform: { x: 0, y: 0, scale: 1.0 } };
     const bright = Number(card?.brightness ?? 1.0);
-    ctx.save();
-    ctx.globalAlpha = op;
-    if (Math.abs(bright - 1.0) > 0.01) ctx.filter = `brightness(${bright})`;
-    drawArtInto(ctx, artImg, baseBounds, transform, { unclipped });
-    ctx.filter = 'none';
-    ctx.restore();
+    const hasEr = Boolean(eraserMasks[layerKey] && skipEraserForKey !== layerKey);
+    if (hasEr) {
+      if (!_artScratchCanvas) _artScratchCanvas = document.createElement('canvas');
+      if (_artScratchCanvas.width !== width) _artScratchCanvas.width = width;
+      if (_artScratchCanvas.height !== height) _artScratchCanvas.height = height;
+      const scratch = _artScratchCanvas;
+      const sctx = scratch.getContext('2d');
+      sctx.clearRect(0, 0, width, height);
+      if (Math.abs(bright - 1.0) > 0.01) sctx.filter = `brightness(${bright})`;
+      drawArtInto(sctx, artImg, baseBounds, transform, { unclipped });
+      sctx.filter = 'none';
+      await applyEraserToScratch(scratch, layerKey);
+      ctx.save();
+      applyCropClip(ctx, layerKey);
+      ctx.globalAlpha = op;
+      ctx.drawImage(scratch, 0, 0);
+      ctx.restore();
+    } else {
+      ctx.save();
+      applyCropClip(ctx, layerKey);
+      ctx.globalAlpha = op;
+      if (Math.abs(bright - 1.0) > 0.01) ctx.filter = `brightness(${bright})`;
+      drawArtInto(ctx, artImg, baseBounds, transform, { unclipped });
+      ctx.filter = 'none';
+      ctx.restore();
+    }
     result.layers += 1;
   };
 
   if (card && card.frame_components) {
     const slotToRole = FRAME_SLOT_ROLES;
-    const rawOrder = Array.isArray(card.layer_order) && card.layer_order.length
-      ? [...card.layer_order]
-      : [...DEFAULT_LAYER_ORDER];
-    // Backwards-compatibility: if saved layer_order didn't have 'textbox' yet, place it right above crown/background
-    if (!rawOrder.includes('textbox')) {
-      const crownIdx = rawOrder.indexOf('crown');
-      const bgIdx = rawOrder.indexOf('background');
-      const insertAt = Math.max(crownIdx, bgIdx);
-      rawOrder.splice(insertAt >= 0 ? insertAt + 1 : rawOrder.length, 0, 'textbox');
-    }
-    const order = rawOrder;
+    const order = normalizeLayerOrder(card.layer_order);
     const scaleFactor = width / 750;
-    const splitFrame = isSplitFrame(card);
-    const splitY = computeFrameSplitY(face, card, height);
+    const masks = resolveFrameComponentMasks(card, face, width, height);
+    const activeDerivedKeys = [...FRAME_DERIVED_LAYERS].filter((k) => Boolean(masks?.[DERIVED_LAYER_TO_MASK_SLOT[k]]));
+    const splitFrame = Boolean(onlyKey || excludeKey) || !canFastPathWholeFrame(card, order, activeDerivedKeys);
+    const excludeMasks = splitFrame ? getBackgroundExcludeMasks(masks, card, order) : [];
+    const excludeMaskCanvas = (splitFrame && excludeMasks.length)
+      ? await getHardenedExcludeMaskCanvas(excludeMasks, width, height)
+      : null;
     const artIdx = order.indexOf('art');
-    const bgIdx = order.indexOf('background');
-    const crownIdx = order.indexOf('crown');
-    const artUnclipped = (artIdx >= 0 && ((bgIdx >= 0 && artIdx > bgIdx) || (crownIdx >= 0 && artIdx > crownIdx)));
+    const frameKeys = ['background', 'pinlines', 'crown', 'title_box', 'type_box', 'textbox', 'border'];
+    const artUnclipped = artIdx >= 0 && frameKeys.some((k) => {
+      const idx = order.indexOf(k);
+      return idx >= 0 && artIdx > idx;
+    });
 
-    for (const key of order) {
-      if (key === 'art') {
-        await drawArt(artUnclipped);
+    const stopIdx = stopBeforeKey ? order.indexOf(stopBeforeKey) : -1;
+    const startIdx = startAfterKey ? order.indexOf(startAfterKey) : -1;
+    for (let liIdx = 0; liIdx < order.length; liIdx += 1) {
+      const key = order[liIdx];
+      if (stopIdx >= 0 && liIdx >= stopIdx) break;
+      if (startIdx >= 0 && liIdx <= startIdx) continue;
+      if (onlyKey && key !== onlyKey) continue;
+      if (excludeKey && key === excludeKey) continue;
+      const base = baseLayerKey(key, card);
+      if (base === 'art') {
+        const myIdx = order.indexOf(key);
+        const myUnclipped = artUnclipped || (myIdx >= 0 && frameKeys.some((fk) => {
+          const fi = order.indexOf(fk);
+          return fi >= 0 && myIdx > fi;
+        }));
+        await drawArt(myUnclipped, key);
         continue;
       }
       if (key.startsWith('shape:')) {
@@ -2414,28 +3172,40 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
         if (shape) drawShapeScaled(ctx, shape, scaleFactor, opacities[key] ?? shape.opacity ?? 0.55);
         continue;
       }
-      if (key === 'textbox') {
-        // Non pop-out: the single Frame layer (background) already covers the whole card.
-        if (!splitFrame) continue;
-        if (hidden.textbox) continue;
-        drawPlaneswalkerBackdrop(ctx, face, width, height);
-        const op = opacities.textbox ?? opacities.background ?? 1.0;
-        const url = card.frame_components.textbox || card.frame_components.background;
+      if (FRAME_DERIVED_LAYERS.has(base)) {
+        if (!splitFrame || hidden[key]) continue;
+        const maskSlot = DERIVED_LAYER_TO_MASK_SLOT[base];
+        const maskSpec = masks?.[maskSlot];
+        if (!maskSpec) continue;
+        if (key === 'textbox') drawPlaneswalkerBackdrop(ctx, face, width, height);
+        const op = opacities[key] ?? opacities[base] ?? opacities.background ?? 1.0;
+        const url = card.frame_components[key] || card.frame_components[base] || card.frame_components.background;
         if (op <= 0.01 || !url) continue;
         const img = await loadImageElement(url);
         if (!img) {
           result.skipped.push(url);
           continue;
         }
-        const rawTint = layerColors.textbox || layerColors.background || '';
+        const rawTint = layerColors[key] || layerColors[base] || layerColors.background || '';
         const tintHex = /^#[0-9a-fA-F]{6}$/.test(rawTint.trim()) ? rawTint.trim() : '';
-        const source = tintHex ? tintImageElement(img, tintHex) : img;
+        const erUrl = (skipEraserForKey && skipEraserForKey === key) ? '' : (eraserMasks[key] || '');
+        const bmKey = `D|${width}x${height}|${url}|${tintHex}|${_maskSpecSig(maskSpec)}|${_eraserSig(erUrl)}`;
+        let scratch = _layerCacheGet(bmKey);
+        if (!scratch) {
+          const source = tintHex ? tintImageElement(img, tintHex) : img;
+          scratch = document.createElement('canvas');
+          scratch.width = width;
+          scratch.height = height;
+          const sctx = scratch.getContext('2d');
+          drawSingleComponentImage(sctx, source, img, 'base_frame', width, height);
+          await applySpecMaskToCanvas(scratch, maskSpec, width, height);
+          if (erUrl) await applyEraserToScratch(scratch, key);
+          _layerCacheSet(bmKey, scratch);
+        }
         ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, splitY, width, height - splitY);
-        ctx.clip();
-        ctx.globalAlpha = op;
-        drawSingleComponentImage(ctx, source, img, 'base_frame', width, height);
+        applyCropClip(ctx, key);
+        ctx.globalAlpha = onlyKey ? 1.0 : op;
+        ctx.drawImage(scratch, 0, 0);
         ctx.restore();
         result.layers += 1;
         continue;
@@ -2443,7 +3213,7 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
       if (key === 'background' && !splitFrame) drawPlaneswalkerBackdrop(ctx, face, width, height);
       if (hidden[key]) continue;
       const op = opacities[key] ?? 1.0;
-      const url = card.frame_components[key];
+      const url = card.frame_components[key] || card.frame_components[base];
       if (op <= 0.01 || !url) continue;
       const img = await loadImageElement(url);
       if (!img) {
@@ -2453,16 +3223,42 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
       const tintHex = layerColors[key] && /^#[0-9a-fA-F]{6}$/.test(layerColors[key].trim())
         ? layerColors[key].trim()
         : '';
-      const source = tintHex ? tintImageElement(img, tintHex) : img;
-      ctx.save();
-      if (key === 'background' && splitFrame) {
-        ctx.beginPath();
-        ctx.rect(0, 0, width, splitY);
-        ctx.clip();
+      const hasEr = Boolean(eraserMasks[key] && skipEraserForKey !== key);
+      const needsBgExclude = Boolean(base === 'background' && splitFrame && excludeMaskCanvas);
+      if (needsBgExclude || hasEr) {
+        const exSig = needsBgExclude ? excludeMasks.map(_maskSpecSig).join(';') : '';
+        const erUrl = hasEr ? (eraserMasks[key] || '') : '';
+        const bmKey = `S|${width}x${height}|${slotToRole[base] || base}|${url}|${tintHex}|${exSig}|${_eraserSig(erUrl)}`;
+        let scratch = _layerCacheGet(bmKey);
+        if (!scratch) {
+          const source = tintHex ? tintImageElement(img, tintHex) : img;
+          scratch = document.createElement('canvas');
+          scratch.width = width;
+          scratch.height = height;
+          const sctx = scratch.getContext('2d');
+          drawSingleComponentImage(sctx, source, img, slotToRole[base] || base, width, height);
+          if (needsBgExclude) {
+            sctx.save();
+            sctx.globalCompositeOperation = 'destination-out';
+            sctx.drawImage(excludeMaskCanvas, 0, 0);
+            sctx.restore();
+          }
+          if (hasEr) await applyEraserToScratch(scratch, key);
+          _layerCacheSet(bmKey, scratch);
+        }
+        ctx.save();
+        applyCropClip(ctx, key);
+        ctx.globalAlpha = onlyKey ? 1.0 : op;
+        ctx.drawImage(scratch, 0, 0);
+        ctx.restore();
+      } else {
+        const source = tintHex ? tintImageElement(img, tintHex) : img;
+        ctx.save();
+        applyCropClip(ctx, key);
+        ctx.globalAlpha = onlyKey ? 1.0 : op;
+        drawSingleComponentImage(ctx, source, img, slotToRole[base] || base, width, height);
+        ctx.restore();
       }
-      ctx.globalAlpha = op;
-      drawSingleComponentImage(ctx, source, img, slotToRole[key] || key, width, height);
-      ctx.restore();
       result.layers += 1;
     }
   } else {
@@ -2504,6 +3300,45 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
     }
   }
 
+  if (onlyKey || opts.skipText) return result;
+
+  // Cache rendered Set Symbol + Text overlay when not recording export ops so frame/art edits skip all text layout
+  const _canCacheText = !opts.recordText && !excludeKey;
+  let _textCacheKey = '';
+  let _origCtx = ctx;
+  let _textOffCanvas = null;
+  if (_canCacheText) {
+    const Lc = card?.layout || {};
+    const tlSnap = {
+      title: Lc.title, official_title: Lc.official_title, mana_cost: Lc.mana_cost,
+      type_line: Lc.type_line, set_symbol: Lc.set_symbol, oracle_box: Lc.oracle_box,
+      pt_text: Lc.pt_text, artist: Lc.artist,
+      adventure_title: Lc.adventure_title, adventure_mana_cost: Lc.adventure_mana_cost,
+      adventure_type_line: Lc.adventure_type_line, adventure_oracle_box: Lc.adventure_oracle_box,
+    };
+    _textCacheKey = JSON.stringify([
+      width, height,
+      face?.template || '',
+      Boolean(card?.hide_card_text),
+      card?.name || '', card?.official_name || '', card?.mana_cost || '',
+      card?.type_line || '', card?.oracle_text || '', card?.flavor_text || '',
+      card?.power ?? '', card?.toughness ?? '', card?.artist || '',
+      card?.set || '', card?.rarity || '',
+      card?.adventure || null,
+      face?.set_symbol?.url || opts?.set_symbol?.url || '',
+      defaultTextColorForFace(face),
+      tlSnap,
+    ]);
+    if (_textOverlayCache.key === _textCacheKey && _textOverlayCache.canvas) {
+      ctx.drawImage(_textOverlayCache.canvas, 0, 0);
+      return result;
+    }
+    _textOffCanvas = document.createElement('canvas');
+    _textOffCanvas.width = width;
+    _textOffCanvas.height = height;
+    ctx = _textOffCanvas.getContext('2d');
+  }
+
   // From here on (set symbol + text) the export replays these exact calls server-side.
   let recorder = null;
   if (opts.recordText) {
@@ -2536,7 +3371,8 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
         height: Math.round(Number(L.set_symbol.size || 40) * sy),
       }
     : (face?.set_symbol_bounds || { x: 1384, y: 1241, width: 120, height: 80 });
-  if (symUrl && symBounds && Number(symBounds.width || 0) > 0 && Number(symBounds.x || 0) > 2) {
+  const hideSetSymbol = Boolean(card?.hide_card_text || card?.layout?.set_symbol?.hidden);
+  if (!hideSetSymbol && symUrl && symBounds && Number(symBounds.width || 0) > 0 && Number(symBounds.x || 0) > 2) {
     const symImg = await loadImageElement(symUrl);
     if (symImg) {
       const bw = Number(symBounds.width) || 120;
@@ -2810,6 +3646,13 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
     }
   }
 
+  if (_textOffCanvas) {
+    _textOverlayCache.key = _textCacheKey;
+    _textOverlayCache.canvas = _textOffCanvas;
+    _origCtx.drawImage(_textOffCanvas, 0, 0);
+    ctx = _origCtx;
+  }
+
   if (recorder) result.text_ops = recorder.ops;
 
   if (opts.draftShape) {
@@ -2817,4 +3660,150 @@ export async function renderProjectFace(face, canvasEl, opts = {}) {
   }
 
   return result;
+}
+
+const _textOverlayCache = { key: '', canvas: null };
+
+export async function prepareLayerDragSession(face, card, targetKey, opts = {}) {
+  if (!face || !card || !targetKey) return null;
+  const width = Number(opts.canvas?.width) || 1500;
+  const height = Number(opts.canvas?.height) || 2100;
+  const belowCanvas = document.createElement('canvas');
+  belowCanvas.width = width;
+  belowCanvas.height = height;
+  const aboveCanvas = document.createElement('canvas');
+  aboveCanvas.width = width;
+  aboveCanvas.height = height;
+
+  await renderProjectFace(face, belowCanvas, {
+    card,
+    set_symbol: opts.set_symbol,
+    canvas: { width, height },
+    stopBeforeKey: targetKey,
+    skipText: true,
+  });
+  await renderProjectFace(face, aboveCanvas, {
+    card,
+    set_symbol: opts.set_symbol,
+    canvas: { width, height },
+    startAfterKey: targetKey,
+    transparentBg: true,
+  });
+
+  const order = normalizeLayerOrder(card.layer_order);
+  const frameKeys = ['background', 'pinlines', 'crown', 'title_box', 'type_box', 'textbox', 'border'];
+  const artIdx = order.indexOf(targetKey);
+  const artUnclipped = targetKey === 'art' && artIdx >= 0 && frameKeys.some((fk) => {
+    const fi = order.indexOf(fk);
+    return fi >= 0 && artIdx > fi;
+  });
+
+  let artImg = null;
+  let eraserImg = null;
+  if (targetKey === 'art') {
+    const rawArtUrl = card?.custom_art_data || card?.art_crop_url || face?.art_layer?.url;
+    if (rawArtUrl) {
+      const artUrl = /^https?:\/\//i.test(rawArtUrl)
+        ? `/api/art/proxy?url=${encodeURIComponent(rawArtUrl)}`
+        : rawArtUrl;
+      artImg = await loadImageElement(artUrl);
+    }
+    const erUrl = card?.layer_eraser_masks?.[targetKey];
+    if (erUrl) eraserImg = await loadImageElement(erUrl);
+  }
+
+  return {
+    targetKey,
+    width,
+    height,
+    belowCanvas,
+    aboveCanvas,
+    artImg,
+    artUnclipped,
+    eraserImg,
+  };
+}
+
+export function paintLayerDragFrame(targetCanvas, session, face, card) {
+  if (!targetCanvas || !session || !card) return false;
+  const { width, height, targetKey, belowCanvas, aboveCanvas, artImg, artUnclipped, eraserImg } = session;
+  if (targetCanvas.width !== width) targetCanvas.width = width;
+  if (targetCanvas.height !== height) targetCanvas.height = height;
+  const ctx = targetCanvas.getContext('2d');
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(belowCanvas, 0, 0);
+
+  const hidden = normalizeHiddenLayers(card.hidden_layers);
+  const opacities = card.layer_opacities || {};
+  const crops = card.layer_crops || {};
+
+  const applyClip = (cCtx) => {
+    const c = crops[targetKey];
+    if (!c || !(Number(c.w) > 0 && Number(c.h) > 0)) return;
+    cCtx.beginPath();
+    cCtx.rect(
+      Math.round(Number(c.x || 0) * (width / 750)),
+      Math.round(Number(c.y || 0) * (height / 1050)),
+      Math.round(Number(c.w || 0) * (width / 750)),
+      Math.round(Number(c.h || 0) * (height / 1050))
+    );
+    cCtx.clip();
+  };
+
+  if (targetKey === 'art' && artImg && !hidden.art) {
+    const op = opacities.art ?? 1.0;
+    if (op > 0.01) {
+      const { bounds: baseBounds, transform } = computeArtPlacement(face, card, width, height)
+        || { bounds: { ...DEFAULT_ART_BOUNDS }, transform: { x: 0, y: 0, scale: 1.0 } };
+      const bright = Number(card?.brightness ?? 1.0);
+      if (eraserImg) {
+        if (!_artScratchCanvas) _artScratchCanvas = document.createElement('canvas');
+        if (_artScratchCanvas.width !== width) _artScratchCanvas.width = width;
+        if (_artScratchCanvas.height !== height) _artScratchCanvas.height = height;
+        const sctx = _artScratchCanvas.getContext('2d');
+        sctx.clearRect(0, 0, width, height);
+        if (Math.abs(bright - 1.0) > 0.01) sctx.filter = `brightness(${bright})`;
+        drawArtInto(sctx, artImg, baseBounds, transform, { unclipped: artUnclipped });
+        sctx.filter = 'none';
+        sctx.save();
+        sctx.globalCompositeOperation = 'destination-out';
+        sctx.drawImage(eraserImg, 0, 0, width, height);
+        sctx.restore();
+        ctx.save();
+        applyClip(ctx);
+        ctx.globalAlpha = op;
+        ctx.drawImage(_artScratchCanvas, 0, 0);
+        ctx.restore();
+      } else {
+        ctx.save();
+        applyClip(ctx);
+        ctx.globalAlpha = op;
+        if (Math.abs(bright - 1.0) > 0.01) ctx.filter = `brightness(${bright})`;
+        drawArtInto(ctx, artImg, baseBounds, transform, { unclipped: artUnclipped });
+        ctx.filter = 'none';
+        ctx.restore();
+      }
+    }
+  } else if (targetKey.startsWith('shape:') && !hidden[targetKey]) {
+    const sid = targetKey.slice(6);
+    const shape = (card.shapes || []).find((s) => s.id === sid);
+    if (shape) drawShapeScaled(ctx, shape, width / 750, opacities[targetKey] ?? shape.opacity ?? 0.55);
+  }
+
+  ctx.drawImage(aboveCanvas, 0, 0);
+  return true;
+}
+
+
+export async function renderLayerForEraser(face, card, targetKey, opts = {}) {
+  const size = { width: 750, height: 1050 };
+  const refCanvas = document.createElement('canvas');
+  refCanvas.width = size.width;
+  refCanvas.height = size.height;
+  const targetCanvas = document.createElement('canvas');
+  targetCanvas.width = size.width;
+  targetCanvas.height = size.height;
+  await renderProjectFace(face, refCanvas, { ...opts, card, canvas: size, excludeKey: targetKey });
+  await renderProjectFace(face, targetCanvas, { ...opts, card, canvas: size, onlyKey: targetKey, skipEraserForKey: targetKey });
+  return { refCanvas, targetCanvas };
 }

@@ -19,6 +19,7 @@ from core.asset_paths import frame_file_path, frame_url, shared_file_path, share
 from core.card_layouts import load_frame_layouts
 from core.card_renderer import clamp_export_dpi, render_recipe, save_recipe_png
 from core.pdf_build import card_image_to_pdf
+from core.frame_masks import build_frame_masks_catalog
 from core.frame_resolver import build_recipe
 from core.workspace import ensure_workspace_subdirs
 from services.card_project import (
@@ -404,6 +405,7 @@ def _build_symbols_payload() -> Dict[str, Any]:
     }
 
     frame_catalog = build_folder_frame_catalog()
+    frame_masks = build_frame_masks_catalog()
 
     _SYMBOLS_CACHE = {
         "mana": mana_map,
@@ -413,6 +415,7 @@ def _build_symbols_payload() -> Dict[str, Any]:
         "defaults_by_material": defaults_by_material,
         "taxonomy_options": taxonomy_options,
         "frame_catalog": frame_catalog,
+        "frame_masks": frame_masks,
     }
     return _SYMBOLS_CACHE
 
@@ -688,9 +691,9 @@ _NATIVE_EXPORT_DPI = 600  # the 1500x2100 render on a 2.5x3.5 in card
 
 
 def _export_scale(payload: dict) -> tuple:
-    """(dpi, render scale) for the requested export DPI; default is the native 600 DPI."""
+    """(dpi, render scale) for the requested export DPI; default is 1200 DPI."""
     raw = payload.get("export_dpi")
-    dpi = clamp_export_dpi(raw) if raw not in (None, "") else _NATIVE_EXPORT_DPI
+    dpi = clamp_export_dpi(raw) if raw not in (None, "") else clamp_export_dpi(1200)
     return dpi, dpi / float(_NATIVE_EXPORT_DPI)
 
 

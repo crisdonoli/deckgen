@@ -9,23 +9,31 @@ import {
   showToast,
 } from './modules/workspace_client.js?v=23';
 import { CropMaskModal, loadImageElement } from './modules/crop_masks.js?v=3';
+import { LayerEraserModal } from './modules/eraser_modal.js?v=2';
 import {
   DEFAULT_LAYER_ORDER,
+  FRAME_DERIVED_LAYERS,
   LayerManager,
   applyPopOutOrder,
+  baseLayerKey,
   buildCardExportSpec,
   applyTemplateLayoutToFace,
   buildLayoutFromProjectFace,
   ensureSymbolsCatalog,
+  getDefaultLayerCropRect,
+  getLayerDisplayLabel,
   getSymbolsCatalog,
   normalizeManaCode,
+  renderLayerForEraser,
   renderProjectFace,
+  prepareLayerDragSession,
+  paintLayerDragFrame,
   resetCardToOriginalFace,
   resolveManaSymbolUrl,
   resolveSetSymbolUrl,
   syncCardWithProjectFace,
   syncProjectFaceFromCard,
-} from './modules/layer_manager.js?v=54';
+} from './modules/layer_manager.js?v=63';
 
 initThemeAndNavbar('card-builder');
 
@@ -136,6 +144,9 @@ function cloneCardSnapshot(card) {
     hidden_layers: card.hidden_layers || {},
     layer_opacities: card.layer_opacities || {},
     layer_colors: card.layer_colors || {},
+    layer_crops: card.layer_crops || {},
+    layer_eraser_masks: card.layer_eraser_masks || {},
+    duplicated_layers: card.duplicated_layers || {},
     frame_components: card.frame_components || {},
     layout: card.layout || {},
     shapes: card.shapes || [],
@@ -318,6 +329,235 @@ const ADVENTURE_KEYS = ['adventure_title', 'adventure_mana_cost', 'adventure_typ
 const TEXT_KEYS = ['mana_cost', 'title', 'official_title', 'set_symbol', 'type_line', 'pt_text', 'oracle_box', 'artist', ...ADVENTURE_KEYS];
 
 let selectedElementKey = null;
+let activeCropLayerKey = null;
+const CARD_CENTER_X = 375;
+const CARD_CENTER_Y = 525;
+const CENTER_SNAP_TOL = 5;
+let activeCenterGuides = { x: false, y: false, xLabel: '', yLabel: '' };
+let rulerCursorPos = { x: null, y: null };
+let previewZoom = 1.0;
+
+function applyPreviewZoom(nextZoom) {
+  previewZoom = Math.max(0.5, Math.min(3.0, Math.round(nextZoom * 20) / 20));
+  const slot = document.querySelector('.cb-ruler-canvas-slot');
+  const pCanvas = document.getElementById('cb-project-canvas');
+  const lCanvas = document.getElementById('card-canvas');
+  const corner = document.querySelector('.cb-ruler-corner');
+  const zoomLbl = document.getElementById('cb-zoom-pct-label');
+  if (zoomLbl) zoomLbl.textContent = `${Math.round(previewZoom * 100)}%`;
+  if (corner) {
+    corner.textContent = Math.abs(previewZoom - 1.0) < 0.01 ? 'mm' : `${Math.round(previewZoom * 100)}%`;
+    corner.title = `MTG card 63.5×88.9 mm · Zoom ${Math.round(previewZoom * 100)}% (Ctrl+Scroll to zoom, click or Ctrl+0 to reset)`;
+    corner.style.cursor = 'pointer';
+  }
+  [pCanvas, lCanvas].forEach((c) => {
+    if (!c) return;
+    if (Math.abs(previewZoom - 1.0) < 0.01) {
+      c.style.width = '';
+      c.style.maxHeight = '';
+    } else {
+      const baseH = Math.min(window.innerHeight * 0.72, 760);
+      const targetH = Math.round(baseH * previewZoom);
+      const targetW = Math.round(targetH * (750 / 1050));
+      c.style.maxHeight = 'none';
+      c.style.maxWidth = 'none';
+      c.style.width = `${targetW}px`;
+      c.style.height = `${targetH}px`;
+    }
+  });
+  if (slot) slot.style.overflow = 'visible';
+  requestAnimationFrame(drawPreviewRulers);
+}
+
+function snapBoxToCenter(box, allowSnap = true) {
+  const res = { x: box.x, y: box.y, w: box.w, h: box.h, snapX: false, snapY: false, xLabel: '', yLabel: '' };
+  if (!allowSnap) return res;
+  const cx = box.x + box.w / 2;
+  const cy = box.y + box.h / 2;
+  if (Math.abs(cx - CARD_CENTER_X) <= CENTER_SNAP_TOL) {
+    res.x = Math.round(CARD_CENTER_X - box.w / 2);
+    res.snapX = true;
+    res.xLabel = '50% Center';
+  } else if (Math.abs(box.x - CARD_CENTER_X) <= CENTER_SNAP_TOL) {
+    res.x = CARD_CENTER_X;
+    res.snapX = true;
+    res.xLabel = '50% Split';
+  } else if (Math.abs(box.x + box.w - CARD_CENTER_X) <= CENTER_SNAP_TOL) {
+    res.x = Math.round(CARD_CENTER_X - box.w);
+    res.snapX = true;
+    res.xLabel = '50% Split';
+  }
+
+  if (Math.abs(cy - CARD_CENTER_Y) <= CENTER_SNAP_TOL) {
+    res.y = Math.round(CARD_CENTER_Y - box.h / 2);
+    res.snapY = true;
+    res.yLabel = '50% Center';
+  } else if (Math.abs(box.y - CARD_CENTER_Y) <= CENTER_SNAP_TOL) {
+    res.y = CARD_CENTER_Y;
+    res.snapY = true;
+    res.yLabel = '50% Split';
+  } else if (Math.abs(box.y + box.h - CARD_CENTER_Y) <= CENTER_SNAP_TOL) {
+    res.y = Math.round(CARD_CENTER_Y - box.h);
+    res.snapY = true;
+    res.yLabel = '50% Split';
+  }
+  return res;
+}
+
+function snapResizeEdgesToCenter(box, handle, allowSnap = true) {
+  const res = { x: box.x, y: box.y, w: box.w, h: box.h, snapX: false, snapY: false, xLabel: '', yLabel: '' };
+  if (!allowSnap || !handle) return res;
+  if (handle.includes('e')) {
+    if (Math.abs((res.x + res.w) - CARD_CENTER_X) <= CENTER_SNAP_TOL) {
+      res.w = Math.max(16, CARD_CENTER_X - res.x);
+      res.snapX = true;
+      res.xLabel = '50% Split';
+    } else if (Math.abs((res.x + res.w / 2) - CARD_CENTER_X) <= CENTER_SNAP_TOL) {
+      res.w = Math.max(16, Math.round((CARD_CENTER_X - res.x) * 2));
+      res.snapX = true;
+      res.xLabel = '50% Center';
+    }
+  } else if (handle.includes('w')) {
+    const right = res.x + res.w;
+    if (Math.abs(res.x - CARD_CENTER_X) <= CENTER_SNAP_TOL) {
+      res.x = CARD_CENTER_X;
+      res.w = Math.max(16, right - CARD_CENTER_X);
+      res.snapX = true;
+      res.xLabel = '50% Split';
+    } else if (Math.abs((res.x + res.w / 2) - CARD_CENTER_X) <= CENTER_SNAP_TOL) {
+      res.w = Math.max(16, Math.round((right - CARD_CENTER_X) * 2));
+      res.x = Math.max(0, right - res.w);
+      res.snapX = true;
+      res.xLabel = '50% Center';
+    }
+  }
+  if (handle.includes('s')) {
+    if (Math.abs((res.y + res.h) - CARD_CENTER_Y) <= CENTER_SNAP_TOL) {
+      res.h = Math.max(16, CARD_CENTER_Y - res.y);
+      res.snapY = true;
+      res.yLabel = '50% Split';
+    } else if (Math.abs((res.y + res.h / 2) - CARD_CENTER_Y) <= CENTER_SNAP_TOL) {
+      res.h = Math.max(16, Math.round((CARD_CENTER_Y - res.y) * 2));
+      res.snapY = true;
+      res.yLabel = '50% Center';
+    }
+  } else if (handle.includes('n')) {
+    const bottom = res.y + res.h;
+    if (Math.abs(res.y - CARD_CENTER_Y) <= CENTER_SNAP_TOL) {
+      res.y = CARD_CENTER_Y;
+      res.h = Math.max(16, bottom - CARD_CENTER_Y);
+      res.snapY = true;
+      res.yLabel = '50% Split';
+    } else if (Math.abs((res.y + res.h / 2) - CARD_CENTER_Y) <= CENTER_SNAP_TOL) {
+      res.h = Math.max(16, Math.round((bottom - CARD_CENTER_Y) * 2));
+      res.y = Math.max(0, bottom - res.h);
+      res.snapY = true;
+      res.yLabel = '50% Center';
+    }
+  }
+  return res;
+}
+
+function drawPreviewRulers() {
+  const topEl = document.getElementById('cb-ruler-top');
+  const leftEl = document.getElementById('cb-ruler-left');
+  const activeCanvas = (state.project && currentProjectFace())
+    ? document.getElementById('cb-project-canvas')
+    : document.getElementById('card-canvas');
+  if (!topEl || !leftEl || !activeCanvas) return;
+  const rect = activeCanvas.getBoundingClientRect();
+  const rw = Math.max(1, Math.round(rect.width));
+  const rh = Math.max(1, Math.round(rect.height));
+  if (rw < 40 || rh < 40) return;
+
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const CARD_W_MM = 63.5;
+  const CARD_H_MM = 88.9;
+
+  // Top horizontal ruler (0 -> 63.5 mm)
+  topEl.style.width = `${rw}px`;
+  topEl.width = Math.round(rw * dpr);
+  topEl.height = Math.round(22 * dpr);
+  const tctx = topEl.getContext('2d');
+  tctx.save();
+  tctx.scale(dpr, dpr);
+  tctx.clearRect(0, 0, rw, 22);
+  tctx.font = '9px sans-serif';
+  tctx.textBaseline = 'top';
+  for (let mm = 0; mm <= CARD_W_MM + 0.01; mm += 2.5) {
+    const x = Math.round((mm / CARD_W_MM) * rw) + 0.5;
+    const isMajor = Math.abs(mm % 10) < 0.01;
+    const isMid = Math.abs(mm % 5) < 0.01;
+    tctx.strokeStyle = isMajor ? 'rgba(203, 213, 225, 0.72)' : 'rgba(148, 163, 184, 0.38)';
+    tctx.lineWidth = 1;
+    tctx.beginPath();
+    tctx.moveTo(x, 22);
+    tctx.lineTo(x, isMajor ? 10 : (isMid ? 14 : 17));
+    tctx.stroke();
+    if (isMajor && mm < CARD_W_MM - 3) {
+      tctx.fillStyle = 'rgba(203, 213, 225, 0.85)';
+      tctx.fillText(String(Math.round(mm)), x + 2, 2);
+    }
+  }
+  // Highlight exact 50% horizontal midpoint (31.75 mm)
+  const midX = Math.round(rw / 2) + 0.5;
+  tctx.strokeStyle = '#ec4899';
+  tctx.lineWidth = 1.5;
+  tctx.beginPath();
+  tctx.moveTo(midX, 0);
+  tctx.lineTo(midX, 22);
+  tctx.stroke();
+  if (rulerCursorPos.x !== null && rulerCursorPos.x >= 0 && rulerCursorPos.x <= 750) {
+    const cx = (rulerCursorPos.x / 750) * rw;
+    tctx.fillStyle = '#38bdf8';
+    tctx.fillRect(cx - 1, 0, 2, 22);
+  }
+  tctx.restore();
+
+  // Left vertical ruler (0 -> 88.9 mm)
+  leftEl.style.height = `${rh}px`;
+  leftEl.width = Math.round(22 * dpr);
+  leftEl.height = Math.round(rh * dpr);
+  const lctx = leftEl.getContext('2d');
+  lctx.save();
+  lctx.scale(dpr, dpr);
+  lctx.clearRect(0, 0, 22, rh);
+  lctx.font = '9px sans-serif';
+  lctx.textBaseline = 'top';
+  for (let mm = 0; mm <= CARD_H_MM + 0.01; mm += 2.5) {
+    const y = Math.round((mm / CARD_H_MM) * rh) + 0.5;
+    const isMajor = Math.abs(mm % 10) < 0.01;
+    const isMid = Math.abs(mm % 5) < 0.01;
+    lctx.strokeStyle = isMajor ? 'rgba(203, 213, 225, 0.72)' : 'rgba(148, 163, 184, 0.38)';
+    lctx.lineWidth = 1;
+    lctx.beginPath();
+    lctx.moveTo(22, y);
+    lctx.lineTo(isMajor ? 10 : (isMid ? 14 : 17), y);
+    lctx.stroke();
+    if (isMajor && mm > 0 && mm < CARD_H_MM - 4) {
+      lctx.save();
+      lctx.translate(2, y + 2);
+      lctx.rotate(-Math.PI / 2);
+      lctx.fillStyle = 'rgba(203, 213, 225, 0.85)';
+      lctx.fillText(String(Math.round(mm)), -12, 0);
+      lctx.restore();
+    }
+  }
+  // Highlight exact 50% vertical midpoint (44.45 mm)
+  const midY = Math.round(rh / 2) + 0.5;
+  lctx.strokeStyle = '#ec4899';
+  lctx.lineWidth = 1.5;
+  lctx.beginPath();
+  lctx.moveTo(0, midY);
+  lctx.lineTo(22, midY);
+  lctx.stroke();
+  if (rulerCursorPos.y !== null && rulerCursorPos.y >= 0 && rulerCursorPos.y <= 1050) {
+    const cy = (rulerCursorPos.y / 1050) * rh;
+    lctx.fillStyle = '#38bdf8';
+    lctx.fillRect(0, cy - 1, 22, 2);
+  }
+  lctx.restore();
+}
 let hoveredElementKey = null;
 let dragState = null;
 const HANDLE_SIZE = 10;
@@ -559,17 +799,19 @@ function getInteractiveRegions(card) {
     });
   }
 
-  const setSize = L.set_symbol.size || 32;
-  const setY = L.set_symbol.y ?? 620;
-  regions.push({
-    key: 'set_symbol',
-    label: 'Set Symbol',
-    x: L.set_symbol.x - setSize * 1.15,
-    y: setY - setSize * 0.75,
-    w: setSize * 1.2,
-    h: setSize * 1.15,
-    resizable: true,
-  });
+  if (!L.set_symbol.hidden) {
+    const setSize = L.set_symbol.size || 32;
+    const setY = L.set_symbol.y ?? 620;
+    regions.push({
+      key: 'set_symbol',
+      label: 'Set Symbol',
+      x: L.set_symbol.x - setSize * 1.15,
+      y: setY - setSize * 0.75,
+      w: setSize * 1.2,
+      h: setSize * 1.15,
+      resizable: true,
+    });
+  }
 
   regions.push({
     key: 'type_line',
@@ -728,6 +970,144 @@ function drawInteractiveOverlays(targetCtx, card) {
     }
     targetCtx.restore();
   });
+
+  // Show visual outline + badge when a frame component (or duplicate) is selected via click / Ctrl+Click
+  if (selectedElementKey && !regions.some((r) => r.key === selectedElementKey) && selectedElementKey !== activeCropLayerKey) {
+    const face = currentProjectFace();
+    const cropR = card.layer_crops?.[selectedElementKey];
+    const box = (cropR && cropR.w > 0 && cropR.h > 0)
+      ? cropR
+      : getDefaultLayerCropRect(selectedElementKey, card, face);
+    if (box && box.w > 0 && box.h > 0) {
+      targetCtx.save();
+      targetCtx.strokeStyle = '#38bdf8';
+      targetCtx.lineWidth = 2;
+      targetCtx.setLineDash([7, 4]);
+      targetCtx.strokeRect(box.x, box.y, box.w, box.h);
+      targetCtx.setLineDash([]);
+      targetCtx.font = 'bold 12px sans-serif';
+      const lbl = getLayerDisplayLabel(selectedElementKey, card);
+      const tw = targetCtx.measureText(lbl).width + 12;
+      const ty = Math.max(4, box.y - 22);
+      targetCtx.fillStyle = '#0284c7';
+      targetCtx.beginPath();
+      targetCtx.roundRect(Math.max(4, box.x), ty, tw, 18, 3);
+      targetCtx.fill();
+      targetCtx.fillStyle = '#ffffff';
+      targetCtx.textAlign = 'left';
+      targetCtx.textBaseline = 'middle';
+      targetCtx.fillText(lbl, Math.max(4, box.x) + 6, ty + 9);
+      targetCtx.restore();
+    }
+  }
+
+  // Active live on-canvas Layer Crop Box (amber handles + subtle outside dim)
+  if (activeCropLayerKey && card.layer_crops?.[activeCropLayerKey]) {
+    const c = card.layer_crops[activeCropLayerKey];
+    if (c.w > 0 && c.h > 0) {
+      targetCtx.save();
+      // Dim outside crop region using evenodd fill
+      targetCtx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+      targetCtx.beginPath();
+      targetCtx.rect(0, 0, 750, 1050);
+      targetCtx.rect(c.x, c.y, c.w, c.h);
+      targetCtx.fill('evenodd');
+
+      targetCtx.strokeStyle = '#f59e0b';
+      targetCtx.lineWidth = 2.5;
+      targetCtx.setLineDash([8, 4]);
+      targetCtx.strokeRect(c.x, c.y, c.w, c.h);
+      targetCtx.setLineDash([]);
+
+      targetCtx.font = 'bold 12px sans-serif';
+      const lbl = `Crop: ${getLayerDisplayLabel(activeCropLayerKey, card)} (Esc to finish)`;
+      const tw = targetCtx.measureText(lbl).width + 12;
+      const ty = Math.max(4, c.y - 22);
+      const tx = Math.max(4, Math.min(750 - tw - 4, c.x));
+      targetCtx.fillStyle = '#d97706';
+      targetCtx.beginPath();
+      targetCtx.roundRect(tx, ty, tw, 19, 3);
+      targetCtx.fill();
+      targetCtx.fillStyle = '#ffffff';
+      targetCtx.textAlign = 'left';
+      targetCtx.textBaseline = 'middle';
+      targetCtx.fillText(lbl, tx + 6, ty + 10);
+
+      getHandlesForRegion({ ...c, resizable: true }).forEach((h) => {
+        targetCtx.fillStyle = '#fef3c7';
+        targetCtx.strokeStyle = '#b45309';
+        targetCtx.lineWidth = 2;
+        targetCtx.fillRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+        targetCtx.strokeRect(h.x - HANDLE_SIZE / 2, h.y - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+      });
+      targetCtx.restore();
+    }
+  }
+
+  // Smart 50% Center Alignment Guides (automatic midpoint detection)
+  let showCenterX = activeCenterGuides.x;
+  let showCenterY = activeCenterGuides.y;
+  let xGuideText = activeCenterGuides.xLabel || '50% · 31.75 mm';
+  let yGuideText = activeCenterGuides.yLabel || '50% · 44.45 mm';
+  if (!showCenterX && !showCenterY && (activeCropLayerKey || selectedElementKey)) {
+    const targetBox = activeCropLayerKey
+      ? card.layer_crops?.[activeCropLayerKey]
+      : (regions.find((r) => r.key === selectedElementKey) || card.layer_crops?.[selectedElementKey]);
+    if (targetBox && targetBox.w > 0 && targetBox.h > 0) {
+      if (Math.abs((targetBox.x + targetBox.w / 2) - CARD_CENTER_X) <= 1 || Math.abs(targetBox.x - CARD_CENTER_X) <= 1 || Math.abs((targetBox.x + targetBox.w) - CARD_CENTER_X) <= 1) {
+        showCenterX = true;
+        xGuideText = Math.abs((targetBox.x + targetBox.w / 2) - CARD_CENTER_X) <= 1 ? '50% Center' : '50% Split';
+      }
+      if (Math.abs((targetBox.y + targetBox.h / 2) - CARD_CENTER_Y) <= 1 || Math.abs(targetBox.y - CARD_CENTER_Y) <= 1 || Math.abs((targetBox.y + targetBox.h) - CARD_CENTER_Y) <= 1) {
+        showCenterY = true;
+        yGuideText = Math.abs((targetBox.y + targetBox.h / 2) - CARD_CENTER_Y) <= 1 ? '50% Center' : '50% Split';
+      }
+    }
+  }
+  if (showCenterX) {
+    targetCtx.save();
+    targetCtx.strokeStyle = '#ec4899';
+    targetCtx.lineWidth = 1.5;
+    targetCtx.setLineDash([6, 4]);
+    targetCtx.beginPath();
+    targetCtx.moveTo(CARD_CENTER_X, 0);
+    targetCtx.lineTo(CARD_CENTER_X, 1050);
+    targetCtx.stroke();
+    targetCtx.setLineDash([]);
+    targetCtx.font = 'bold 11px sans-serif';
+    const tw = targetCtx.measureText(xGuideText).width + 10;
+    targetCtx.fillStyle = '#db2777';
+    targetCtx.beginPath();
+    targetCtx.roundRect(CARD_CENTER_X - tw / 2, 6, tw, 17, 3);
+    targetCtx.fill();
+    targetCtx.fillStyle = '#ffffff';
+    targetCtx.textAlign = 'center';
+    targetCtx.textBaseline = 'middle';
+    targetCtx.fillText(xGuideText, CARD_CENTER_X, 14.5);
+    targetCtx.restore();
+  }
+  if (showCenterY) {
+    targetCtx.save();
+    targetCtx.strokeStyle = '#ec4899';
+    targetCtx.lineWidth = 1.5;
+    targetCtx.setLineDash([6, 4]);
+    targetCtx.beginPath();
+    targetCtx.moveTo(0, CARD_CENTER_Y);
+    targetCtx.lineTo(750, CARD_CENTER_Y);
+    targetCtx.stroke();
+    targetCtx.setLineDash([]);
+    targetCtx.font = 'bold 11px sans-serif';
+    const tw = targetCtx.measureText(yGuideText).width + 10;
+    targetCtx.fillStyle = '#db2777';
+    targetCtx.beginPath();
+    targetCtx.roundRect(6, CARD_CENTER_Y - 21, tw, 17, 3);
+    targetCtx.fill();
+    targetCtx.fillStyle = '#ffffff';
+    targetCtx.textAlign = 'left';
+    targetCtx.textBaseline = 'middle';
+    targetCtx.fillText(yGuideText, 11, CARD_CENTER_Y - 12.5);
+    targetCtx.restore();
+  }
 }
 
 
@@ -1187,6 +1567,29 @@ _baseCanvas.height = 1050;
 const _baseCtx = _baseCanvas.getContext('2d');
 let _baseCacheKey = '';
 
+let _activeDragSession = null;
+let _dragSessionSeq = 0;
+
+function startLayerDragSession(card, targetKey) {
+  _activeDragSession = null;
+  if (!state.project || !currentProjectFace() || !card || !targetKey) return;
+  if (targetKey !== 'art' && !targetKey.startsWith('shape:')) return;
+  const seq = ++_dragSessionSeq;
+  const face = currentProjectFace();
+  prepareLayerDragSession(face, card, targetKey, {
+    set_symbol: state.project?.set_symbol,
+  }).then((sess) => {
+    if (seq === _dragSessionSeq && dragState && dragState.key === targetKey) {
+      _activeDragSession = sess;
+    }
+  }).catch(() => {});
+}
+
+function clearLayerDragSession() {
+  _dragSessionSeq += 1;
+  _activeDragSession = null;
+}
+
 function scheduleRender(card) {
   if (!card) return;
   _pendingCard = card;
@@ -1195,7 +1598,21 @@ function scheduleRender(card) {
     _rafId = 0;
     const target = _pendingCard;
     _pendingCard = null;
-    if (target) renderCardCanvas(target);
+    if (!target) return;
+    const projectCanvas = document.getElementById('cb-project-canvas');
+    if (state.project && currentProjectFace() && projectCanvas && dragState) {
+      if (dragState.mode === 'draw-shape' && _projectCleanReady) {
+        paintProjectWithOverlays(projectCanvas, target);
+        return;
+      }
+      if (_activeDragSession && _activeDragSession.targetKey === dragState.key) {
+        paintLayerDragFrame(_projectCleanCanvas, _activeDragSession, currentProjectFace(), target);
+        _projectCleanReady = true;
+        paintProjectWithOverlays(projectCanvas, target);
+        return;
+      }
+    }
+    renderCardCanvas(target);
   });
 }
 
@@ -1267,7 +1684,7 @@ function drawCardForeground(octx, card) {
   octx.fillText(card.type_line || '', typeX, card.layout?.type_line?.y || 626, typeMaxW);
   octx.restore();
 
-  drawSetSymbol(octx, card.set, card.rarity, setRightX, card.layout?.set_symbol?.y || 620, setSize);
+  if (!card.layout?.set_symbol?.hidden) drawSetSymbol(octx, card.set, card.rarity, setRightX, card.layout?.set_symbol?.y || 620, setSize);
 
   if (!card.layout?.oracle_box?.hidden) drawRichOracleText(octx, card.oracle_text || '', card.flavor_text || '', {
     x: card.layout?.oracle_box?.x || 56,
@@ -1382,28 +1799,49 @@ function paintProjectWithOverlays(projectCanvas, card) {
   pCtx.restore();
 }
 
-async function renderCardCanvas(card) {
+let _renderInFlight = false;
+let _renderQueuedCard = null;
+let _hiResSettleTimer = null;
+
+async function renderCardCanvas(card, opts = {}) {
   if (!card) return;
   const legacyWrap = document.getElementById('cb-legacy-wrap');
   const projectWrap = document.getElementById('cb-project-wrap');
   const projectCanvas = document.getElementById('cb-project-canvas');
   if (state.project && currentProjectFace() && projectCanvas) {
-    const seq = ++renderSeq;
-    const face = currentProjectFace();
-    syncProjectFaceFromCard(card, face);
-    if (legacyWrap) legacyWrap.style.display = 'none';
-    if (projectWrap) projectWrap.style.display = 'flex';
-    await renderProjectFace(face, _projectCleanCanvas, {
-      card,
-      set_symbol: state.project?.set_symbol,
-    });
-    if (seq !== renderSeq) return;
-    projectCanvas.width = _projectCleanCanvas.width;
-    projectCanvas.height = _projectCleanCanvas.height;
-    projectCanvas.style.maxWidth = '100%';
-    projectCanvas.style.height = 'auto';
-    _projectCleanReady = true;
-    paintProjectWithOverlays(projectCanvas, card);
+    if (_renderInFlight) {
+      _renderQueuedCard = card;
+      return;
+    }
+    _renderInFlight = true;
+    try {
+      const seq = ++renderSeq;
+      const face = currentProjectFace();
+      syncProjectFaceFromCard(card, face);
+      if (legacyWrap) legacyWrap.style.display = 'none';
+      if (projectWrap) projectWrap.style.display = 'flex';
+      await renderProjectFace(face, _projectCleanCanvas, {
+        card,
+        set_symbol: state.project?.set_symbol,
+      });
+      if (seq === renderSeq) {
+        const sizeChanged = projectCanvas.width !== _projectCleanCanvas.width || projectCanvas.height !== _projectCleanCanvas.height;
+        if (projectCanvas.width !== _projectCleanCanvas.width) projectCanvas.width = _projectCleanCanvas.width;
+        if (projectCanvas.height !== _projectCleanCanvas.height) projectCanvas.height = _projectCleanCanvas.height;
+        projectCanvas.style.maxWidth = '100%';
+        projectCanvas.style.height = 'auto';
+        _projectCleanReady = true;
+        paintProjectWithOverlays(projectCanvas, card);
+        if (sizeChanged) requestAnimationFrame(drawPreviewRulers);
+      }
+    } finally {
+      _renderInFlight = false;
+      if (_renderQueuedCard) {
+        const nextCard = _renderQueuedCard;
+        _renderQueuedCard = null;
+        renderCardCanvas(nextCard);
+      }
+    }
     return;
   }
   if (projectWrap) projectWrap.style.display = 'none';
@@ -2055,6 +2493,62 @@ function updateSetPreviewIcon(setCode, rarity) {
   }
 }
 
+function renderSetSymbolPickerGrid(activeSet, rarity = 'common', filterText = '') {
+  const grid = document.getElementById('cb-set-symbol-grid');
+  if (!grid) return;
+  const cat = getSymbolsCatalog();
+  const sets = cat?.sets || {};
+  const rChar = String(rarity || 'common').trim().toLowerCase()[0] || 'c';
+  const codeMap = new Map();
+  for (const [k, url] of Object.entries(sets)) {
+    const m = k.match(/^([a-z0-9_]+)-([curms])$/i);
+    const code = (m ? m[1] : k).toLowerCase();
+    const rc = m ? m[2].toLowerCase() : 'c';
+    if (!codeMap.has(code) || rc === rChar || (rc === 'c' && !codeMap.get(code).exact)) {
+      codeMap.set(code, { code, url, exact: rc === rChar });
+    }
+  }
+  const q = String(filterText || '').trim().toLowerCase();
+  const cur = String(activeSet || '').trim().toLowerCase();
+  const list = [...codeMap.values()]
+    .filter((it) => !q || it.code.includes(q))
+    .sort((a, b) => a.code.localeCompare(b.code));
+  if (!list.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1; font-size:10px; color:var(--text-muted); text-align:center; padding:8px;">No matching set symbols</div>';
+    return;
+  }
+  const MAX_SHOW = 160;
+  const shown = list.slice(0, MAX_SHOW);
+  grid.innerHTML = shown.map((it) => `
+    <button type="button" class="cb-set-sym-item${it.code === cur ? ' active' : ''}" data-set-code="${it.code}" title="${it.code.toUpperCase()}">
+      <img src="${it.url}" alt="${it.code}" loading="lazy">
+      <span>${it.code}</span>
+    </button>
+  `).join('');
+  grid.querySelectorAll('[data-set-code]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const code = btn.dataset.setCode || 'mtg';
+      const card = getActiveCard();
+      if (!card) return;
+      pushUndoState(card);
+      card.set = code;
+      const L = ensureCardLayout(card);
+      if (L.set_symbol?.hidden) {
+        L.set_symbol.hidden = false;
+        const hideSetEl = document.getElementById('cb-hide-set-symbol');
+        if (hideSetEl) hideSetEl.checked = false;
+      }
+      const setIn = document.getElementById('cb-field-set');
+      if (setIn) setIn.value = code;
+      updateSetPreviewIcon(code, card.rarity || 'common');
+      grid.querySelectorAll('.cb-set-sym-item').forEach((b) => b.classList.toggle('active', b === btn));
+      renderCardCanvas(card);
+      persistState(true);
+    });
+  });
+}
+
 function populateDetailControls(card) {
   document.getElementById('cb-detail-ready-check').checked = getReadyIds().has(card.id);
   if (card.original_name === undefined) card.original_name = card.official_name || card.name || '';
@@ -2063,13 +2557,18 @@ function populateDetailControls(card) {
   document.getElementById('cb-field-mana').value = card.mana_cost || '';
   document.getElementById('cb-field-type').value = card.type_line || '';
   document.getElementById('cb-field-oracle').value = card.oracle_text || '';
+  const flavorEl = document.getElementById('cb-field-flavor');
+  if (flavorEl) flavorEl.value = card.flavor_text || '';
   document.getElementById('cb-field-pt').value = card.power != null ? `${card.power}/${card.toughness ?? ''}` : '';
   document.getElementById('cb-field-artist').value = card.artist || '';
   const setIn = document.getElementById('cb-field-set');
   const rarSel = document.getElementById('cb-field-rarity');
   if (setIn) setIn.value = (card.set || 'mtg').toLowerCase();
   if (rarSel) rarSel.value = (card.rarity || 'common').toLowerCase();
+  const hideSetEl = document.getElementById('cb-hide-set-symbol');
+  if (hideSetEl) hideSetEl.checked = Boolean(card.layout?.set_symbol?.hidden);
   updateSetPreviewIcon(card.set || 'mtg', card.rarity || 'common');
+  renderSetSymbolPickerGrid(card.set || 'mtg', card.rarity || 'common', '');
   document.getElementById('cb-color-title').value = card.layout?.title?.color || '#111111';
   document.getElementById('cb-color-official').value = card.layout?.official_title?.color || '#111111';
   document.getElementById('cb-color-type').value = card.layout?.type_line?.color || '#111111';
@@ -2156,16 +2655,133 @@ function bindDetailEvents() {
   document.getElementById('cb-undo-btn')?.addEventListener('click', performUndo);
   document.getElementById('cb-redo-btn')?.addEventListener('click', performRedo);
   window.addEventListener('keydown', (evt) => {
+    if (activeCropLayerKey && (evt.key === 'Escape' || evt.key === 'Enter')) {
+      const c = getActiveCard();
+      activeCropLayerKey = null;
+      layerManager?.setCropKey(null);
+      if (c) {
+        layerManager?.render(c);
+        renderCardCanvas(c);
+        persistState(true);
+      }
+      return;
+    }
     if (detailView.style.display === 'none') return;
     const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+    const card = getActiveCard();
+
+    // Ctrl+Z (Undo), Ctrl+Y / Ctrl+Shift+Z (Redo), Ctrl+0 (Reset preview zoom)
     if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'z') {
       evt.preventDefault();
       if (evt.shiftKey) performRedo();
       else performUndo();
-    } else if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'y') {
+      return;
+    }
+    if ((evt.ctrlKey || evt.metaKey) && evt.key.toLowerCase() === 'y') {
       evt.preventDefault();
       performRedo();
+      return;
+    }
+    if ((evt.ctrlKey || evt.metaKey) && evt.key === '0') {
+      evt.preventDefault();
+      applyPreviewZoom(1.0);
+      return;
+    }
+
+    if (!card) return;
+
+    // Delete (Supr) / Backspace: remove selected duplicate/shape, clear active crop, or hide standard layer
+    if (evt.key === 'Delete' || evt.key === 'Backspace') {
+      const targetKey = activeCropLayerKey || selectedElementKey;
+      if (!targetKey) return;
+      evt.preventDefault();
+      pushUndoState(card);
+      if (activeCropLayerKey) {
+        if (card.layer_crops) delete card.layer_crops[activeCropLayerKey];
+        activeCropLayerKey = null;
+        layerManager?.setCropKey(null);
+      } else if (targetKey.startsWith('dup:')) {
+        if (card.duplicated_layers) delete card.duplicated_layers[targetKey];
+        card.layer_order = (card.layer_order || []).filter((k) => k !== targetKey);
+        if (card.frame_components) delete card.frame_components[targetKey];
+        if (card.layer_opacities) delete card.layer_opacities[targetKey];
+        if (card.layer_colors) delete card.layer_colors[targetKey];
+        if (card.layer_crops) delete card.layer_crops[targetKey];
+        if (card.layer_eraser_masks) delete card.layer_eraser_masks[targetKey];
+        if (card.hidden_layers) delete card.hidden_layers[targetKey];
+        selectedElementKey = null;
+        layerManager?.setSelected(null);
+      } else if (targetKey.startsWith('shape:')) {
+        const sid = targetKey.slice(6);
+        card.shapes = (card.shapes || []).filter((s) => s.id !== sid);
+        card.layer_order = (card.layer_order || []).filter((k) => k !== targetKey);
+        if (card.layer_opacities) delete card.layer_opacities[targetKey];
+        if (card.hidden_layers) delete card.hidden_layers[targetKey];
+        selectedElementKey = null;
+        layerManager?.setSelected(null);
+      } else if (!TEXT_KEYS.includes(targetKey)) {
+        card.hidden_layers = Array.isArray(card.hidden_layers)
+          ? Object.fromEntries(card.hidden_layers.map((k) => [k, true]))
+          : (card.hidden_layers || {});
+        card.hidden_layers[targetKey] = true;
+        selectedElementKey = null;
+        layerManager?.setSelected(null);
+      } else {
+        return;
+      }
+      layerManager?.render(card);
+      renderCardCanvas(card);
+      persistState(true);
+      return;
+    }
+
+    // Arrow keys (1px) / Shift+Arrow keys (10px) to nudge/move selected component or active crop box
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(evt.key)) {
+      const k = activeCropLayerKey || selectedElementKey;
+      if (!k) return;
+      const step = evt.shiftKey ? 10 : 1;
+      const dx = evt.key === 'ArrowLeft' ? -step : (evt.key === 'ArrowRight' ? step : 0);
+      const dy = evt.key === 'ArrowUp' ? -step : (evt.key === 'ArrowDown' ? step : 0);
+      let moved = false;
+
+      if (activeCropLayerKey && card.layer_crops?.[activeCropLayerKey]) {
+        evt.preventDefault();
+        pushUndoState(card);
+        const c = card.layer_crops[activeCropLayerKey];
+        c.x = Math.max(0, Math.min(750 - c.w, Math.round(c.x + dx)));
+        c.y = Math.max(0, Math.min(1050 - c.h, Math.round(c.y + dy)));
+        moved = true;
+      } else if (k.startsWith('shape:') && Array.isArray(card.shapes)) {
+        const s = card.shapes.find((sh) => sh.id === k.slice(6));
+        if (s) {
+          evt.preventDefault();
+          pushUndoState(card);
+          s.x = Math.round((s.x || 0) + dx);
+          s.y = Math.round((s.y || 0) + dy);
+          moved = true;
+        }
+      } else {
+        const L = ensureCardLayout(card);
+        if (k === 'art' && L.art) {
+          evt.preventDefault();
+          pushUndoState(card);
+          L.art.x = Math.round((L.art.x || 0) + dx);
+          L.art.y = Math.round((L.art.y || 0) + dy);
+          moved = true;
+        } else if (L[k] && typeof L[k].x === 'number') {
+          evt.preventDefault();
+          pushUndoState(card);
+          L[k].x = Math.round(L[k].x + dx);
+          L[k].y = Math.round((L[k].y ?? 0) + dy);
+          moved = true;
+        }
+      }
+      if (moved) {
+        renderCardCanvas(card);
+        persistState(true);
+      }
     }
   });
 
@@ -2300,11 +2916,35 @@ function bindDetailEvents() {
   syncField('cb-field-mana', (c, v) => { c.mana_cost = v; });
   syncField('cb-field-type', (c, v) => { c.type_line = v; });
   syncField('cb-field-oracle', (c, v) => { c.oracle_text = v; });
+  syncField('cb-field-flavor', (c, v) => { c.flavor_text = v; });
+  document.getElementById('cb-clear-flavor-btn')?.addEventListener('click', () => {
+    const c = getActiveCard();
+    if (!c) return;
+    pushUndoState(c);
+    c.flavor_text = '';
+    const flEl = document.getElementById('cb-field-flavor');
+    if (flEl) flEl.value = '';
+    renderCardCanvas(c);
+    persistState(true);
+  });
   syncField('cb-field-artist', (c, v) => { c.artist = v; });
   syncField('cb-field-set', (c, v) => {
-    const code = (v || 'mtg').trim().toLowerCase() || 'mtg';
+    const raw = (v || '').trim().toLowerCase();
+    const code = raw || 'mtg';
     c.set = code;
     updateSetPreviewIcon(code, c.rarity || 'common');
+    renderSetSymbolPickerGrid(code, c.rarity || 'common', raw);
+  });
+  document.getElementById('cb-hide-set-symbol')?.addEventListener('change', (e) => {
+    const card = getActiveCard();
+    if (!card) return;
+    pushUndoState(card);
+    const L = ensureCardLayout(card);
+    L.set_symbol = L.set_symbol || { ...DEFAULT_LAYOUT.set_symbol };
+    L.set_symbol.hidden = Boolean(e.target.checked);
+    if (L.set_symbol.hidden && selectedElementKey === 'set_symbol') selectedElementKey = null;
+    renderCardCanvas(card);
+    persistState(true);
   });
   document.getElementById('cb-field-rarity')?.addEventListener('change', (e) => {
     const c = getActiveCard();
@@ -2312,6 +2952,7 @@ function bindDetailEvents() {
     pushUndoState(c);
     c.rarity = (e.target.value || 'common').toLowerCase();
     updateSetPreviewIcon(c.set || 'mtg', c.rarity);
+    renderSetSymbolPickerGrid(c.set || 'mtg', c.rarity, '');
     renderCardCanvas(c);
     persistState(true);
   });
@@ -2408,7 +3049,7 @@ function bindDetailEvents() {
   document.getElementById('cb-export-single-pdf-btn').addEventListener('click', async () => {
     const card = getActiveCard();
     if (!card) return;
-    await exportCardsBatch([card], 'fronts', 'pdf', SINGLE_PDF_EXPORT_DPI, true);
+    await exportCardsBatch([card], 'fronts', 'pdf', getSingleExportDpi(), true);
   });
 
   const interactiveCheck = document.getElementById('cb-interactive-mode');
@@ -2494,38 +3135,59 @@ function bindDetailEvents() {
   }
 
   function isFramePixelOpaque(card, layerKey, mx, my) {
+    const crop = card.layer_crops?.[layerKey];
+    if (crop && crop.w > 0 && crop.h > 0) {
+      if (mx < crop.x || mx > crop.x + crop.w || my < crop.y || my > crop.y + crop.h) return false;
+    }
+    const base = baseLayerKey(layerKey, card);
     const fc = card.frame_components || {};
-    const relPath = fc[layerKey];
+    const relPath = fc[layerKey] || fc[base] || (FRAME_DERIVED_LAYERS.has(base) ? fc.background : '');
     if (!relPath) return false;
-    if (layerKey === 'background') {
-      // Let clicks inside the artwork window pass through the transparent RGBA frame cutout to Artwork
+    const face = currentProjectFace();
+    if (base === 'background' || base === 'pinlines') {
       const L = ensureCardLayout(card);
       const a = L.art;
       if (a && mx >= a.x && mx <= a.x + a.w && my >= a.y && my <= a.y + a.h) return false;
       return true;
     }
-    const cacheKey = `${layerKey}::${relPath}`;
-    const off = transparentLayerCache.get(cacheKey);
-    if (!off) return false;
-    const px = Math.max(0, Math.min(749, Math.round(mx)));
-    const py = Math.max(0, Math.min(1049, Math.round(my)));
-    try {
-      const data = off.getContext('2d', { willReadFrequently: true }).getImageData(px, py, 1, 1).data;
-      return data[3] > 20;
-    } catch {
-      return false;
+    if (base === 'border') {
+      return mx < 36 || mx > 714 || my < 36 || my > 978;
     }
+    const box = getDefaultLayerCropRect(layerKey, card, face);
+    if (box && box.w > 0 && box.h > 0) {
+      return mx >= box.x && mx <= box.x + box.w && my >= box.y && my <= box.y + box.h;
+    }
+    return false;
   }
 
-  function findAllHitTargets(mx, my, card) {
+  function findAllHitTargets(mx, my, card, ignoreHandles = false) {
     const hits = [];
-    const regions = getInteractiveRegions(card);
-    const selRegion = regions.find((r) => r.key === selectedElementKey);
-    if (selRegion) {
-      for (const h of getHandlesForRegion(selRegion)) {
-        if (Math.abs(mx - h.x) <= HANDLE_SIZE && Math.abs(my - h.y) <= HANDLE_SIZE) {
-          hits.push({ type: 'handle', key: selRegion.key, handle: h.id, cursor: h.cursor, region: selRegion });
+    // 0. Active live Layer Crop Box handles & body take priority unless cycling behind
+    if (!ignoreHandles && activeCropLayerKey && card.layer_crops?.[activeCropLayerKey]) {
+      const c = card.layer_crops[activeCropLayerKey];
+      if (c.w > 0 && c.h > 0) {
+        for (const h of getHandlesForRegion({ ...c, resizable: true })) {
+          if (Math.abs(mx - h.x) <= HANDLE_SIZE + 2 && Math.abs(my - h.y) <= HANDLE_SIZE + 2) {
+            hits.push({ type: 'crop-handle', key: activeCropLayerKey, handle: h.id, cursor: h.cursor, region: c });
+            return hits;
+          }
+        }
+        if (mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) {
+          hits.push({ type: 'crop-move', key: activeCropLayerKey, cursor: 'move', region: c });
           return hits;
+        }
+      }
+    }
+
+    const regions = getInteractiveRegions(card);
+    if (!ignoreHandles) {
+      const selRegion = regions.find((r) => r.key === selectedElementKey);
+      if (selRegion) {
+        for (const h of getHandlesForRegion(selRegion)) {
+          if (Math.abs(mx - h.x) <= HANDLE_SIZE && Math.abs(my - h.y) <= HANDLE_SIZE) {
+            hits.push({ type: 'handle', key: selRegion.key, handle: h.id, cursor: h.cursor, region: selRegion });
+            return hits;
+          }
         }
       }
     }
@@ -2539,22 +3201,34 @@ function bindDetailEvents() {
       }
     }
 
-    // 2. Layer stack from topmost to bottommost (shapes, art, and frame components)
+    // 2. Layer stack from topmost to bottommost (shapes, art, duplicated layers, and frame components)
     const hidden = Array.isArray(card.hidden_layers)
       ? Object.fromEntries(card.hidden_layers.map((k) => [k, true]))
       : (card.hidden_layers || {});
     const order = Array.isArray(card.layer_order) && card.layer_order.length
       ? card.layer_order
-      : ['background', 'art', 'pinlines', 'name_box', 'crown', 'border', 'pt_box'];
+      : [...DEFAULT_LAYER_ORDER];
     const regionMap = new Map(regions.map((r) => [r.key, r]));
 
     for (let i = order.length - 1; i >= 0; i--) {
       const key = order[i];
       if (hidden[key]) continue;
-      if (key.startsWith('shape:') || key === 'art') {
+      const base = baseLayerKey(key, card);
+      if (key.startsWith('shape:')) {
         const r = regionMap.get(key);
         if (r && mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
           hits.push({ type: 'region', key, cursor: 'move', region: r });
+        }
+      } else if (base === 'art') {
+        const crop = card.layer_crops?.[key];
+        if (crop && crop.w > 0 && crop.h > 0) {
+          if (mx < crop.x || mx > crop.x + crop.w || my < crop.y || my > crop.y + crop.h) continue;
+        }
+        const r = regionMap.get('art');
+        if (r && mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
+          hits.push({ type: key === 'art' ? 'region' : 'frame', key, cursor: key === 'art' ? 'move' : 'pointer', region: key === 'art' ? r : null });
+        } else if (card.art_over_top && (!crop || (mx >= crop.x && mx <= crop.x + crop.w && my >= crop.y && my <= crop.y + crop.h))) {
+          hits.push({ type: key === 'art' ? 'region' : 'frame', key, cursor: key === 'art' ? 'move' : 'pointer', region: key === 'art' ? r : null });
         }
       } else if (isFramePixelOpaque(card, key, mx, my)) {
         hits.push({ type: 'frame', key, cursor: 'pointer', region: null });
@@ -2636,6 +3310,11 @@ function bindDetailEvents() {
       g.classList.toggle('active', g.dataset.textKey === key);
     });
     textPopoverEl.style.display = 'block';
+    if (key === 'set_symbol' && card) {
+      const hideSetEl = document.getElementById('cb-hide-set-symbol');
+      if (hideSetEl) hideSetEl.checked = Boolean(card.layout?.set_symbol?.hidden);
+      renderSetSymbolPickerGrid(card.set || 'mtg', card.rarity || 'common', '');
+    }
     toolTextBtn?.classList.toggle('active', key !== 'official_title');
     toolOfficialBtn?.classList.toggle('active', key === 'official_title');
     if (focusInput) {
@@ -2780,8 +3459,56 @@ function bindDetailEvents() {
       return;
     }
 
-    const hits = findAllHitTargets(mx, my, card);
+    // Shift+Drag moves the currently selected component directly (even if it sits behind another layer)
+    if (evt.shiftKey && !evt.ctrlKey && !evt.metaKey && (activeCropLayerKey || selectedElementKey)) {
+      const targetKey = activeCropLayerKey || selectedElementKey;
+      const preDragSnap = cloneCardSnapshot(card);
+      if (activeCropLayerKey && card.layer_crops?.[activeCropLayerKey]) {
+        dragState = {
+          mode: 'crop-move',
+          key: activeCropLayerKey,
+          handle: null,
+          startX: mx,
+          startY: my,
+          initialCrop: { ...card.layer_crops[activeCropLayerKey] },
+          changed: false,
+          preDragSnap,
+        };
+        renderCardCanvas(card);
+        return;
+      }
+      const L = ensureCardLayout(card);
+      const isMovableKey = targetKey === 'art' || targetKey.startsWith('shape:') || Boolean(L[targetKey]);
+      if (isMovableKey) {
+        dragState = {
+          mode: 'move',
+          key: targetKey,
+          startX: mx,
+          startY: my,
+          initialLayout: JSON.parse(JSON.stringify(L)),
+          initialShapes: JSON.parse(JSON.stringify(card.shapes || [])),
+          changed: false,
+          preDragSnap,
+        };
+        startLayerDragSession(card, targetKey);
+        if (state.project && currentProjectFace() && _projectCleanReady) {
+          paintProjectWithOverlays(document.getElementById('cb-project-canvas'), card);
+        } else {
+          renderCardCanvas(card);
+        }
+        return;
+      }
+    }
+
+    const cycleBehind = Boolean(evt.ctrlKey || evt.metaKey);
+    if (evt.ctrlKey) evt.preventDefault();
+    const hits = findAllHitTargets(mx, my, card, cycleBehind);
     if (!hits.length) {
+      if (activeCropLayerKey) {
+        activeCropLayerKey = null;
+        layerManager?.setCropKey(null);
+        layerManager?.render(card);
+      }
       selectedElementKey = null;
       layerManager?.setSelected(null);
       closeTextPopover();
@@ -2790,9 +3517,16 @@ function bindDetailEvents() {
     }
 
     let hit = hits[0];
-    if (evt.shiftKey && hit.type !== 'handle' && hits.length > 1) {
+    if (cycleBehind && hit.type !== 'handle' && hit.type !== 'crop-handle' && hits.length > 1) {
       const curIdx = hits.findIndex((h) => h.key === selectedElementKey);
       hit = hits[(curIdx + 1) % hits.length];
+    }
+
+    // Clicking outside the active crop box finishes crop mode cleanly
+    if (activeCropLayerKey && hit.type !== 'crop-handle' && hit.type !== 'crop-move') {
+      activeCropLayerKey = null;
+      layerManager?.setCropKey(null);
+      layerManager?.render(card);
     }
 
     selectedElementKey = hit.key;
@@ -2802,6 +3536,23 @@ function bindDetailEvents() {
       openTextPopover(hit.key, false);
     } else {
       closeTextPopover();
+    }
+
+    if (hit.type === 'crop-handle' || hit.type === 'crop-move') {
+      const preDragSnap = cloneCardSnapshot(card);
+      const initCrop = { ...(card.layer_crops?.[hit.key] || { x: 0, y: 0, w: 750, h: 1050 }) };
+      dragState = {
+        mode: hit.type === 'crop-handle' ? 'crop-resize' : 'crop-move',
+        key: hit.key,
+        handle: hit.handle || null,
+        startX: mx,
+        startY: my,
+        initialCrop: initCrop,
+        changed: false,
+        preDragSnap,
+      };
+      renderCardCanvas(card);
+      return;
     }
 
     if (hit.type === 'frame') {
@@ -2820,16 +3571,124 @@ function bindDetailEvents() {
     } else {
       dragState = { mode: 'move', key: hit.key, startX: mx, startY: my, initialLayout, initialShapes, changed: false, preDragSnap };
     }
-    renderCardCanvas(card);
+    if (dragState && (dragState.key === 'art' || String(dragState.key || '').startsWith('shape:'))) {
+      startLayerDragSession(card, dragState.key);
+    }
+    if (state.project && currentProjectFace() && _projectCleanReady) {
+      paintProjectWithOverlays(document.getElementById('cb-project-canvas'), card);
+    } else {
+      renderCardCanvas(card);
+    }
   };
 
   canvas.addEventListener('mousedown', handleStageMouseDown);
   document.getElementById('cb-project-canvas')?.addEventListener('mousedown', handleStageMouseDown);
+  // Workspace Zoom (Ctrl+Scroll + topbar buttons) & Panning (Space+Drag, Middle-Click+Drag, or Grid-Drag)
+  const stageViewport = document.getElementById('cb-stage-viewport') || document.querySelector('.cb-stage');
+  const centerStageViewport = () => {
+    if (!stageViewport) return;
+    stageViewport.scrollLeft = Math.max(0, Math.round((stageViewport.scrollWidth - stageViewport.clientWidth) / 2));
+    stageViewport.scrollTop = Math.max(0, Math.round((stageViewport.scrollHeight - stageViewport.clientHeight) / 2));
+  };
+  stageViewport?.addEventListener('wheel', (evt) => {
+    if (!(evt.ctrlKey || evt.metaKey)) return;
+    evt.preventDefault();
+    const delta = evt.deltaY < 0 ? 0.1 : -0.1;
+    applyPreviewZoom(previewZoom + delta);
+  }, { passive: false });
+  document.querySelector('.cb-ruler-corner')?.addEventListener('click', () => {
+    applyPreviewZoom(1.0);
+    requestAnimationFrame(centerStageViewport);
+  });
+  document.getElementById('cb-zoom-in-btn')?.addEventListener('click', () => applyPreviewZoom(previewZoom + 0.15));
+  document.getElementById('cb-zoom-out-btn')?.addEventListener('click', () => applyPreviewZoom(previewZoom - 0.15));
+  document.getElementById('cb-zoom-reset-btn')?.addEventListener('click', () => {
+    applyPreviewZoom(1.0);
+    requestAnimationFrame(centerStageViewport);
+  });
+
+  let spacePanHeld = false;
+  let workspacePan = null;
+  window.addEventListener('keydown', (e) => {
+    if (e.code !== 'Space' || detailView.style.display === 'none') return;
+    const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') return;
+    if (!spacePanHeld) {
+      spacePanHeld = true;
+      stageViewport?.classList.add('space-pan-ready');
+    }
+    e.preventDefault();
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'Space') {
+      spacePanHeld = false;
+      stageViewport?.classList.remove('space-pan-ready');
+    }
+  });
+
+  // Panning via Space+Drag, Middle-Click+Drag, or dragging on the empty grid background;
+  // a plain click on the empty grid (without dragging) deselects everything.
+  stageViewport?.addEventListener('mousedown', (evt) => {
+    const onInteractiveUi = Boolean(evt.target.closest('button, input, select, textarea, label, .cb-ps-toolbox, .cb-text-popover'));
+    if (onInteractiveUi) return;
+    const onCanvas = Boolean(evt.target.closest('#card-canvas, #cb-project-canvas'));
+    const isMiddle = evt.button === 1;
+    const shouldPan = isMiddle || spacePanHeld || (!onCanvas && evt.button === 0);
+    if (!shouldPan) return;
+    if (isMiddle || spacePanHeld) {
+      evt.preventDefault();
+      evt.stopPropagation();
+    }
+    workspacePan = {
+      startX: evt.clientX,
+      startY: evt.clientY,
+      scrollLeft: stageViewport.scrollLeft,
+      scrollTop: stageViewport.scrollTop,
+      moved: false,
+      startedOnEmptyGrid: !onCanvas && !isMiddle && !spacePanHeld,
+    };
+    stageViewport.classList.add('is-panning');
+  }, true);
+
+  window.addEventListener('mousemove', (evt) => {
+    if (!workspacePan || !stageViewport) return;
+    const dx = evt.clientX - workspacePan.startX;
+    const dy = evt.clientY - workspacePan.startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) workspacePan.moved = true;
+    stageViewport.scrollLeft = workspacePan.scrollLeft - dx;
+    stageViewport.scrollTop = workspacePan.scrollTop - dy;
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!workspacePan) return;
+    const wasEmptyClick = workspacePan.startedOnEmptyGrid && !workspacePan.moved;
+    workspacePan = null;
+    stageViewport?.classList.remove('is-panning');
+    if (wasEmptyClick) {
+      const card = getActiveCard();
+      if (!card) return;
+      const hadSelection = Boolean(selectedElementKey || activeCropLayerKey);
+      selectedElementKey = null;
+      if (activeCropLayerKey) {
+        activeCropLayerKey = null;
+        layerManager?.setCropKey(null);
+        layerManager?.render(card);
+      }
+      layerManager?.setSelected(null);
+      closeTextPopover();
+      if (hadSelection) {
+        renderCardCanvas(card);
+        persistState(true);
+      }
+    }
+  });
 
   window.addEventListener('mousemove', (evt) => {
     const card = getActiveCard();
     if (!card || detailView.style.display === 'none') return;
     const { x: mx, y: my } = getCanvasMouseCoords(evt);
+    rulerCursorPos = (mx >= 0 && mx <= 750 && my >= 0 && my <= 1050) ? { x: mx, y: my } : { x: null, y: null };
+    drawPreviewRulers();
 
     if (!dragState) {
       const activeStage = getActiveStageCanvas();
@@ -2877,11 +3736,53 @@ function bindDetailEvents() {
     const L = ensureCardLayout(card);
     const k = dragState.key;
 
-    if (dragState.mode === 'pan-art') {
+    const allowSnap = !evt.altKey;
+    activeCenterGuides = { x: false, y: false, xLabel: '', yLabel: '' };
+    if (dragState.mode === 'crop-move' && dragState.initialCrop) {
+      card.layer_crops = card.layer_crops || {};
+      const ic = dragState.initialCrop;
+      const raw = {
+        x: Math.max(0, Math.min(750 - ic.w, Math.round(ic.x + dx))),
+        y: Math.max(0, Math.min(1050 - ic.h, Math.round(ic.y + dy))),
+        w: ic.w,
+        h: ic.h,
+      };
+      const sn = snapBoxToCenter(raw, allowSnap);
+      activeCenterGuides = { x: sn.snapX, y: sn.snapY, xLabel: sn.xLabel, yLabel: sn.yLabel };
+      card.layer_crops[k] = { x: sn.x, y: sn.y, w: sn.w, h: sn.h };
+      scheduleRender(card);
+      return;
+    } else if (dragState.mode === 'crop-resize' && dragState.initialCrop) {
+      card.layer_crops = card.layer_crops || {};
+      const ic = dragState.initialCrop;
+      const h = dragState.handle || '';
+      let nx = ic.x, ny = ic.y, nw = ic.w, nh = ic.h;
+      if (h.includes('e')) nw = Math.max(16, Math.min(750 - ic.x, Math.round(ic.w + dx)));
+      if (h.includes('s')) nh = Math.max(16, Math.min(1050 - ic.y, Math.round(ic.h + dy)));
+      if (h.includes('w')) {
+        const clampedDx = Math.max(-ic.x, Math.min(ic.w - 16, Math.round(dx)));
+        nx = ic.x + clampedDx;
+        nw = ic.w - clampedDx;
+      }
+      if (h.includes('n')) {
+        const clampedDy = Math.max(-ic.y, Math.min(ic.h - 16, Math.round(dy)));
+        ny = ic.y + clampedDy;
+        nh = ic.h - clampedDy;
+      }
+      const sn = snapResizeEdgesToCenter({ x: nx, y: ny, w: nw, h: nh }, h, allowSnap);
+      activeCenterGuides = { x: sn.snapX, y: sn.snapY, xLabel: sn.xLabel, yLabel: sn.yLabel };
+      card.layer_crops[k] = { x: sn.x, y: sn.y, w: sn.w, h: sn.h };
+      scheduleRender(card);
+      return;
+    } else if (dragState.mode === 'pan-art') {
       L.art.offset_x = (init.art.offset_x || 0) + dx;
       L.art.offset_y = (init.art.offset_y || 0) + dy;
     } else if (dragState.mode === 'move') {
-      if (k === 'art') { L.art.x = init.art.x + dx; L.art.y = init.art.y + dy; }
+      if (k === 'art') {
+        const sn = snapBoxToCenter({ x: init.art.x + dx, y: init.art.y + dy, w: L.art.w, h: L.art.h }, allowSnap);
+        activeCenterGuides = { x: sn.snapX, y: sn.snapY, xLabel: sn.xLabel, yLabel: sn.yLabel };
+        L.art.x = sn.x; L.art.y = sn.y;
+      }
       else if (k === 'title') { L.title.x = init.title.x + dx; L.title.y = init.title.y + dy; }
       else if (k === 'official_title') { L.official_title.x = init.official_title.x + dx; L.official_title.y = init.official_title.y + dy; }
       else if (k === 'mana_cost') { L.mana_cost.x = init.mana_cost.x + dx; L.mana_cost.y = init.mana_cost.y + dy; }
@@ -2895,7 +3796,11 @@ function bindDetailEvents() {
         const sid = k.slice(6);
         const sInit = (dragState.initialShapes || []).find((s) => s.id === sid);
         const sCur = card.shapes.find((s) => s.id === sid);
-        if (sInit && sCur) { sCur.x = sInit.x + dx; sCur.y = sInit.y + dy; }
+        if (sInit && sCur) {
+          const sn = snapBoxToCenter({ x: sInit.x + dx, y: sInit.y + dy, w: sInit.w, h: sInit.h }, allowSnap);
+          activeCenterGuides = { x: sn.snapX, y: sn.snapY, xLabel: sn.xLabel, yLabel: sn.yLabel };
+          sCur.x = sn.x; sCur.y = sn.y;
+        }
       }
     } else if (dragState.mode === 'resize') {
       const h = dragState.handle;
@@ -2909,7 +3814,9 @@ function bindDetailEvents() {
           if (h.includes('s')) nh = Math.max(20, sInit.h + dy);
           if (h.includes('w')) { const pw = sInit.w - dx; if (pw >= 20) { nw = pw; nx = sInit.x + dx; } }
           if (h.includes('n')) { const ph = sInit.h - dy; if (ph >= 20) { nh = ph; ny = sInit.y + dy; } }
-          sCur.x = nx; sCur.y = ny; sCur.w = nw; sCur.h = nh;
+          const sn = snapResizeEdgesToCenter({ x: nx, y: ny, w: nw, h: nh }, h, allowSnap);
+          activeCenterGuides = { x: sn.snapX, y: sn.snapY, xLabel: sn.xLabel, yLabel: sn.yLabel };
+          sCur.x = sn.x; sCur.y = sn.y; sCur.w = sn.w; sCur.h = sn.h;
         }
       } else if (k === 'art') {
         const initArt = init.art;
@@ -2993,12 +3900,14 @@ function bindDetailEvents() {
   });
 
   window.addEventListener('mouseup', () => {
+    activeCenterGuides = { x: false, y: false, xLabel: '', yLabel: '' };
     if (!dragState) return;
     const card = getActiveCard();
     const mode = dragState.mode;
     const changed = dragState.changed;
     const preSnap = dragState.preDragSnap;
     dragState = null;
+    clearLayerDragSession();
 
     if (mode === 'draw-shape' && draftShape && card) {
       const s = { ...draftShape };
@@ -3021,8 +3930,10 @@ function bindDetailEvents() {
       card.layer_opacities[key] = s.opacity ?? 0.55;
       selectedElementKey = key;
       setActiveTool('select');
+      if (layerManager) layerManager.expandedKey = key;
       layerManager?.setSelected(key);
       layerManager?.render(card);
+      syncToolColorFromSelection(card);
       renderCardCanvas(card);
       persistState(true);
       return;
@@ -3271,11 +4182,17 @@ function bindChangeArtModal() {
               ...(card.hidden_layers || {}),
               background: true,
               pinlines: true,
+              title_box: true,
+              type_box: true,
+              textbox: true,
               name_box: true,
               crown: true,
               border: true,
               pt_box: true,
             };
+            Object.keys(card.duplicated_layers || {}).forEach((dk) => {
+              card.hidden_layers[dk] = true;
+            });
             delete card.hidden_layers.art;
             modal.classList.remove('open');
             populateDetailControls(card);
@@ -3290,7 +4207,7 @@ function bindChangeArtModal() {
               const L = ensureCardLayout(card);
               L.art = { ...DEFAULT_LAYOUT.art };
               card.hidden_layers = card.hidden_layers || {};
-              ['background', 'pinlines', 'name_box', 'crown', 'pt_box'].forEach((k) => {
+              ['background', 'pinlines', 'title_box', 'type_box', 'textbox', 'name_box', 'crown', 'pt_box'].forEach((k) => {
                 if (card.frame_components?.[k]) delete card.hidden_layers[k];
                 else card.hidden_layers[k] = true;
               });
@@ -3587,9 +4504,50 @@ async function importFromScryfall() {
   document.getElementById('cb-sf-import-modal')?.classList.remove('open');
 }
 
-// DPI of the two single-card export buttons; keep in sync with their labels in card_builder.html.
-const SINGLE_PDF_EXPORT_DPI = 1200;
-const SINGLE_PNG_EXPORT_DPI = 600;
+const DEFAULT_SINGLE_EXPORT_DPI = 1200;
+
+function getSingleExportDpi() {
+  const el = document.getElementById('cb-single-export-dpi');
+  const raw = parseInt(el?.value || '', 10);
+  if (!Number.isFinite(raw)) return DEFAULT_SINGLE_EXPORT_DPI;
+  return Math.max(500, Math.min(2400, raw));
+}
+
+function syncToolColorFromSelection(card) {
+  const el = document.getElementById('cb-tool-color');
+  if (!el || !card || !selectedElementKey || !selectedElementKey.startsWith('shape:')) return;
+  const sid = selectedElementKey.slice(6);
+  const shape = (card.shapes || []).find((s) => s.id === sid);
+  if (shape && /^#[0-9a-fA-F]{6}$/.test(String(shape.color || '').trim())) {
+    el.value = shape.color.trim();
+  }
+}
+
+function closeExportMenuPopover() {
+  const pop = document.getElementById('cb-export-menu-popover');
+  const btn = document.getElementById('cb-export-menu-btn');
+  pop?.classList.remove('open');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+
+function syncSingleExportDpiUi() {
+  const dpi = getSingleExportDpi();
+  const pxW = Math.round(2.5 * dpi);
+  const pxH = Math.round(3.5 * dpi);
+  const pdfLbl = document.getElementById('cb-export-single-pdf-label');
+  const pngLbl = document.getElementById('cb-export-single-png-label');
+  const pdfBtn = document.getElementById('cb-export-single-pdf-btn');
+  const pngBtn = document.getElementById('cb-export-single-png-btn');
+  const pxEl = document.getElementById('cb-export-px-readout');
+  if (pdfLbl) pdfLbl.textContent = `Export PDF · ${dpi} DPI`;
+  if (pngLbl) pngLbl.textContent = `Export PNG · ${dpi} DPI`;
+  if (pxEl) pxEl.textContent = `${pxW} × ${pxH} px`;
+  if (pdfBtn) pdfBtn.title = `One-card PDF, 63.5×88.9 mm at ${dpi} DPI (${pxW}×${pxH} px), saved to cards/pdf`;
+  if (pngBtn) pngBtn.title = `PNG at ${dpi} DPI (${pxW}×${pxH} px), downloaded by the browser`;
+  document.querySelectorAll('[data-dpi-preset]').forEach((b) => {
+    b.classList.toggle('active', parseInt(b.dataset.dpiPreset || '', 10) === dpi);
+  });
+}
 
 async function exportCard() {
   const errorEl = document.getElementById('cb-sf-error');
@@ -3602,7 +4560,7 @@ async function exportCard() {
     face_index: state.faceIndex,
     text_layers: face?.text_layers || null,
     frame_spec: card ? await buildCardExportSpec(card, face, { set_symbol: state.project?.set_symbol }) : null,
-    export_dpi: SINGLE_PNG_EXPORT_DPI,
+    export_dpi: getSingleExportDpi(),
   };
   if (face?.art_layer?.url?.startsWith('data:image/')) {
     payload.art_override_dataurl = face.art_layer.url;
@@ -3718,7 +4676,75 @@ function bindProjectPanels() {
   document.getElementById('cb-sf-import')?.addEventListener('click', importFromScryfall);
   document.getElementById('cb-sf-face')?.addEventListener('change', (e) => switchProjectFace(e.target.value));
   document.getElementById('cb-stage-face-select')?.addEventListener('change', (e) => switchProjectFace(e.target.value));
-  document.getElementById('cb-export-single-png-btn')?.addEventListener('click', exportCard);
+  const exportMenuBtn = document.getElementById('cb-export-menu-btn');
+  const exportMenuWrap = document.getElementById('cb-export-menu-wrap');
+  const exportMenuPop = document.getElementById('cb-export-menu-popover');
+  exportMenuBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = exportMenuPop?.classList.toggle('open');
+    exportMenuBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (isOpen) syncSingleExportDpiUi();
+  });
+  document.addEventListener('click', (e) => {
+    if (exportMenuPop?.classList.contains('open') && exportMenuWrap && !exportMenuWrap.contains(e.target)) {
+      closeExportMenuPopover();
+    }
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && exportMenuPop?.classList.contains('open')) {
+      closeExportMenuPopover();
+    }
+  });
+  document.getElementById('cb-export-single-pdf-btn')?.addEventListener('click', closeExportMenuPopover);
+  document.getElementById('cb-export-single-png-btn')?.addEventListener('click', () => {
+    closeExportMenuPopover();
+    exportCard();
+  });
+  const singleDpiEl = document.getElementById('cb-single-export-dpi');
+  if (singleDpiEl) {
+    singleDpiEl.addEventListener('input', syncSingleExportDpiUi);
+    singleDpiEl.addEventListener('change', () => {
+      singleDpiEl.value = String(getSingleExportDpi());
+      syncSingleExportDpiUi();
+    });
+    document.querySelectorAll('[data-dpi-preset]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        singleDpiEl.value = btn.dataset.dpiPreset || String(DEFAULT_SINGLE_EXPORT_DPI);
+        syncSingleExportDpiUi();
+      });
+    });
+    syncSingleExportDpiUi();
+  }
+  const toolColorEl = document.getElementById('cb-tool-color');
+  if (toolColorEl) {
+    const applyToolColorToSelected = () => {
+      const card = getActiveCard();
+      if (!card || !selectedElementKey || !selectedElementKey.startsWith('shape:')) return;
+      const sid = selectedElementKey.slice(6);
+      const shape = (card.shapes || []).find((s) => s.id === sid);
+      if (!shape) return;
+      shape.color = toolColorEl.value;
+      const drawerColor = document.querySelector(`.layer-item[data-layer-key="${CSS.escape(selectedElementKey)}"]`)?.parentElement?.querySelector('[data-act="color"]');
+      const drawerHex = document.querySelector(`.layer-item[data-layer-key="${CSS.escape(selectedElementKey)}"]`)?.parentElement?.querySelector('[data-act="color-hex"]');
+      const drawerDot = document.querySelector(`.layer-item[data-layer-key="${CSS.escape(selectedElementKey)}"] [data-role="shape-dot"]`);
+      if (drawerColor) drawerColor.value = shape.color;
+      if (drawerHex) drawerHex.value = shape.color;
+      if (drawerDot) drawerDot.style.background = shape.color;
+      renderCardCanvas(card);
+      persistState(true);
+    };
+    toolColorEl.addEventListener('input', applyToolColorToSelected);
+    toolColorEl.addEventListener('change', applyToolColorToSelected);
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => drawPreviewRulers());
+    const pCanvas = document.getElementById('cb-project-canvas');
+    const lCanvas = document.getElementById('card-canvas');
+    if (pCanvas) ro.observe(pCanvas);
+    if (lCanvas) ro.observe(lCanvas);
+  }
+  window.addEventListener('resize', drawPreviewRulers);
   document.getElementById('cb-replace-art-btn')?.addEventListener('click', openArtMenu);
 }
 
@@ -3766,7 +4792,10 @@ function bindProjectPanels() {
     (selectedKey, changedCard) => {
       selectedElementKey = selectedKey || null;
       const card = changedCard || getActiveCard();
-      if (card) renderCardCanvas(card);
+      if (card) {
+        syncToolColorFromSelection(card);
+        renderCardCanvas(card);
+      }
     }
   );
 
@@ -3776,6 +4805,59 @@ function bindProjectPanels() {
     if (!layoutSel || card !== getActiveCard() || ![...layoutSel.options].some((o) => o.value === tplName)) return;
     layoutSel.value = tplName;
     layoutSel.dispatchEvent(new Event('change'));
+  };
+
+  layerManager.onCropToggle = (key, card) => {
+    const active = card || getActiveCard();
+    if (!active) return;
+    if (!key || activeCropLayerKey === key) {
+      activeCropLayerKey = null;
+      layerManager.setCropKey(null);
+      layerManager.render(active);
+      renderCardCanvas(active);
+      persistState(true);
+      return;
+    }
+    active.layer_crops = active.layer_crops || {};
+    if (!active.layer_crops[key]) {
+      pushUndoState(active);
+      active.layer_crops[key] = getDefaultLayerCropRect(key, active, currentProjectFace());
+    }
+    activeCropLayerKey = key;
+    selectedElementKey = key;
+    layerManager.setCropKey(key);
+    layerManager.setSelected(key);
+    layerManager.render(active);
+    renderCardCanvas(active);
+  };
+
+  const eraserModal = new LayerEraserModal(document.getElementById('cb-eraser-modal'), (layerKey, maskDataUrl) => {
+    const card = getActiveCard();
+    if (!card || !layerKey) return;
+    pushUndoState(card);
+    card.layer_eraser_masks = card.layer_eraser_masks || {};
+    if (maskDataUrl) card.layer_eraser_masks[layerKey] = maskDataUrl;
+    else delete card.layer_eraser_masks[layerKey];
+    layerManager?.render(card);
+    renderCardCanvas(card);
+    persistState(true);
+  });
+
+  layerManager.onEraserOpen = async (key, card) => {
+    const active = card || getActiveCard();
+    const face = currentProjectFace();
+    if (!active || !face || !key) return;
+    syncProjectFaceFromCard(active, face);
+    const { refCanvas, targetCanvas } = await renderLayerForEraser(face, active, key, {
+      set_symbol: state.project?.set_symbol,
+    });
+    await eraserModal.open({
+      layerKey: key,
+      layerLabel: getLayerDisplayLabel(key, active),
+      refCanvas,
+      targetCanvas,
+      existingMaskDataUrl: active.layer_eraser_masks?.[key] || null,
+    });
   };
 
   cropModal = new CropMaskModal(document.getElementById('cb-crop-modal'), (dataUrl, maskType) => {

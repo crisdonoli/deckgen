@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>Card Builder - DeckGen Studio</title>
-  <link rel="stylesheet" href="/static/css/main.css?v=32">
+  <link rel="stylesheet" href="/static/css/main.css?v=92">
   <style>
     @font-face {
       font-family: "BelerenLocal";
@@ -115,7 +115,7 @@
       word-break: break-word;
     }
   </style>
-  <script type="module" src="/static/js/card_builder.js?v=81"></script>
+  <script type="module" src="/static/js/card_builder.js?v=94"></script>
 </head>
 <body>
   $navbar
@@ -244,9 +244,9 @@
                 <button type="button" id="cb-change-art-btn" class="btn btn-sm btn-primary" style="flex:1;"><i data-ico="palette" data-ico-size="13"></i> Change Art</button>
                 <button type="button" id="cb-crop-art-btn" class="btn btn-sm" style="flex:1;"><i data-ico="crop" data-ico-size="13"></i> Crop Art</button>
               </div>
-              <label class="row" style="font-size:11px; cursor:pointer; margin-bottom:6px; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:var(--radius-sm);">
+              <label class="row" style="font-size:11px; cursor:pointer; margin-bottom:6px; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:var(--radius-sm);" title="Quick preset: places Artwork above Frame, Pinlines, Crown, Title Box & Type Box (and behind Ability Textbox & Border). You can also drag any layer manually in Layer Manager.">
                 <input type="checkbox" id="cb-art-over-top">
-                <span><i data-ico="sparkles" data-ico-size="12"></i> Art Over Title / Frame (Pop-Out)</span>
+                <span><i data-ico="sparkles" data-ico-size="12"></i> Art Pop-Out (Over Title &amp; Type)</span>
               </label>
               <label class="row" style="font-size:11px; cursor:pointer; margin-bottom:6px; background:var(--surface); padding:4px 6px; border:1px solid var(--border); border-radius:var(--radius-sm);" title="Hide Scryfall text overlays (useful when importing a complete MPCFill card; you can still enable vector frame layers in Layer Manager)">
                 <input type="checkbox" id="cb-hide-card-text">
@@ -284,17 +284,66 @@
       </aside>
 
       <div class="cb-stage">
-        <div class="cb-stage-row">
-          <!-- Photoshop-style movable floating Toolbox -->
+        <div class="cb-stage-topbar" id="cb-stage-topbar">
+          <label class="row" style="font-size:11.5px; cursor:pointer; background:var(--surface-2); padding:3px 8px; border:1px solid var(--border); border-radius:var(--radius-sm);" title="Ctrl+Click cycles layers behind · Space+Drag or Grid-Drag pans workspace">
+            <input type="checkbox" id="cb-interactive-mode" checked>
+            <span>Interactive editing (Ctrl+Click: layer behind)</span>
+          </label>
+          <button type="button" id="cb-undo-btn" class="btn btn-sm" title="Undo (Ctrl+Z)" disabled><i data-ico="undo" data-ico-size="13"></i> Undo</button>
+          <button type="button" id="cb-redo-btn" class="btn btn-sm" title="Redo (Ctrl+Y)" disabled><i data-ico="redo" data-ico-size="13"></i> Redo</button>
+          <button type="button" id="cb-reset-all-btn" class="btn btn-sm" title="Reset card to original state (frame, components, layout &amp; text)"><i data-ico="rotate-ccw" data-ico-size="13"></i> Reset</button>
+          <button type="button" id="cb-save-single-btn" class="btn btn-sm"><i data-ico="save" data-ico-size="13"></i> Save Card</button>
+          <div class="row" style="gap:3px; align-items:center;" title="Preview zoom (Ctrl+Scroll) · Pan with Space+Drag or dragging the grid">
+            <button type="button" id="cb-zoom-out-btn" class="btn btn-sm" style="padding:2px 6px;" title="Zoom out">−</button>
+            <button type="button" id="cb-zoom-reset-btn" class="btn btn-sm" style="padding:2px 6px; min-width:44px;" title="Reset zoom &amp; center view (Ctrl+0)"><span id="cb-zoom-pct-label">100%</span></button>
+            <button type="button" id="cb-zoom-in-btn" class="btn btn-sm" style="padding:2px 6px;" title="Zoom in">+</button>
+          </div>
+          <select id="cb-stage-face-select" class="select" style="width:auto; min-width:110px;" title="Select card face"><option value="0">Face 1</option></select>
+          <div class="cb-export-menu-wrap" id="cb-export-menu-wrap">
+            <button type="button" id="cb-export-menu-btn" class="btn btn-sm btn-primary" aria-haspopup="true" aria-expanded="false" title="Export card as PDF or PNG">
+              <i data-ico="download" data-ico-size="13"></i> <span>Export</span> <span style="font-size:10px; opacity:0.85;">▾</span>
+            </button>
+            <div class="cb-export-popover" id="cb-export-menu-popover" role="menu">
+              <div class="row-between" style="margin-bottom:6px;">
+                <span style="font-size:11px; font-weight:600;">Resolution (DPI)</span>
+                <span id="cb-export-px-readout" style="font-size:10.5px; color:var(--text-muted); font-variant-numeric:tabular-nums;">3000 × 4200 px</span>
+              </div>
+              <div class="row" style="gap:6px; margin-bottom:6px;">
+                <input type="number" id="cb-single-export-dpi" class="input" min="500" max="2400" step="100" value="1200" style="width:78px; padding:3px 6px; font-size:12px; height:26px;">
+                <div class="cb-dpi-presets">
+                  <button type="button" class="cb-dpi-preset-btn" data-dpi-preset="600">600</button>
+                  <button type="button" class="cb-dpi-preset-btn" data-dpi-preset="900">900</button>
+                  <button type="button" class="cb-dpi-preset-btn active" data-dpi-preset="1200">1200</button>
+                  <button type="button" class="cb-dpi-preset-btn" data-dpi-preset="1800">1800</button>
+                  <button type="button" class="cb-dpi-preset-btn" data-dpi-preset="2400">2400</button>
+                </div>
+              </div>
+              <div style="border-top:1px solid var(--border); margin:8px 0;"></div>
+              <div style="display:flex; flex-direction:column; gap:6px;">
+                <button type="button" id="cb-export-single-pdf-btn" class="btn btn-sm btn-primary cb-export-action-btn" title="One-card PDF, 63.5×88.9 mm at 1200 DPI (3000×4200 px), saved to cards/pdf">
+                  <span class="row" style="gap:6px;"><i data-ico="upload" data-ico-size="13"></i> <strong id="cb-export-single-pdf-label">Export PDF · 1200 DPI</strong></span>
+                  <span style="font-size:10px; opacity:0.82;">63.5×88.9 mm · saves to cards/pdf</span>
+                </button>
+                <button type="button" id="cb-export-single-png-btn" class="btn btn-sm btn-primary cb-export-action-btn" title="PNG at 1200 DPI (3000×4200 px), downloaded by the browser">
+                  <span class="row" style="gap:6px;"><i data-ico="download" data-ico-size="13"></i> <strong id="cb-export-single-png-label">Export PNG · 1200 DPI</strong></span>
+                  <span style="font-size:10px; opacity:0.82;">High-res image · browser download</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Photoshop-style movable floating Toolbox (stays fixed over viewport) -->
           <div class="cb-ps-toolbox" id="cb-ps-toolbox" title="Drawing, Text & Selection Tools">
             <div id="cb-toolbox-drag-handle" class="cb-toolbox-drag-handle" title="Drag to move toolbar"><i data-ico="grip" data-ico-size="13"></i></div>
-            <button type="button" class="cb-tool-btn active" data-tool="select" title="Select / Move — Shift+Click cycles layers behind"><i data-ico="cursor" data-ico-size="15"></i></button>
+            <button type="button" class="cb-tool-btn active" data-tool="select" title="Select / Move — Ctrl+Click cycles layers behind"><i data-ico="cursor" data-ico-size="15"></i></button>
             <button type="button" class="cb-tool-btn" id="cb-tool-text-btn" title="Edit Text Properties"><i data-ico="type" data-ico-size="15"></i></button>
             <button type="button" class="cb-tool-btn" id="cb-tool-official-btn" title="Set Official / Original Name (in parentheses)"><i data-ico="tag" data-ico-size="15"></i></button>
             <div class="cb-rail-sep"></div>
             <button type="button" class="cb-tool-btn" data-tool="rect" title="Rectangle Tool — Drag on canvas to draw box"><i data-ico="rect" data-ico-size="15"></i></button>
             <button type="button" class="cb-tool-btn" data-tool="rounded" title="Rounded Box Tool — Drag on canvas to draw rounded box"><i data-ico="rounded-rect" data-ico-size="15"></i></button>
             <button type="button" class="cb-tool-btn" data-tool="circle" title="Ellipse / Circle Tool — Drag on canvas to draw circle"><i data-ico="circle" data-ico-size="15"></i></button>
+            <div class="cb-rail-sep"></div>
+            <input type="color" id="cb-tool-color" class="cb-tool-color" value="#1e293b" title="Shape fill color (applies to new &amp; selected shapes)">
 
             <!-- Contextual Text Inspector Popover -->
             <div id="cb-text-popover" class="cb-text-popover" style="display:none;">
@@ -374,11 +423,18 @@
               </div>
 
               <div class="cb-text-group" data-text-key="set_symbol">
-                <label class="label">Set Code (Keyrune, e.g. cmr, cmm, mh3, lea)</label>
+                <div class="row-between" style="margin-bottom:4px;">
+                  <label class="label" for="cb-field-set" style="margin:0;">Set Symbol</label>
+                  <label class="row" style="font-size:10.5px; gap:4px; cursor:pointer; color:var(--text-muted);" title="Hide set symbol on card">
+                    <input type="checkbox" id="cb-hide-set-symbol">
+                    <span>Hide</span>
+                  </label>
+                </div>
                 <div class="row" style="gap:6px; align-items:center;">
-                  <input type="text" id="cb-field-set" class="input" placeholder="mtg" style="flex:1; text-transform:lowercase;">
+                  <input type="text" id="cb-field-set" class="input" placeholder="Search or type code (e.g. mh3, cmr)" style="flex:1; text-transform:lowercase;">
                   <i id="cb-set-preview-icon" class="ss ss-mtg ss-2x" style="min-width:28px; text-align:center;"></i>
                 </div>
+                <div id="cb-set-symbol-grid" class="cb-set-symbol-grid" title="Click any available set symbol"></div>
                 <div class="row-between" style="margin-top:6px; gap:6px;">
                   <label class="row" style="font-size:10.5px; gap:4px; flex:1;">
                     <span>Rarity</span>
@@ -399,6 +455,11 @@
               <div class="cb-text-group" data-text-key="oracle_box">
                 <label class="label">Rules Text (Oracle)</label>
                 <textarea id="cb-field-oracle" class="textarea" rows="4"></textarea>
+                <div class="row-between" style="margin-top:8px; margin-bottom:2px;">
+                  <label class="label" for="cb-field-flavor" style="margin:0;">Flavor Text (Italic)</label>
+                  <button type="button" id="cb-clear-flavor-btn" class="btn btn-sm" style="padding:1px 6px; font-size:10px;" title="Remove flavor text and divider">Clear</button>
+                </div>
+                <textarea id="cb-field-flavor" class="textarea" rows="2" placeholder="Optional flavor text (leave empty to hide)"></textarea>
                 <div class="row-between" style="margin-top:6px; gap:6px;">
                   <label class="row" style="font-size:10.5px; gap:4px;">
                     <span>Size</span>
@@ -499,29 +560,82 @@
             </div>
           </div>
 
-          <div id="cb-legacy-wrap" class="cb-canvas-wrap">
-            <canvas id="card-canvas" width="750" height="1050"></canvas>
-          </div>
-          <div id="cb-project-wrap" class="cb-canvas-wrap">
-            <canvas id="cb-project-canvas" width="1500" height="2100"></canvas>
+        <div class="cb-stage-viewport" id="cb-stage-viewport">
+          <div class="cb-stage-row">
+          <div class="cb-ruler-stage" id="cb-ruler-stage">
+            <div class="cb-ruler-corner" title="MTG standard card size: 63.5 × 88.9 mm">mm</div>
+            <canvas id="cb-ruler-top" class="cb-ruler-top"></canvas>
+            <canvas id="cb-ruler-left" class="cb-ruler-left"></canvas>
+            <div class="cb-ruler-canvas-slot">
+              <div id="cb-legacy-wrap" class="cb-canvas-wrap">
+                <canvas id="card-canvas" width="750" height="1050"></canvas>
+              </div>
+              <div id="cb-project-wrap" class="cb-canvas-wrap">
+                <canvas id="cb-project-canvas" width="1500" height="2100"></canvas>
+              </div>
+            </div>
           </div>
         </div>
-        <div class="row" style="flex-wrap:wrap; justify-content:center;">
-          <label class="row" style="font-size:11.5px; cursor:pointer; background:var(--surface); padding:4px 9px; border:1px solid var(--border); border-radius:var(--radius-sm);">
-            <input type="checkbox" id="cb-interactive-mode" checked>
-            <span>Interactive editing (Shift+Click: layer behind)</span>
-          </label>
-          <button type="button" id="cb-undo-btn" class="btn btn-sm" title="Undo (Ctrl+Z)" disabled><i data-ico="undo" data-ico-size="13"></i> Undo</button>
-          <button type="button" id="cb-redo-btn" class="btn btn-sm" title="Redo (Ctrl+Y)" disabled><i data-ico="redo" data-ico-size="13"></i> Redo</button>
-          <button type="button" id="cb-reset-all-btn" class="btn btn-sm" title="Reset card to original state (frame, components, layout &amp; text)"><i data-ico="rotate-ccw" data-ico-size="13"></i> Reset</button>
-          <button type="button" id="cb-save-single-btn" class="btn btn-sm"><i data-ico="save" data-ico-size="13"></i> Save Card</button>
-          <select id="cb-stage-face-select" class="select" style="width:auto; min-width:120px;" title="Select card face"><option value="0">Face 1</option></select>
-          <button type="button" id="cb-export-single-pdf-btn" class="btn btn-sm btn-primary" title="One-card PDF, 63.5×88.9 mm at 1200 DPI (3000×4200 px), saved to cards/pdf"><i data-ico="upload" data-ico-size="13"></i> Export PDF · 1200 DPI</button>
-          <button type="button" id="cb-export-single-png-btn" class="btn btn-sm btn-primary" title="PNG at 600 DPI (1500×2100 px), downloaded by the browser"><i data-ico="download" data-ico-size="13"></i> Export PNG · 600 DPI</button>
         </div>
       </div>
     </section>
   </main>
+
+
+  <!-- MODAL: Freehand Layer Eraser (Canva-style) -->
+  <div id="cb-eraser-modal" class="modal-overlay">
+    <div class="modal-content" style="width: 820px; max-width: 96vw; max-height: 92vh; display:flex; flex-direction:column;">
+      <div class="modal-header">
+        <span id="cb-eraser-title"><i data-ico="eraser" data-ico-size="14"></i> Eraser</span>
+        <button type="button" class="modal-close" id="cb-eraser-close-btn">&times;</button>
+      </div>
+      <div class="modal-body" style="display:flex; flex-direction:column; gap:10px; overflow:hidden; flex:1;">
+        <div class="row" style="gap:8px; flex-wrap:wrap; align-items:center; background:var(--surface-2); padding:6px 10px; border:1px solid var(--border); border-radius:var(--radius-sm);">
+          <button type="button" id="cb-eraser-mode-erase" class="btn btn-sm btn-primary" title="Erase parts of the component"><i data-ico="eraser" data-ico-size="12"></i> Erase</button>
+          <button type="button" id="cb-eraser-mode-restore" class="btn btn-sm" title="Restore accidentally erased areas"><i data-ico="sparkles" data-ico-size="12"></i> Restore</button>
+          <span style="width:1px; height:18px; background:var(--border);"></span>
+          <button type="button" class="btn btn-sm btn-primary" data-eraser-tool="brush" title="Freehand brush">Brush</button>
+          <button type="button" class="btn btn-sm" data-eraser-tool="line" title="Straight line cut (hold Shift for 0°/45°/90°)">Line</button>
+          <button type="button" class="btn btn-sm" data-eraser-tool="rect" title="Rectangle cut (hold Shift for square)"><i data-ico="rect" data-ico-size="11"></i> Rect</button>
+          <button type="button" class="btn btn-sm" data-eraser-tool="circle" title="Ellipse / Circle cut (hold Shift for circle)"><i data-ico="circle" data-ico-size="11"></i> Circle</button>
+          <label class="row" style="font-size:11px; gap:5px;">
+            <span>Brush</span>
+            <input type="range" id="cb-eraser-size" min="4" max="140" step="2" value="28" style="width:86px;">
+            <span id="cb-eraser-size-val" style="min-width:34px; font-variant-numeric:tabular-nums;">28px</span>
+          </label>
+          <label class="row" style="font-size:11px; gap:5px;">
+            <span>Softness</span>
+            <input type="range" id="cb-eraser-softness" min="0" max="1" step="0.05" value="0.15" style="width:66px;">
+            <span id="cb-eraser-softness-val" style="min-width:30px; font-variant-numeric:tabular-nums;">15%</span>
+          </label>
+          <label class="row" style="font-size:11px; gap:5px;" title="Transparency of all other card layers shown as spatial reference">
+            <span>Ref. Opacity</span>
+            <input type="range" id="cb-eraser-ref-opacity" min="0" max="1" step="0.05" value="0.4" style="width:70px;">
+            <span id="cb-eraser-ref-opacity-val" style="min-width:30px; font-variant-numeric:tabular-nums;">40%</span>
+          </label>
+          <div class="row" style="gap:3px; margin-left:auto;">
+            <button type="button" id="cb-eraser-zoom-out" class="btn btn-sm" title="Zoom out">−</button>
+            <button type="button" id="cb-eraser-zoom-reset" class="btn btn-sm" title="Reset zoom"><span id="cb-eraser-zoom-val">100%</span></button>
+            <button type="button" id="cb-eraser-zoom-in" class="btn btn-sm" title="Zoom in">+</button>
+          </div>
+        </div>
+        <div id="cb-eraser-stage" style="flex:1; min-height:360px; overflow:auto; display:flex; align-items:center; justify-content:center; background:#0f172a; border:1px solid var(--border); border-radius:6px; padding:10px;">
+          <canvas id="cb-eraser-canvas" width="750" height="1050" style="cursor:crosshair; border-radius:4px; box-shadow:0 6px 24px rgba(0,0,0,0.45); touch-action:none;"></canvas>
+        </div>
+        <div class="row-between" style="gap:8px; flex-wrap:wrap;">
+          <div class="row" style="gap:6px;">
+            <button type="button" id="cb-eraser-undo-btn" class="btn btn-sm" disabled title="Undo last stroke (Ctrl+Z)"><i data-ico="undo" data-ico-size="12"></i> Undo</button>
+            <button type="button" id="cb-eraser-reset-btn" class="btn btn-sm" title="Restore entire layer"><i data-ico="rotate-ccw" data-ico-size="12"></i> Reset All</button>
+            <span style="font-size:10.5px; color:var(--text-muted);">Shortcuts: [ / ] brush size · Ctrl+Scroll zoom · Ctrl+Z undo</span>
+          </div>
+          <div class="row" style="gap:6px;">
+            <button type="button" id="cb-eraser-cancel-btn" class="btn btn-sm">Cancel</button>
+            <button type="button" id="cb-eraser-apply-btn" class="btn btn-sm btn-primary">Apply Eraser</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- MODAL: Search Card Picker (multiple matches) -->
   <div id="cb-search-picker-modal" class="modal-overlay">
