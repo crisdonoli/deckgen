@@ -28,6 +28,25 @@ def sheet_geometry(paper: str, landscape: bool, dpi: int, card_spacing: float = 
     return cols, rows, paper_px, card_px, margin_x, margin_y, gap_px
 
 
+def back_offset_px(back_offset_mm: Optional[Tuple[float, float]], dpi: int) -> Tuple[int, int]:
+    """Back sheet shift (x, y) in px from mm, clamped to +/-10 mm. It compensates the
+    printer's duplex registration error: positive x moves the backs right and positive y
+    moves them down, as the back page is seen in the PDF."""
+    if not back_offset_mm:
+        return 0, 0
+    out = []
+    for v in back_offset_mm[:2]:
+        try:
+            mm = float(v)
+        except (TypeError, ValueError):
+            mm = 0.0
+        mm = max(-10.0, min(10.0, mm))
+        out.append(int(round(mm * dpi / 25.4)))
+    while len(out) < 2:
+        out.append(0)
+    return out[0], out[1]
+
+
 def _mirror_rect_x(x: int, y: int, w: int, h: int, paper_w: int) -> Tuple[int, int]:
     return (paper_w - x - w, y)
 
@@ -82,6 +101,8 @@ def generate_base_sheets(
     duplex_flip: bool = True,
     card_scales: Optional[Dict[str, float]] = None,
     global_start_index: int = 0,
+    back_offset_mm: Optional[Tuple[float, float]] = None,
+    bleed_mm: float = 0.0,
 ) -> List[Image.Image]:
     cols, rows, paper_px, card_px, margin_x, margin_y, gap_px = sheet_geometry(
         paper, landscape, dpi, card_spacing
@@ -92,10 +113,16 @@ def generate_base_sheets(
     cards_per_sheet = cols * rows
     sheets = []
     scales_map = card_scales or {}
+    off_x, off_y = back_offset_px(back_offset_mm, dpi) if is_back else (0, 0)
+    try:
+        bleed_px = mm_to_px(max(0.0, min(5.0, float(bleed_mm or 0.0))), dpi)
+    except (TypeError, ValueError):
+        bleed_px = 0
 
     for sheet_idx in range(0, len(images), cards_per_sheet):
         canvas = Image.new("RGB", paper_px, (255, 255, 255))
         batch = images[sheet_idx : sheet_idx + cards_per_sheet]
+        placed: List[Tuple[Image.Image, int, int]] = []
 
         for idx, image in enumerate(batch):
             abs_idx = global_start_index + sheet_idx + idx
@@ -114,6 +141,18 @@ def generate_base_sheets(
                 x, y = x_front, y_front
                 img_to_paste = _apply_individual_card_scale(image, w, h, scale)
 
+            placed.append((img_to_paste, x + off_x, y + off_y))
+
+        # Black bleed border: a rectangle bleed_px larger than each card, drawn under all
+        # cards first, so it only shows where a card edge faces the white sheet.
+        if bleed_px > 0:
+            draw = ImageDraw.Draw(canvas)
+            for img_to_paste, x, y in placed:
+                draw.rectangle(
+                    [x - bleed_px, y - bleed_px, x + img_to_paste.width + bleed_px - 1, y + img_to_paste.height + bleed_px - 1],
+                    fill=(0, 0, 0),
+                )
+        for img_to_paste, x, y in placed:
             canvas.paste(img_to_paste, (x, y))
         sheets.append(canvas)
     return sheets
@@ -131,6 +170,7 @@ def draw_cut_lines_on_canvas(
     card_spacing: float = 0.0,
     is_back: bool = False,
     duplex_flip: bool = True,
+    back_offset_mm: Optional[Tuple[float, float]] = None,
 ) -> Image.Image:
     if cut == "none":
         return canvas
@@ -140,6 +180,10 @@ def draw_cut_lines_on_canvas(
     if is_back and duplex_flip:
         grid_w = cols * card_px[0] + (cols - 1) * gap_px
         margin_x = paper_px[0] - margin_x - grid_w
+    if is_back:
+        off_x, off_y = back_offset_px(back_offset_mm, dpi)
+        margin_x += off_x
+        margin_y += off_y
 
     draw = ImageDraw.Draw(canvas)
     mark_px = mm_to_px(mark_len, dpi)
@@ -193,6 +237,8 @@ def generate_sheets(
     duplex_flip: bool = True,
     card_scales: Optional[Dict[str, float]] = None,
     global_start_index: int = 0,
+    back_offset_mm: Optional[Tuple[float, float]] = None,
+    bleed_mm: float = 0.0,
 ) -> List[Image.Image]:
     sheets = generate_base_sheets(
         images,
@@ -204,6 +250,8 @@ def generate_sheets(
         duplex_flip=duplex_flip,
         card_scales=card_scales,
         global_start_index=global_start_index,
+        back_offset_mm=back_offset_mm,
+        bleed_mm=bleed_mm,
     )
     for canvas in sheets:
         draw_cut_lines_on_canvas(
@@ -218,5 +266,6 @@ def generate_sheets(
             card_spacing=card_spacing,
             is_back=is_back,
             duplex_flip=duplex_flip,
+            back_offset_mm=back_offset_mm,
         )
     return sheets

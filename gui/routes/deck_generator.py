@@ -89,6 +89,8 @@ async def api_deck_preview(payload: Dict[str, Any] = Body(...)):
     custom_backs = payload.get("custom_backs") or {}
     dfc_pairs = dfc_back_pairs(root_dir)
     dfc_as_backs = bool(payload.get("dfc_backs"))
+    back_offset_mm = (payload.get("back_offset_x", 0.0), payload.get("back_offset_y", 0.0))
+    bleed_mm = float(payload.get("bleed_mm", 0.0) or 0.0)
 
     loop = asyncio.get_running_loop()
     try:
@@ -113,6 +115,8 @@ async def api_deck_preview(payload: Dict[str, Any] = Body(...)):
                 dfc_pairs=dfc_pairs,
                 dfc_as_backs=dfc_as_backs,
                 paired_backs_dir=os.path.join(root_dir, "cards", "backs") if root_dir else None,
+                back_offset_mm=back_offset_mm,
+                bleed_mm=bleed_mm,
             ),
         )
     except Exception as exc:
@@ -155,6 +159,8 @@ async def api_deck_generate(payload: Dict[str, Any] = Body(...)):
     custom_backs = payload.get("custom_backs") or {}
     dfc_pairs = dfc_back_pairs(root_dir)
     dfc_as_backs = bool(payload.get("dfc_backs"))
+    back_offset_mm = (payload.get("back_offset_x", 0.0), payload.get("back_offset_y", 0.0))
+    bleed_mm = float(payload.get("bleed_mm", 0.0) or 0.0)
     collision_mode = payload.get("collision_mode")  # None | "check" | "overwrite" | "version"
 
     export_base_name = f"{face}_{paper}"
@@ -189,6 +195,8 @@ async def api_deck_generate(payload: Dict[str, Any] = Body(...)):
                 dfc_pairs=dfc_pairs,
                 dfc_as_backs=dfc_as_backs,
                 paired_backs_dir=os.path.join(root_dir, "cards", "backs") if root_dir else None,
+                back_offset_mm=back_offset_mm,
+                bleed_mm=bleed_mm,
                 progress_cb=_set_progress,
             ),
         )

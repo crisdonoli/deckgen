@@ -10,7 +10,7 @@ from PIL import Image
 from config import CARD_H_MM, CARD_W_MM, DPI, PAPER_SIZES, PREVIEW_CACHE_DIR, PREVIEW_DPI
 from core.pdf_build import IMAGE_EXTS, build_pdf, convert_images_folder_to_pdfs, image_to_standard_pdf
 from core.pdf_render import render_card_file_to_image
-from core.sheets import draw_cut_lines_on_canvas, generate_base_sheets, generate_sheets, sheet_geometry
+from core.sheets import back_offset_px, draw_cut_lines_on_canvas, generate_base_sheets, generate_sheets, sheet_geometry
 from services.card_project import build_card_project
 from utils.conversions import mm_to_px
 from utils.text import safe_card_filename
@@ -142,6 +142,8 @@ def build_deck_sheets(
     dfc_pairs: Optional[Dict[str, str]] = None,
     dfc_as_backs: bool = False,
     paired_backs_dir: Optional[str] = None,
+    back_offset_mm: Optional[Tuple[float, float]] = None,
+    bleed_mm: float = 0.0,
     progress_cb: Optional[Callable[[int, int, str], None]] = None,
 ) -> Tuple[List[Image.Image], Dict[str, Any]]:
     if paper not in PAPER_SIZES:
@@ -269,6 +271,8 @@ def build_deck_sheets(
             duplex_flip=duplex_flip,
             card_scales=index_scales,
             global_start_index=start_idx,
+            back_offset_mm=back_offset_mm,
+            bleed_mm=bleed_mm,
         )
 
     front_of = {back: front for front, back in dfc_pairs.items()}
@@ -298,12 +302,16 @@ def build_deck_sheets(
     pitch_x = card_px[0] + gap_px
     pitch_y = card_px[1] + gap_px
     pw, ph = paper_px
+    off_x, off_y = back_offset_px(back_offset_mm, dpi)
     for idx in range(len(slice_files)):
         r = idx // cols
         c = idx % cols
         xf = margin_x + c * pitch_x
         yf = margin_y + r * pitch_y
         x = (pw - xf - card_px[0]) if (face == "backs" and duplex_flip) else xf
+        if face == "backs":
+            x += off_x
+            yf += off_y
         abs_idx = start_idx + idx
         slots_meta.append({
             "index": abs_idx,

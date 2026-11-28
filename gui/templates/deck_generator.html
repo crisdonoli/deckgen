@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>Deck Generator - DeckGen Studio</title>
   <link rel="stylesheet" href="/static/css/main.css?v=32">
-  <script type="module" src="/static/js/deck_generator.js?v=26"></script>
+  <script type="module" src="/static/js/deck_generator.js?v=28"></script>
 </head>
 <body>
   $navbar
@@ -41,6 +41,15 @@
           <label class="row" style="font-size:12px;">
             <span>Gap (mm):</span>
             <input type="number" id="dg-spacing" class="input" value="0" min="0" max="5" step="0.5" style="width:56px;">
+          </label>
+          <label class="row" style="font-size:12px;" title="Black border around the cards, only on the edges that face the white sheet. Works as bleed so a slightly off cut does not show white.">
+            <span>Bleed (mm):</span>
+            <input type="number" id="dg-bleed" class="input" value="0" min="0" max="5" step="0.5" style="width:56px;">
+          </label>
+          <label class="row" style="font-size:12px;" title="Shifts the back sheets to fix the printer's duplex misalignment. Saved separately for each paper size and orientation. Positive X moves the backs right and positive Y moves them down, as the back page looks in the preview/PDF.">
+            <span>Back offset X/Y (mm):</span>
+            <input type="number" id="dg-back-offset-x" class="input" value="0" min="-10" max="10" step="0.1" style="width:56px;">
+            <input type="number" id="dg-back-offset-y" class="input" value="0" min="-10" max="10" step="0.1" style="width:56px;">
           </label>
         </div>
         <div class="ribbon-group-title">Paper</div>

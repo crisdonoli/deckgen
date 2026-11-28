@@ -40,7 +40,30 @@ function ensureDgConfig() {
   workspaceState.deck_generator = workspaceState.deck_generator || {};
   workspaceState.deck_generator.card_scales = workspaceState.deck_generator.card_scales || {};
   workspaceState.deck_generator.custom_backs = workspaceState.deck_generator.custom_backs || {};
+  workspaceState.deck_generator.back_offsets = workspaceState.deck_generator.back_offsets || {};
   return workspaceState.deck_generator;
+}
+
+// Back offsets are saved per paper size and orientation (a duplex misalignment is not the
+// same on A4 and A3, and landscape swaps the axes).
+function backOffsetKey(cfg) {
+  return `${cfg.paper || 'a4'}${cfg.landscape ? '-landscape' : ''}`;
+}
+
+function currentBackOffset(cfg) {
+  const off = cfg.back_offsets?.[backOffsetKey(cfg)] || {};
+  return { x: Number(off.x) || 0, y: Number(off.y) || 0 };
+}
+
+function clampOffset(v) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? Math.max(-10, Math.min(10, n)) : 0;
+}
+
+function showBackOffsetControls(cfg) {
+  const off = currentBackOffset(cfg);
+  document.getElementById('dg-back-offset-x').value = off.x;
+  document.getElementById('dg-back-offset-y').value = off.y;
 }
 
 function readControlsToConfig() {
@@ -48,6 +71,7 @@ function readControlsToConfig() {
   cfg.paper = document.getElementById('dg-paper').value;
   cfg.landscape = document.getElementById('dg-landscape').checked;
   cfg.card_spacing = parseFloat(document.getElementById('dg-spacing').value) || 0;
+  cfg.bleed_mm = Math.max(0, Math.min(5, parseFloat(document.getElementById('dg-bleed').value) || 0));
   cfg.cut = document.getElementById('dg-cut').value;
   cfg.color = document.getElementById('dg-cut-color').value;
   cfg.thickness = parseFloat(document.getElementById('dg-thickness').value) || 0.5;
@@ -62,6 +86,7 @@ function applyConfigToControls(cfg) {
   document.getElementById('dg-paper').value = cfg.paper || 'a4';
   document.getElementById('dg-landscape').checked = Boolean(cfg.landscape);
   document.getElementById('dg-spacing').value = cfg.card_spacing ?? 0;
+  document.getElementById('dg-bleed').value = cfg.bleed_mm ?? 0;
   document.getElementById('dg-cut').value = cfg.cut || 'corners';
   document.getElementById('dg-cut-color').value = cfg.color || '#ff0000';
   document.getElementById('dg-thickness').value = cfg.thickness ?? 0.5;
@@ -69,6 +94,7 @@ function applyConfigToControls(cfg) {
   document.getElementById('dg-view-mode').value = cfg.view_mode || 'both';
   document.getElementById('dg-duplex-flip').checked = cfg.duplex_flip !== false;
   document.getElementById('dg-dfc-backs').checked = Boolean(cfg.dfc_backs);
+  showBackOffsetControls(cfg);
   document.getElementById('dg-back-label').textContent = cfg.generic_back ? cfg.generic_back.split('/').pop() : 'None';
   document.getElementById('dg-source-label').textContent = cfg.source_folder
     ? cfg.source_folder.split('/').pop()
@@ -151,6 +177,9 @@ async function fetchFacePreview(face, page) {
       mark_len: cfg.mark_len,
       card_spacing: cfg.card_spacing,
       duplex_flip: cfg.duplex_flip,
+      back_offset_x: currentBackOffset(cfg).x,
+      back_offset_y: currentBackOffset(cfg).y,
+      bleed_mm: cfg.bleed_mm || 0,
       page,
       card_scales: cfg.card_scales,
       generic_back: cfg.generic_back || null,
@@ -214,9 +243,24 @@ async function persist() {
     showToast('Configuración guardada en state.json');
   });
 
-  ['dg-paper', 'dg-landscape', 'dg-spacing', 'dg-cut', 'dg-cut-color', 'dg-thickness', 'dg-mark-len', 'dg-duplex-flip', 'dg-dfc-backs'].forEach((id) => {
+  ['dg-paper', 'dg-landscape', 'dg-spacing', 'dg-bleed', 'dg-cut', 'dg-cut-color', 'dg-thickness', 'dg-mark-len', 'dg-duplex-flip', 'dg-dfc-backs'].forEach((id) => {
     document.getElementById(id).addEventListener('change', () => {
-      readControlsToConfig();
+      const cfg = readControlsToConfig();
+      if (id === 'dg-paper' || id === 'dg-landscape') showBackOffsetControls(cfg);
+      persist();
+      refreshPreviews();
+    });
+  });
+
+  ['dg-back-offset-x', 'dg-back-offset-y'].forEach((id) => {
+    document.getElementById(id).addEventListener('change', () => {
+      const cfg = readControlsToConfig();
+      const x = clampOffset(document.getElementById('dg-back-offset-x').value);
+      const y = clampOffset(document.getElementById('dg-back-offset-y').value);
+      const key = backOffsetKey(cfg);
+      if (x === 0 && y === 0) delete cfg.back_offsets[key];
+      else cfg.back_offsets[key] = { x, y };
+      showBackOffsetControls(cfg);
       persist();
       refreshPreviews();
     });
@@ -296,6 +340,9 @@ async function persist() {
       mark_len: cfg.mark_len,
       card_spacing: cfg.card_spacing,
       duplex_flip: cfg.duplex_flip,
+      back_offset_x: currentBackOffset(cfg).x,
+      back_offset_y: currentBackOffset(cfg).y,
+      bleed_mm: cfg.bleed_mm || 0,
       export_dpi: exportDpi,
       card_scales: cfg.card_scales,
       generic_back: cfg.generic_back || null,

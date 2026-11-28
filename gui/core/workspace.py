@@ -28,6 +28,9 @@ DEFAULT_DECK_GEN_CONFIG = {
     "custom_backs": {},
     "generic_back": "",
     "dfc_backs": False,
+    # Duplex registration fix per paper key ("a4", "a3-landscape"…): {"x": mm, "y": mm}.
+    "back_offsets": {},
+    "bleed_mm": 0.0,  # black border around the card block, only where it faces the white sheet
 }
 
 
